@@ -7,9 +7,18 @@
 
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
+  let query = $state("");
 
   onMount(async () => {
     recents = await recentList().catch(() => []);
+  });
+
+  const filtered = $derived.by(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return recents;
+    return recents.filter(
+      (r) => r.name.toLowerCase().includes(q) || r.dir.toLowerCase().includes(q)
+    );
   });
 
   async function choose(dir: string | null) {
@@ -33,7 +42,7 @@
 </script>
 
 <div class="grid h-screen place-items-center bg-[var(--color-bg-0)] px-6">
-  <div class="w-[460px]">
+  <div class="w-[640px]">
     <div class="mb-6 flex items-center gap-3">
       <span
         class="grid h-9 w-9 place-items-center rounded-lg bg-[var(--color-accent)] text-lg font-bold text-black"
@@ -46,10 +55,15 @@
     </div>
 
     <div class="mb-3 flex gap-2">
+      <input
+        bind:value={query}
+        placeholder="Search projects…"
+        class="mono flex-1 rounded-lg bg-[var(--color-bg-2)] px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+      />
       <button
         onclick={openFolder}
         disabled={busy}
-        class="flex-1 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-black disabled:opacity-50"
+        class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-black disabled:opacity-50"
         >Open folder…</button
       >
       <button
@@ -60,33 +74,46 @@
       >
     </div>
 
-    <div class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)]">
-      <div class="border-b border-[var(--color-bg-3)] px-3 py-2 text-[10px] tracking-wide text-zinc-500 uppercase">
-        Recent
-      </div>
-      {#if recents.length === 0}
-        <div class="px-3 py-4 text-xs text-zinc-600">
-          No recent projects. Open a folder to start one — its data lives in
-          <code class="mono">.red/request/app.rdb</code>.
-        </div>
-      {:else}
-        <div class="max-h-[40vh] overflow-y-auto">
-          {#each recents as r (r.dir)}
-            <button
-              onclick={() => choose(r.dir)}
-              disabled={busy}
-              class="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-[var(--color-bg-2)] disabled:opacity-50"
-            >
-              <span class="min-w-0">
-                <span class="block truncate text-sm text-zinc-200">{r.name}</span>
-                <span class="mono block truncate text-[10px] text-zinc-600">{r.dir}</span>
-              </span>
-              <span class="shrink-0 pl-3 text-[10px] text-zinc-600">{ago(r.last_opened)}</span>
-            </button>
-          {/each}
-        </div>
+    <div class="mb-1.5 flex items-center justify-between px-1">
+      <span class="text-[10px] tracking-wide text-zinc-500 uppercase">Recent</span>
+      {#if recents.length}
+        <span class="text-[10px] text-zinc-600">
+          {filtered.length}{filtered.length !== recents.length ? `/${recents.length}` : ""}
+        </span>
       {/if}
     </div>
+
+    {#if recents.length === 0}
+      <div
+        class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] px-3 py-6 text-center text-xs text-zinc-600"
+      >
+        No recent projects. Open a folder to start one — its data lives in
+        <code class="mono">.red/request/app.rdb</code>.
+      </div>
+    {:else if filtered.length === 0}
+      <div
+        class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] px-3 py-6 text-center text-xs text-zinc-600"
+      >
+        No projects match “{query}”.
+      </div>
+    {:else}
+      <div class="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto pr-1">
+        {#each filtered as r (r.dir)}
+          <button
+            onclick={() => choose(r.dir)}
+            disabled={busy}
+            class="group flex flex-col items-start gap-1 rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
+          >
+            <span class="flex w-full items-center gap-2">
+              <span class="text-zinc-500 group-hover:text-[var(--color-accent)]">▸</span>
+              <span class="truncate text-sm font-medium text-zinc-100">{r.name}</span>
+            </span>
+            <span class="mono w-full truncate text-[10px] text-zinc-600">{r.dir}</span>
+            <span class="text-[10px] text-zinc-600">{ago(r.last_opened)}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
 
     {#if busy}
       <p class="mt-3 text-center text-xs text-zinc-500">Opening…</p>
