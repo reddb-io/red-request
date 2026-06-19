@@ -5,7 +5,7 @@ import net from "node:net";
 import dgram from "node:dgram";
 import { createClient } from "recker/client";
 import { createDNS } from "recker/dns";
-import type { ResponseResult } from "@red-requester/core";
+import type { ResponseResult } from "@red-request/core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

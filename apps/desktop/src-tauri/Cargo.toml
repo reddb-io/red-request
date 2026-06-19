@@ -1,5 +1,5 @@
 [package]
-name = "red-requester"
+name = "red-request"
 version = "0.1.0"
 description = "Open-source white-label API client (recker-powered)"
 authors = ["RedDB.io"]
@@ -7,7 +7,7 @@ edition = "2021"
 rust-version = "1.77"
 
 [lib]
-name = "red_requester_lib"
+name = "red_request_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

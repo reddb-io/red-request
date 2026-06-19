@@ -16,7 +16,7 @@ import {
   type StoredEnvironment,
   type LoadedCollection,
   type HistoryEntry,
-} from "@red-requester/core";
+} from "@red-request/core";
 import * as db from "./reddb";
 
 export const COL = "rr_collections";
@@ -137,7 +137,7 @@ export async function ensureSample(): Promise<void> {
     name: "POST json",
     method: "POST",
     url: "https://{{host}}/post",
-    headers: [{ name: "X-Demo", value: "red-requester", enabled: true }],
+    headers: [{ name: "X-Demo", value: "red-request", enabled: true }],
     body: { type: "json", content: '{\n  "name": "ada"\n}', fields: [] },
   });
   // a couple of non-HTTP kinds for discovery

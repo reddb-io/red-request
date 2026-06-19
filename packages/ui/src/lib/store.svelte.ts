@@ -9,7 +9,7 @@ import {
   type HistoryEntry,
   type RunnerParams,
   type RunnerResult,
-} from "@red-requester/core";
+} from "@red-request/core";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend, runnerRun } from "./rpc";

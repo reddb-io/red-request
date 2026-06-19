@@ -7,7 +7,7 @@ import {
   type RpcNotification,
   type RunnerParams,
   type RunnerResult,
-} from "@red-requester/core";
+} from "@red-request/core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
 export function engineCall<T>(method: string, params: unknown): Promise<T> {

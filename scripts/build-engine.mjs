@@ -35,7 +35,7 @@ function targetTriple() {
 
 const triple = targetTriple();
 const ext = process.platform === "win32" ? ".exe" : "";
-const outfile = resolve(outDir, `red-requester-engine-${triple}${ext}`);
+const outfile = resolve(outDir, `red-request-engine-${triple}${ext}`);
 
 if (!existsSync(entry)) {
   console.error(`engine entry not found: ${entry}`);

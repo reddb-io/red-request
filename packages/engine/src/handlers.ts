@@ -1,5 +1,5 @@
 // Maps RPC method names to handlers. Each handler takes validated params and returns a
-// serializable result. Schemas live in @red-requester/core so the UI and engine agree.
+// serializable result. Schemas live in @red-request/core so the UI and engine agree.
 import {
   ENGINE_METHODS,
   httpSendParamsSchema,
@@ -9,7 +9,7 @@ import {
   type HttpSendResult,
   type Oauth2TokenResult,
   type RunnerResult,
-} from "@red-requester/core";
+} from "@red-request/core";
 import reckerPkg from "recker/package.json" with { type: "json" };
 import { dispatch, oauth2Token } from "./recker.js";
 import { runPipeline } from "./pipeline.js";

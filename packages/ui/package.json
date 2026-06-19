@@ -1,9 +1,9 @@
 {
-  "name": "@red-requester/ui",
+  "name": "@red-request/ui",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "red-requester UI — SvelteKit (static) client surface.",
+  "description": "red-request UI — SvelteKit (static) client surface.",
   "scripts": {
     "dev": "vite dev --port 1420 --strictPort",
     "build": "vite build",
@@ -12,7 +12,7 @@
     "test": "echo \"(ui: no unit tests yet)\" && exit 0"
   },
   "dependencies": {
-    "@red-requester/core": "workspace:*",
+    "@red-request/core": "workspace:*",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-http": "^2.5.9",

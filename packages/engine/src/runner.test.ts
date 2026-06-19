@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { newRequest, type RequestDefinition } from "@red-requester/core";
+import { newRequest, type RequestDefinition } from "@red-request/core";
 import { runLoop } from "./runner.js";
 
 let server: Server;

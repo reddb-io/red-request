@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
-  import { httpMethodSchema, requestKindSchema } from "@red-requester/core";
+  import { httpMethodSchema, requestKindSchema } from "@red-request/core";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";

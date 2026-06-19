@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Kv, StoredEnvironment } from "@red-requester/core";
+  import type { Kv, StoredEnvironment } from "@red-request/core";
   import { ws } from "../store.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
 

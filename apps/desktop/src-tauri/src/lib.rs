@@ -166,7 +166,7 @@ fn spawn_engine(
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
     let shell = app.shell();
     // Production: the bundled, bun-compiled sidecar binary.
-    if let Some(Ok(pair)) = shell.sidecar("red-requester-engine").ok().map(|c| c.spawn()) {
+    if let Some(Ok(pair)) = shell.sidecar("red-request-engine").ok().map(|c| c.spawn()) {
         return Ok(pair);
     }
     // Dev (`tauri dev`): the sidecar binary isn't built, so run the engine's
@@ -266,7 +266,7 @@ async fn engine_call(
 // The master key never enters the webview.
 // ---------------------------------------------------------------------------
 
-const MASTER_KEY_SERVICE: &str = "io.reddb.requester";
+const MASTER_KEY_SERVICE: &str = "io.reddb.request";
 const MASTER_KEY_NAME: &str = "master-key";
 
 #[derive(Serialize, Deserialize)]
@@ -552,12 +552,12 @@ async fn open_project(
 }
 
 /// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
-/// sidecar copy isn't present). Excludes the `red-requester-engine` binary.
+/// sidecar copy isn't present). Excludes the `red-request-engine` binary.
 fn find_red_binary() -> Option<String> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
     for e in std::fs::read_dir(&dir).ok()?.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
-        if name.starts_with("red-") && !name.starts_with("red-requester") {
+        if name.starts_with("red-") && !name.starts_with("red-request") {
             return Some(e.path().to_string_lossy().to_string());
         }
     }

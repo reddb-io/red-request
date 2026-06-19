@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// red-requester engine — the recker sidecar.
+// red-request engine — the recker sidecar.
 //
 // Speaks NDJSON-RPC over stdio: one JSON object per line on stdin, one reply per line on
 // stdout. The Rust shell owns this process and correlates replies by `id`. Nothing is
 // ever printed to stdout except RPC replies/notifications — all diagnostics go to stderr.
 import { createInterface } from "node:readline";
-import { rpcRequestSchema } from "@red-requester/core";
+import { rpcRequestSchema } from "@red-request/core";
 import { handlers } from "./handlers.js";
 
 function send(obj: unknown): void {

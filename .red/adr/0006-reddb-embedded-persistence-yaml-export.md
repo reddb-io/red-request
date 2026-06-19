@@ -5,7 +5,7 @@
 ## Context
 
 ADR-0003 made YAML-on-disk the source of truth. RedDB is this org's own database — having
-red-requester persist into an embedded `.rdb` is natural dogfooding and gives a real
+red-request persist into an embedded `.rdb` is natural dogfooding and gives a real
 runtime store (indexes, scans, queries) instead of ad-hoc file IO. But the Bruno-style
 git-friendly, plain-text, diffable workflow is a core value we don't want to lose.
 

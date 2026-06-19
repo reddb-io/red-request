@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Kv } from "@red-requester/core";
+  import type { Kv } from "@red-request/core";
 
   let { items = $bindable(), placeholder = "name" }: {
     items: Kv[];

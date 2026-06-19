@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SealedSecret } from "@red-requester/core";
+import type { SealedSecret } from "@red-request/core";
 
 /** Seal a plaintext secret via the Rust bridge (AES-256-GCM, key in OS keychain). */
 export const seal = (plaintext: string): Promise<SealedSecret> =>

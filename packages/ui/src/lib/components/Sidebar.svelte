@@ -3,7 +3,7 @@
   import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
-  import type { LoadedCollection } from "@red-requester/core";
+  import type { LoadedCollection } from "@red-request/core";
 
   let status = $state("");
 

@@ -15,7 +15,7 @@ import type {
   ResponseResult,
   AuthConfig,
   Kv,
-} from "@red-requester/core";
+} from "@red-request/core";
 
 type Plugin = unknown;
 type ReckerCall = (

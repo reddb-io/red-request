@@ -1,4 +1,4 @@
-# red-requester — Context
+# red-request — Context
 
 Open-source, white-label API client (a Bruno/Insomnia alternative). Requests are
 dispatched by [`recker`](https://github.com/forattini-dev/recker); the app ships as a
@@ -7,7 +7,7 @@ code, commits and ADRs.
 
 ## Language (glossary)
 
-- **Engine** — the `recker` sidecar (`@red-requester/engine`). A standalone process that
+- **Engine** — the `recker` sidecar (`@red-request/engine`). A standalone process that
   receives a serialized request and returns a serialized response. Never runs in the
   webview (recker uses raw sockets).
 - **Sidecar** — the engine as a child process the Rust shell owns. Shipped as a single
@@ -34,7 +34,7 @@ code, commits and ADRs.
   the RedDB store. Export omits secret values. The Bruno-style artifact. (ADR-0006.)
 - **Brand** — the white-label identity in `brand/brand.config.json`. `scripts/sync-brand.mjs`
   stamps it into the Tauri config, the theme tokens and the runtime constants.
-- **core** — `@red-requester/core`: the Zod schemas + variable resolver shared by the UI and
+- **core** — `@red-request/core`: the Zod schemas + variable resolver shared by the UI and
   the engine. The single source of truth for the wire/disk contract.
 
 ## Shape

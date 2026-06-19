@@ -5,7 +5,7 @@ import type {
   RequestDefinition,
   ResponseResult,
   ScriptTest,
-} from "@red-requester/core";
+} from "@red-request/core";
 
 function fmt(v: unknown): string {
   if (typeof v === "string") return v;

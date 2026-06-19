@@ -23,4 +23,4 @@ Tauri events (`engine://stream`).
 - Streaming (SSE/WS/progress, F4) rides the same channel as notifications.
 
 The contract types (`RpcRequest`/`RpcResponse`/`RpcNotification`) live in
-`@red-requester/core`.
+`@red-request/core`.

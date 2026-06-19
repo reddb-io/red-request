@@ -45,7 +45,7 @@ importers:
 
   packages/engine:
     dependencies:
-      '@red-requester/core':
+      '@red-request/core':
         specifier: workspace:*
         version: link:../core
       recker:
@@ -64,7 +64,7 @@ importers:
 
   packages/ui:
     dependencies:
-      '@red-requester/core':
+      '@red-request/core':
         specifier: workspace:*
         version: link:../core
       '@tauri-apps/api':

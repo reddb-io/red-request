@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { ws } from "../store.svelte";
   import * as repo from "../repo";
-  import type { HistoryEntry } from "@red-requester/core";
+  import type { HistoryEntry } from "@red-request/core";
 
   let history = $state<HistoryEntry[]>([]);
   let loading = $state(true);

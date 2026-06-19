@@ -3,7 +3,7 @@
     dnsRecordTypeSchema,
     type NetConfig,
     type RequestKind,
-  } from "@red-requester/core";
+  } from "@red-request/core";
 
   let {
     kind,

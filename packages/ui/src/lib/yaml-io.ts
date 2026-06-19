@@ -12,7 +12,7 @@ import {
   storedEnvironmentSchema,
   environmentToFile,
   type LoadedCollection,
-} from "@red-requester/core";
+} from "@red-request/core";
 import * as fs from "./fs";
 import * as repo from "./repo";
 

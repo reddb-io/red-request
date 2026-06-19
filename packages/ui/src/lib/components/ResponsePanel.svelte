@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
-  import type { ResponseResult } from "@red-requester/core";
+  import type { ResponseResult } from "@red-request/core";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
 

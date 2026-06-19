@@ -3,7 +3,7 @@
     SELECTABLE_AUTH_TYPES,
     type AuthConfig,
     type AuthType,
-  } from "@red-requester/core";
+  } from "@red-request/core";
 
   let { auth = $bindable() }: { auth: AuthConfig } = $props();
 

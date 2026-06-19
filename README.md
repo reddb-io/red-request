@@ -1,4 +1,4 @@
-# red-requester
+# red-request
 
 Open-source, **white-label** API client — a Bruno/Insomnia alternative built on the
 [`recker`](https://github.com/forattini-dev/recker) multi-protocol SDK and shipped as a
@@ -22,7 +22,7 @@ Webview (SvelteKit static)
    ⇅  @tauri-apps/api  (invoke + events)
 Tauri / Rust  →  fs (collections), keychain (secrets), brand/theming, deep links
    ⇅  stdin/stdout  (NDJSON-RPC, no network port)
-Sidecar (@red-requester/engine)  →  recker  →  HTTP / WS / GraphQL / SSE
+Sidecar (@red-request/engine)  →  recker  →  HTTP / WS / GraphQL / SSE
 ```
 
 recker is TypeScript and uses raw sockets, so it cannot run inside the webview. It runs
@@ -32,12 +32,12 @@ glossary.
 
 ## Workspace
 
-| Package                  | Role                                                          |
-| ------------------------ | ------------------------------------------------------------- |
-| `@red-requester/core`    | Shared Zod schemas + variable resolver (UI ⇄ engine contract) |
-| `@red-requester/engine`  | Bun/Node sidecar wrapping recker; NDJSON-RPC over stdio       |
-| `@red-requester/ui`      | SvelteKit (static) app — the actual client UI                 |
-| `@red-requester/desktop` | Tauri 2 shell (Rust)                                          |
+| Package                | Role                                                          |
+| ---------------------- | ------------------------------------------------------------- |
+| `@red-request/core`    | Shared Zod schemas + variable resolver (UI ⇄ engine contract) |
+| `@red-request/engine`  | Bun/Node sidecar wrapping recker; NDJSON-RPC over stdio       |
+| `@red-request/ui`      | SvelteKit (static) app — the actual client UI                 |
+| `@red-request/desktop` | Tauri 2 shell (Rust)                                          |
 
 ## Develop
 

@@ -5,7 +5,7 @@ import {
   type RequestDefinition,
   type ResponseResult,
   type ScriptResult,
-} from "@red-requester/core";
+} from "@red-request/core";
 import { dispatch } from "./recker.js";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
 import { runWhois, runDns, runTcp, runUdp, runPing } from "./protocols.js";

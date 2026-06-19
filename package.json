@@ -1,5 +1,5 @@
 {
-  "name": "red-requester",
+  "name": "red-request",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --filter @red-requester/ui dev",
-    "desktop:dev": "pnpm brand:sync && pnpm --filter @red-requester/core build && pnpm --filter @red-requester/engine build && pnpm --filter @red-requester/desktop tauri dev",
-    "desktop:build": "pnpm brand:sync && pnpm --filter @red-requester/core build && pnpm engine:build && pnpm --filter @red-requester/desktop tauri build",
+    "dev": "pnpm --filter @red-request/ui dev",
+    "desktop:dev": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm --filter @red-request/engine build && pnpm --filter @red-request/desktop tauri dev",
+    "desktop:build": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
     "engine:build": "node scripts/build-engine.mjs",
     "brand:sync": "node scripts/sync-brand.mjs",
     "build": "pnpm -r build",
