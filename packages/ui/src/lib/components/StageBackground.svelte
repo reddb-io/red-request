@@ -48,9 +48,11 @@
     const rnd = (a: number, b: number) => a + Math.random() * (b - a);
     const bars = Array.from({ length: 16 }, () => {
       const dir = Math.random() < 0.5 ? 1 : -1;
+      // mostly thin pillars, ~30% noticeably thicker for variety
+      const thick = Math.random() < 0.3;
       return {
         x: rnd(-0.1, 1.1) * w,
-        w: rnd(5, 46),
+        w: thick ? rnd(48, 96) : rnd(5, 42),
         speed: dir * rnd(8, 58), // px/s
         c: palette[Math.floor(Math.random() * palette.length)]!,
         alpha: rnd(0.05, 0.18),
