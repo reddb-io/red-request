@@ -5,6 +5,8 @@ import {
   type HttpSendParams,
   type HttpSendResult,
   type RpcNotification,
+  type RunnerParams,
+  type RunnerResult,
 } from "@red-requester/core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
@@ -14,6 +16,10 @@ export function engineCall<T>(method: string, params: unknown): Promise<T> {
 
 export function httpSend(params: HttpSendParams): Promise<HttpSendResult> {
   return engineCall<HttpSendResult>(ENGINE_METHODS.httpSend, params);
+}
+
+export function runnerRun(params: RunnerParams): Promise<RunnerResult> {
+  return engineCall<RunnerResult>(ENGINE_METHODS.runnerRun, params);
 }
 
 export function reckerVersion(): Promise<{ version: string }> {

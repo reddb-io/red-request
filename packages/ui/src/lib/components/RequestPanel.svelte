@@ -4,6 +4,9 @@
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
+  import RunnerPanel from "./RunnerPanel.svelte";
+
+  let showRunner = $state(false);
 
   const methods = httpMethodSchema.options;
   type Tab = "params" | "path" | "headers" | "body" | "auth" | "scripts";
@@ -69,6 +72,11 @@
         onclick={() => ws.save()}
         class="rounded border border-[var(--color-bg-3)] px-3 py-1 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
         >Save</button
+      >
+      <button
+        onclick={() => (showRunner = true)}
+        class="rounded border border-[var(--color-bg-3)] px-3 py-1 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
+        title="Run loops: repeat, data-driven, or flow">Run…</button
       >
     </div>
 
@@ -148,6 +156,10 @@
       {/if}
     </div>
   </section>
+
+  {#if showRunner}
+    <RunnerPanel onClose={() => (showRunner = false)} />
+  {/if}
 {:else}
   <section
     class="grid h-full place-items-center border-r border-[var(--color-bg-3)] bg-[var(--color-bg-1)] text-sm text-zinc-600"

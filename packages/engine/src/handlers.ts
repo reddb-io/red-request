@@ -4,42 +4,33 @@ import {
   ENGINE_METHODS,
   httpSendParamsSchema,
   oauth2TokenParamsSchema,
+  runnerParamsSchema,
   resolveRequest,
   type HttpSendResult,
   type Oauth2TokenResult,
+  type RunnerResult,
 } from "@red-requester/core";
 import reckerPkg from "recker/package.json" with { type: "json" };
 import { dispatch, oauth2Token } from "./recker.js";
-import { runPreRequest, runPostResponse } from "./sandbox.js";
+import { runPipeline } from "./pipeline.js";
+import { runLoop } from "./runner.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
 export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.httpSend]: async (raw): Promise<HttpSendResult> => {
     const { request, variables } = httpSendParamsSchema.parse(raw);
-    const vars: Record<string, string> = { ...variables };
-    // 1. pre-request script may mutate the request and set variables.
-    const pre = await runPreRequest(request, vars);
-    // 2. resolve {{vars}} + :path params, then dispatch.
-    const { request: resolved, unresolved } = resolveRequest(request, vars);
-    const response = await dispatch(resolved);
-    // 3. post-response script: assertions + variable extraction.
-    const post = await runPostResponse(
-      request.scripts.postResponse,
-      response,
-      vars
-    );
+    const out = await runPipeline(request, variables);
     return {
-      response,
-      unresolved,
-      effectiveUrl: resolved.url,
-      scriptResult: {
-        logs: [...pre.logs, ...post.logs],
-        tests: post.tests,
-        varChanges: post.varChanges,
-        error: pre.error ?? post.error,
-      },
+      response: out.response,
+      unresolved: out.unresolved,
+      effectiveUrl: out.effectiveUrl,
+      scriptResult: out.scriptResult,
     };
+  },
+
+  [ENGINE_METHODS.runnerRun]: async (raw): Promise<RunnerResult> => {
+    return runLoop(runnerParamsSchema.parse(raw));
   },
 
   [ENGINE_METHODS.collectionDryRun]: async (raw): Promise<HttpSendResult> => {

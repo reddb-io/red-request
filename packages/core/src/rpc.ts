@@ -41,6 +41,7 @@ export const ENGINE_METHODS = {
   httpSend: "http.send",
   oauth2Token: "oauth2.token",
   collectionDryRun: "collection.dryRun",
+  runnerRun: "runner.run",
   metaReckerVersion: "meta.reckerVersion",
   // declared for later phases:
   wsOpen: "ws.open",

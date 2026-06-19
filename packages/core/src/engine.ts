@@ -60,3 +60,53 @@ export const oauth2TokenResultSchema = z.object({
   expiresIn: z.number().optional(),
 });
 export type Oauth2TokenResult = z.infer<typeof oauth2TokenResultSchema>;
+
+// --- runner / loops ---------------------------------------------------------
+
+const runnerVars = z.record(z.string(), z.string()).default({});
+
+/** Params for `runner.run`, discriminated on `mode`. */
+export const runnerParamsSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("repeat"),
+    request: requestDefinitionSchema,
+    count: z.number().int().min(1).max(1000).default(1),
+    variables: runnerVars,
+  }),
+  z.object({
+    mode: z.literal("data"),
+    request: requestDefinitionSchema,
+    dataset: z.array(z.record(z.string(), z.string())).default([]),
+    variables: runnerVars,
+  }),
+  z.object({
+    mode: z.literal("flow"),
+    requests: z.array(requestDefinitionSchema).default([]),
+    variables: runnerVars,
+  }),
+]);
+export type RunnerParams = z.infer<typeof runnerParamsSchema>;
+
+export const runIterationSchema = z.object({
+  index: z.number(),
+  label: z.string(),
+  reqId: z.string(),
+  reqName: z.string(),
+  method: z.string(),
+  url: z.string(),
+  response: responseResultSchema,
+  scriptResult: scriptResultSchema.optional(),
+});
+export type RunIteration = z.infer<typeof runIterationSchema>;
+
+export const runnerResultSchema = z.object({
+  iterations: z.array(runIterationSchema).default([]),
+  aggregate: z.object({
+    total: z.number(),
+    okCount: z.number(),
+    passed: z.number(),
+    failed: z.number(),
+    avgMs: z.number(),
+  }),
+});
+export type RunnerResult = z.infer<typeof runnerResultSchema>;

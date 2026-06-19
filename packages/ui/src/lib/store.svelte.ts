@@ -7,10 +7,12 @@ import {
   type StoredEnvironment,
   type ScriptTest,
   type HistoryEntry,
+  type RunnerParams,
+  type RunnerResult,
 } from "@red-requester/core";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
-import { httpSend } from "./rpc";
+import { httpSend, runnerRun } from "./rpc";
 import { isTauri } from "./tauri";
 import { projectInfo, type ProjectInfo } from "./project";
 
@@ -34,6 +36,10 @@ class Workspace {
   tests = $state<ScriptTest[]>([]);
   logs = $state<string[]>([]);
   scriptError = $state<string | null>(null);
+
+  running = $state(false);
+  runResult = $state<RunnerResult | null>(null);
+  runError = $state<string | null>(null);
 
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
@@ -139,10 +145,12 @@ class Workspace {
         this.scriptError = sr.error ?? null;
         await this.applyVarChanges(sr.varChanges);
       }
-      await this.recordRun(
-        this.activeReq,
-        result.response,
+      await this.recordEntry(
+        this.activeReq.id,
+        this.activeReq.name,
+        this.activeReq.method,
         result.effectiveUrl,
+        result.response,
         sr?.tests ?? []
       );
     } catch (e) {
@@ -153,21 +161,23 @@ class Workspace {
   }
 
   /** Record one run in history (best-effort; never breaks the send). */
-  private async recordRun(
-    req: RequestDefinition,
+  private async recordEntry(
+    reqId: string,
+    name: string,
+    method: string,
+    url: string,
     response: ResponseResult,
-    effectiveUrl: string,
     tests: ScriptTest[]
   ): Promise<void> {
     if (!this.activeColId) return;
     const ts = Date.now();
     const entry: HistoryEntry = {
-      id: `${req.id}__${ts}`,
-      reqId: req.id,
+      id: `${reqId}__${ts}`,
+      reqId,
       collectionId: this.activeColId,
-      name: req.name,
-      method: req.method,
-      url: effectiveUrl || req.url,
+      name,
+      method,
+      url,
       ts,
       status: response.status,
       ok: response.ok,
@@ -181,6 +191,67 @@ class Workspace {
       await repo.saveHistory(entry);
     } catch {
       /* history is best-effort */
+    }
+  }
+
+  /**
+   * Run a loop (repeat / data-driven / flow). The UI supplies only the mode-specific
+   * bits; we attach the active request/collection + resolved variables. Each iteration
+   * is recorded in history.
+   */
+  async runLoop(opts: {
+    mode: "repeat" | "data" | "flow";
+    count?: number;
+    dataset?: Record<string, string>[];
+  }): Promise<void> {
+    if (this.running) return;
+    const col = this.activeCollection;
+    if (!col || (opts.mode !== "flow" && !this.activeReq)) return;
+    this.running = true;
+    this.runResult = null;
+    this.runError = null;
+    try {
+      const variables = await this.buildVariables();
+      const snap = (r: RequestDefinition) =>
+        structuredClone($state.snapshot(r)) as RequestDefinition;
+      let params: RunnerParams;
+      if (opts.mode === "repeat") {
+        params = {
+          mode: "repeat",
+          request: snap(this.activeReq!),
+          count: opts.count ?? 1,
+          variables,
+        };
+      } else if (opts.mode === "data") {
+        params = {
+          mode: "data",
+          request: snap(this.activeReq!),
+          dataset: opts.dataset ?? [],
+          variables,
+        };
+      } else {
+        params = {
+          mode: "flow",
+          requests: col.requests.map(snap),
+          variables,
+        };
+      }
+      const result = await runnerRun(params);
+      this.runResult = result;
+      for (const it of result.iterations) {
+        await this.recordEntry(
+          it.reqId,
+          it.reqName,
+          it.method,
+          it.url,
+          it.response,
+          it.scriptResult?.tests ?? []
+        );
+      }
+    } catch (e) {
+      this.runError = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.running = false;
     }
   }
 
