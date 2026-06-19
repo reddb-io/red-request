@@ -1,4 +1,6 @@
-use serde::Serialize;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -251,12 +253,246 @@ async fn engine_call(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Secret sealing — AES-256-GCM with a master key kept in the OS keychain. The
+// `.rdb` is plaintext at rest, so secret VALUES are sealed before being stored.
+// The master key never enters the webview.
+// ---------------------------------------------------------------------------
+
+const MASTER_KEY_SERVICE: &str = "io.reddb.requester";
+const MASTER_KEY_NAME: &str = "master-key";
+
+#[derive(Serialize, Deserialize)]
+struct Sealed {
+    iv: String,
+    ct: String,
+}
+
+fn master_key() -> Result<[u8; 32], String> {
+    let entry =
+        keyring::Entry::new(MASTER_KEY_SERVICE, MASTER_KEY_NAME).map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(b64s) => {
+            let bytes = B64.decode(b64s).map_err(|e| e.to_string())?;
+            bytes
+                .try_into()
+                .map_err(|_| "master key has wrong length".to_string())
+        }
+        Err(keyring::Error::NoEntry) => {
+            use rand::RngCore;
+            let mut key = [0u8; 32];
+            rand::rngs::OsRng.fill_bytes(&mut key);
+            entry.set_password(&B64.encode(key)).map_err(|e| e.to_string())?;
+            Ok(key)
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn seal_with_key(key: &[u8; 32], plaintext: &str) -> Result<Sealed, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+    use rand::RngCore;
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let mut nb = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nb);
+    let nonce = Nonce::from_slice(&nb);
+    let ct = cipher
+        .encrypt(nonce, plaintext.as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(Sealed {
+        iv: B64.encode(nb),
+        ct: B64.encode(ct),
+    })
+}
+
+fn open_with_key(key: &[u8; 32], iv: &str, ct: &str) -> Result<String, String> {
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let nb = B64.decode(iv).map_err(|e| e.to_string())?;
+    let ctb = B64.decode(ct).map_err(|e| e.to_string())?;
+    let pt = cipher
+        .decrypt(Nonce::from_slice(&nb), ctb.as_ref())
+        .map_err(|_| "decryption failed".to_string())?;
+    String::from_utf8(pt).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn secret_seal(plaintext: String) -> Result<Sealed, String> {
+    seal_with_key(&master_key()?, &plaintext)
+}
+
+#[tauri::command]
+fn secret_open(iv: String, ct: String) -> Result<String, String> {
+    open_with_key(&master_key()?, &iv, &ct)
+}
+
+// ---------------------------------------------------------------------------
+// Embedded RedDB sidecar — `red server` on a local .rdb, the app's persistence.
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct EmbeddedDb {
+    url: Mutex<Option<String>>,
+    child: Mutex<Option<CommandChild>>,
+}
+
+/// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
+/// sidecar copy isn't present). Excludes the `red-requester-engine` binary.
+fn find_red_binary() -> Option<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with("red-") && !name.starts_with("red-requester") {
+            return Some(e.path().to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        if std::time::Instant::now() > deadline {
+            return Err("embedded reddb did not become ready within 20s".to_string());
+        }
+        if let Ok(mut stream) = tokio::net::TcpStream::connect(bind).await {
+            let req = format!("GET /stats HTTP/1.0\r\nHost: {bind}\r\nConnection: close\r\n\r\n");
+            if stream.write_all(req.as_bytes()).await.is_ok() {
+                let mut buf = [0u8; 32];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    if String::from_utf8_lossy(&buf[..n]).contains(" 200") {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
+async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
+    let db_path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("app.rdb");
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .map_err(|e| e.to_string())?;
+    let bind = format!("127.0.0.1:{port}");
+    let args = [
+        "server".to_string(),
+        "--http".to_string(),
+        "--path".to_string(),
+        db_path.to_string_lossy().to_string(),
+        "--http-bind".to_string(),
+        bind.clone(),
+    ];
+    let shell = app.shell();
+    let sidecar = shell
+        .sidecar("red")
+        .ok()
+        .map(|c| c.args(args.clone()).env("RED_HTTP_TLS_DEV", "1").spawn());
+    let (mut rx, child) = match sidecar {
+        Some(Ok(pair)) => pair,
+        _ => {
+            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
+            shell
+                .command(bin)
+                .args(args)
+                .env("RED_HTTP_TLS_DEV", "1")
+                .spawn()
+                .map_err(|e| format!("failed to start reddb: {e}"))?
+        }
+    };
+    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    reddb_wait_ready(&bind).await?;
+    let state = app.state::<EmbeddedDb>();
+    *state.url.lock().map_err(|e| e.to_string())? = Some(format!("http://{bind}"));
+    *state.child.lock().map_err(|e| e.to_string())? = Some(child);
+    Ok(())
+}
+
+#[tauri::command]
+fn reddb_url(app: tauri::AppHandle) -> Result<String, String> {
+    app.state::<EmbeddedDb>()
+        .url
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "reddb not ready".to_string())
+}
+
+#[derive(Serialize)]
+struct HttpReply {
+    status: u16,
+    body: String,
+}
+
+/// Proxy a reddb HTTP request through Rust (reqwest) — controls the framing so reddb
+/// 0.1.5 gets a Content-Length body, and sidesteps the webview's mixed-content block.
+#[tauri::command]
+async fn reddb_request(
+    app: tauri::AppHandle,
+    method: String,
+    path: String,
+    body: Option<String>,
+) -> Result<HttpReply, String> {
+    let base = app
+        .state::<EmbeddedDb>()
+        .url
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone()
+        .ok_or_else(|| "reddb not ready".to_string())?;
+    let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
+    let mut rb = reqwest::Client::new()
+        .request(m, format!("{base}{path}"))
+        .header("content-type", "application/json");
+    if let Some(b) = body {
+        rb = rb.body(b);
+    }
+    let res = rb.send().await.map_err(|e| e.to_string())?;
+    Ok(HttpReply {
+        status: res.status().as_u16(),
+        body: res.text().await.unwrap_or_default(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{open_with_key, seal_with_key};
+
+    #[test]
+    fn seal_open_roundtrip() {
+        let key = [7u8; 32];
+        let sealed = seal_with_key(&key, "s3cr3t-value").unwrap();
+        assert_ne!(sealed.ct, "s3cr3t-value");
+        let opened = open_with_key(&key, &sealed.iv, &sealed.ct).unwrap();
+        assert_eq!(opened, "s3cr3t-value");
+    }
+
+    #[test]
+    fn wrong_key_fails() {
+        let sealed = seal_with_key(&[1u8; 32], "x").unwrap();
+        assert!(open_with_key(&[2u8; 32], &sealed.iv, &sealed.ct).is_err());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .manage(EngineState::default())
+        .manage(EmbeddedDb::default())
         .setup(|app| {
             // Deep links (rr:// branded scheme).
             let dl_handle = app.handle().clone();
@@ -297,6 +533,15 @@ pub fn run() {
                 }
                 Err(e) => eprintln!("[engine] {e}"),
             }
+
+            // Start the embedded RedDB sidecar (async; the UI polls reddb_url()
+            // until it is ready).
+            let db_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = start_reddb(db_handle).await {
+                    eprintln!("[reddb] {e}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -310,6 +555,10 @@ pub fn run() {
             fs_mkdirp,
             fs_remove,
             engine_call,
+            reddb_url,
+            reddb_request,
+            secret_seal,
+            secret_open,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -318,6 +567,13 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app_handle.try_state::<EngineState>() {
                     if let Ok(mut guard) = state.child.lock() {
+                        if let Some(child) = guard.take() {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+                if let Some(db) = app_handle.try_state::<EmbeddedDb>() {
+                    if let Ok(mut guard) = db.child.lock() {
                         if let Some(child) = guard.take() {
                             let _ = child.kill();
                         }

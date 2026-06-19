@@ -17,9 +17,14 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-shell = "2"
+# reddb CRUD is routed through Rust (reqwest) rather than webview fetch — avoids the
+# WebKit mixed-content block AND gives us full control over the request framing
+# (Content-Length, not chunked, which reddb 0.1.5 needs).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = [
+  "net",
   "io-util",
   "rt-multi-thread",
   "macros",
@@ -32,6 +37,9 @@ keyring = { version = "3", features = [
   "windows-native",
   "linux-native-sync-persistent",
 ] }
+aes-gcm = "0.10"
+rand = "0.8"
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

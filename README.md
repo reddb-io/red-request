@@ -4,12 +4,13 @@ Open-source, **white-label** API client — a Bruno/Insomnia alternative built o
 [`recker`](https://github.com/forattini-dev/recker) multi-protocol SDK and shipped as a
 [Tauri 2](https://tauri.app) desktop app.
 
-- **Offline-first & git-friendly** — collections are plain **YAML** files on disk, one
-  request per file. No mandatory cloud, no account.
+- **Offline-first, embedded store** — all content lives in a local **RedDB** `.rdb`
+  (an embedded `red server` sidecar). No mandatory cloud, no account. Export to a
+  git-friendly **YAML** tree (one request per file) whenever you want to version/share.
 - **recker as the dispatcher** — every request is executed by recker, running in a
   bundled sidecar. HTTP today; WebSocket / GraphQL / SSE / gRPC on the roadmap.
-- **Secrets stay out of git** — environment values flagged as secret live in the OS
-  keychain; the YAML only references them by name.
+- **Secrets stay safe** — secret values are sealed (AES-256-GCM) inside the `.rdb` with a
+  master key kept in the OS keychain; YAML export never contains secret values.
 - **White-label by design** — product name, identifier, accent color, logo and deep-link
   scheme all come from a single `brand/brand.config.json`. Rebrand without touching code.
 - **100% MIT.**

@@ -48,6 +48,13 @@ export const retrySchema = z.object({
 });
 export type RetryConfig = z.infer<typeof retrySchema>;
 
+/** Pre-request / post-response scripts (JS, run in the engine sandbox). */
+export const scriptsSchema = z.object({
+  preRequest: z.string().default(""),
+  postResponse: z.string().default(""),
+});
+export type Scripts = z.infer<typeof scriptsSchema>;
+
 /**
  * A single request — serialized one-per-file under `requests/<slug>.yaml`.
  * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
@@ -60,8 +67,11 @@ export const requestDefinitionSchema = z.object({
   url: z.string().default(""),
   headers: z.array(kvSchema).default([]),
   query: z.array(kvSchema).default([]),
+  /** Positional path params (`:name` segments in the URL). */
+  pathParams: z.array(kvSchema).default([]),
   body: requestBodySchema.default({ type: "none", content: "", fields: [] }),
   auth: authConfigSchema.default({ type: "inherit" }),
+  scripts: scriptsSchema.default({ preRequest: "", postResponse: "" }),
   timeout: z.number().int().positive().optional(),
   retry: retrySchema.optional(),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */

@@ -1,6 +1,9 @@
 # 0003 — Collections are native YAML on disk; other formats are importers
 
-**Status:** accepted · 2026-06-19
+**Status:** superseded by [ADR-0006](0006-reddb-embedded-persistence-yaml-export.md) · 2026-06-19
+
+> Superseded: the live store is now embedded RedDB. YAML is no longer the primary
+> persistence — it survives as the **export/import** (git) artifact. See ADR-0006.
 
 ## Context
 

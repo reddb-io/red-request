@@ -1,24 +1,24 @@
 import {
   mergeScopes,
+  storedEnvironmentSchema,
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
-  type EnvironmentFile,
+  type StoredEnvironment,
+  type ScriptTest,
 } from "@red-requester/core";
 import * as repo from "./repo";
-import * as keychain from "./keychain";
+import * as secrets from "./secrets";
 import { httpSend } from "./rpc";
 import { isTauri } from "./tauri";
-
-const collectionId = (folder: string): string =>
-  folder.split("/").filter(Boolean).pop() ?? folder;
 
 class Workspace {
   ready = $state(false);
   bridgeMissing = $state(false);
+  loadError = $state<string | null>(null);
   collections = $state<LoadedCollection[]>([]);
 
-  activeColPath = $state<string | null>(null);
+  activeColId = $state<string | null>(null);
   activeReq = $state<RequestDefinition | null>(null);
   activeEnvName = $state<string | null>(null);
 
@@ -27,13 +27,20 @@ class Workspace {
   unresolved = $state<string[]>([]);
   effectiveUrl = $state("");
   errorMsg = $state<string | null>(null);
+  tests = $state<ScriptTest[]>([]);
+  logs = $state<string[]>([]);
+  scriptError = $state<string | null>(null);
 
   get activeCollection(): LoadedCollection | null {
-    return this.collections.find((c) => c.path === this.activeColPath) ?? null;
+    return this.collections.find((c) => c.id === this.activeColId) ?? null;
   }
 
-  get environments(): EnvironmentFile[] {
+  get environments(): StoredEnvironment[] {
     return this.activeCollection?.environments ?? [];
+  }
+
+  get activeEnv(): StoredEnvironment | null {
+    return this.environments.find((e) => e.name === this.activeEnvName) ?? null;
   }
 
   async init(): Promise<void> {
@@ -42,23 +49,31 @@ class Workspace {
       this.ready = true;
       return;
     }
-    await repo.ensureSample();
-    this.collections = await repo.loadAll();
-    const first = this.collections[0];
-    if (first) {
-      this.activeColPath = first.path;
-      this.activeEnvName = first.environments[0]?.name ?? null;
-      if (first.requests[0])
-        this.selectRequest(first.path, first.requests[0].id);
+    try {
+      await repo.ensureStore();
+      await repo.ensureSample();
+      await this.reload();
+    } catch (e) {
+      this.loadError = e instanceof Error ? e.message : String(e);
     }
     this.ready = true;
   }
 
-  selectRequest(colPath: string, reqId: string): void {
-    const col = this.collections.find((c) => c.path === colPath);
+  async reload(): Promise<void> {
+    this.collections = await repo.loadAll();
+    const first = this.collections[0];
+    if (first && !this.activeColId) {
+      this.activeColId = first.id;
+      this.activeEnvName = first.environments[0]?.name ?? null;
+      if (first.requests[0]) this.selectRequest(first.id, first.requests[0].id);
+    }
+  }
+
+  selectRequest(colId: string, reqId: string): void {
+    const col = this.collections.find((c) => c.id === colId);
     const req = col?.requests.find((r) => r.id === reqId);
     if (!col || !req) return;
-    this.activeColPath = colPath;
+    this.activeColId = colId;
     this.activeReq = structuredClone($state.snapshot(req)) as RequestDefinition;
     this.activeEnvName =
       this.activeEnvName ?? col.environments[0]?.name ?? null;
@@ -71,21 +86,27 @@ class Workspace {
     const col = this.activeCollection;
     if (!col) return {};
     const env = col.environments.find((e) => e.name === this.activeEnvName);
-    const secrets: Record<string, string> = {};
+    const openedSecrets: Record<string, string> = {};
     if (env) {
-      for (const ref of env.secretRefs) {
-        const v = await keychain.getSecret(collectionId(col.path), ref);
-        if (v != null) secrets[ref] = v;
+      for (const [name, sealed] of Object.entries(env.secrets)) {
+        try {
+          openedSecrets[name] = await secrets.open(sealed);
+        } catch {
+          /* leave unresolved if it can't be opened */
+        }
       }
     }
     // Precedence (earlier wins): secret > environment > collection.
-    return mergeScopes([secrets, env?.vars ?? {}, col.collection.vars]);
+    return mergeScopes([openedSecrets, env?.vars ?? {}, col.collection.vars]);
   }
 
   async send(): Promise<void> {
     if (!this.activeReq || this.sending) return;
     this.sending = true;
     this.errorMsg = null;
+    this.tests = [];
+    this.logs = [];
+    this.scriptError = null;
     try {
       const variables = await this.buildVariables();
       const result = await httpSend({
@@ -95,6 +116,13 @@ class Workspace {
       this.response = result.response;
       this.unresolved = result.unresolved;
       this.effectiveUrl = result.effectiveUrl;
+      const sr = result.scriptResult;
+      if (sr) {
+        this.tests = sr.tests;
+        this.logs = sr.logs;
+        this.scriptError = sr.error ?? null;
+        await this.applyVarChanges(sr.varChanges);
+      }
     } catch (e) {
       this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
@@ -102,42 +130,104 @@ class Workspace {
     }
   }
 
+  /** Persist variables a post-response script set into the active environment. */
+  private async applyVarChanges(
+    changes: Record<string, string>
+  ): Promise<void> {
+    const entries = Object.entries(changes);
+    if (entries.length === 0) return;
+    const env = this.activeEnv;
+    if (!env) return;
+    for (const [k, v] of entries) env.vars[k] = v;
+    await this.persistEnv(env);
+  }
+
   async save(): Promise<void> {
-    if (!this.activeReq || !this.activeColPath) return;
-    const snapshot = structuredClone(
+    if (!this.activeReq || !this.activeColId) return;
+    const snap = structuredClone(
       $state.snapshot(this.activeReq)
     ) as RequestDefinition;
-    await repo.saveRequest(this.activeColPath, snapshot);
+    await repo.saveRequest(this.activeColId, snap);
     const col = this.activeCollection;
     if (col) {
-      const idx = col.requests.findIndex((r) => r.id === snapshot.id);
-      if (idx >= 0) col.requests[idx] = snapshot;
-      else col.requests.push(snapshot);
+      const idx = col.requests.findIndex((r) => r.id === snap.id);
+      if (idx >= 0) col.requests[idx] = snap;
+      else col.requests.push(snap);
     }
   }
 
-  async setSecret(name: string, value: string): Promise<void> {
-    const col = this.activeCollection;
-    const env = col?.environments.find((e) => e.name === this.activeEnvName);
-    if (!col || !env) return;
-    await keychain.setSecret(collectionId(col.path), name, value);
-    if (!env.secretRefs.includes(name)) env.secretRefs.push(name);
+  // --- environment management ---------------------------------------------
+
+  private async persistEnv(env: StoredEnvironment): Promise<void> {
+    if (!this.activeColId) return;
     await repo.saveEnvironment(
-      col.path,
-      $state.snapshot(env) as EnvironmentFile
+      this.activeColId,
+      $state.snapshot(env) as StoredEnvironment
     );
   }
 
-  async removeSecret(name: string): Promise<void> {
+  async createEnv(name: string): Promise<void> {
     const col = this.activeCollection;
-    const env = col?.environments.find((e) => e.name === this.activeEnvName);
-    if (!col || !env) return;
-    await keychain.deleteSecret(collectionId(col.path), name);
-    env.secretRefs = env.secretRefs.filter((r) => r !== name);
-    await repo.saveEnvironment(
-      col.path,
-      $state.snapshot(env) as EnvironmentFile
-    );
+    if (!col || !name.trim()) return;
+    if (col.environments.some((e) => e.name === name)) return;
+    const env = storedEnvironmentSchema.parse({ name, vars: {}, secrets: {} });
+    col.environments.push(env);
+    await this.persistEnv(env);
+    this.activeEnvName = name;
+  }
+
+  async duplicateEnv(source: StoredEnvironment): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    let name = `${source.name}-copy`;
+    let i = 2;
+    while (col.environments.some((e) => e.name === name))
+      name = `${source.name}-copy-${i++}`;
+    const env = structuredClone(
+      $state.snapshot({ ...source, name })
+    ) as StoredEnvironment;
+    col.environments.push(env);
+    await this.persistEnv(env);
+    this.activeEnvName = name;
+  }
+
+  async renameEnv(env: StoredEnvironment, newName: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !newName.trim() || newName === env.name) return;
+    const oldName = env.name;
+    await repo.deleteEnvironment(col.id, oldName);
+    env.name = newName;
+    await this.persistEnv(env);
+    if (this.activeEnvName === oldName) this.activeEnvName = newName;
+  }
+
+  async deleteEnv(env: StoredEnvironment): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    await repo.deleteEnvironment(col.id, env.name);
+    col.environments = col.environments.filter((e) => e !== env);
+    if (this.activeEnvName === env.name)
+      this.activeEnvName = col.environments[0]?.name ?? null;
+  }
+
+  /** Persist edits to an environment's plain vars. */
+  async saveEnvVars(env: StoredEnvironment): Promise<void> {
+    await this.persistEnv(env);
+  }
+
+  async setSecret(
+    env: StoredEnvironment,
+    name: string,
+    value: string
+  ): Promise<void> {
+    if (!name.trim()) return;
+    env.secrets[name] = await secrets.seal(value);
+    await this.persistEnv(env);
+  }
+
+  async removeSecret(env: StoredEnvironment, name: string): Promise<void> {
+    delete env.secrets[name];
+    await this.persistEnv(env);
   }
 }
 

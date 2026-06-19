@@ -10,18 +10,36 @@ import {
 } from "@red-requester/core";
 import reckerPkg from "recker/package.json" with { type: "json" };
 import { dispatch, oauth2Token } from "./recker.js";
+import { runPreRequest, runPostResponse } from "./sandbox.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
 export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.httpSend]: async (raw): Promise<HttpSendResult> => {
     const { request, variables } = httpSendParamsSchema.parse(raw);
-    const { request: resolved, unresolved } = resolveRequest(
-      request,
-      variables
-    );
+    const vars: Record<string, string> = { ...variables };
+    // 1. pre-request script may mutate the request and set variables.
+    const pre = await runPreRequest(request, vars);
+    // 2. resolve {{vars}} + :path params, then dispatch.
+    const { request: resolved, unresolved } = resolveRequest(request, vars);
     const response = await dispatch(resolved);
-    return { response, unresolved, effectiveUrl: resolved.url };
+    // 3. post-response script: assertions + variable extraction.
+    const post = await runPostResponse(
+      request.scripts.postResponse,
+      response,
+      vars
+    );
+    return {
+      response,
+      unresolved,
+      effectiveUrl: resolved.url,
+      scriptResult: {
+        logs: [...pre.logs, ...post.logs],
+        tests: post.tests,
+        varChanges: post.varChanges,
+        error: pre.error ?? post.error,
+      },
+    };
   },
 
   [ENGINE_METHODS.collectionDryRun]: async (raw): Promise<HttpSendResult> => {

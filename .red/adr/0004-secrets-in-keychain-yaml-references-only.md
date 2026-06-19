@@ -1,6 +1,9 @@
 # 0004 — Secrets live in the OS keychain; YAML only references them
 
-**Status:** accepted · 2026-06-19
+**Status:** superseded by [ADR-0007](0007-secrets-encrypted-in-rdb-master-key-in-keychain.md) · 2026-06-19
+
+> Superseded: secret _values_ now live (sealed) in the RedDB store, encrypted with a
+> master key kept in the keychain. The keychain holds one key, not N secrets. See ADR-0007.
 
 ## Context
 

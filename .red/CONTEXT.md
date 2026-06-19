@@ -16,16 +16,22 @@ code, commits and ADRs.
   `engine_call` over stdio, owns the keychain and the collections filesystem.
 - **Surface** — a way the UI is presented. Today: the Tauri desktop window. (A browser/PWA
   surface is possible later; that's why `rpc.ts` is the single backend seam.)
-- **Collection** — a folder of YAML on disk: `collection.yaml` + `requests/*.yaml` +
-  `environments/*.yaml`. Git-friendly, one request per file.
-- **Request** — a `RequestDefinition` (method, url, headers, query, body, auth). Serialized
-  one-per-file under `requests/`.
-- **Environment** — named variable set (`environments/<name>.yaml`): plain `vars` plus
-  `secretRefs` (names only).
-- **Secret** — a sensitive value stored in the OS keychain, referenced from an environment
-  by name. **Never written to YAML.**
+- **RedDB store** — the embedded `.rdb` (a `red server` sidecar) that is the **live
+  persistence** for all content. KV collections `rr_collections` / `rr_requests` /
+  `rr_environments`. The UI talks to it via `reddb.ts`. (ADR-0006.)
+- **Collection** — a `CollectionFile` (name, baseUrl, vars, inherited auth, order) stored in
+  RedDB under its `colId`.
+- **Request** — a `RequestDefinition` (method, url, headers, query, body, auth) stored under
+  `colId.reqId`.
+- **Environment** — a `StoredEnvironment`: plain `vars` plus `secrets` (sealed values),
+  keyed by name.
+- **Secret** — a sensitive value **sealed (AES-256-GCM) and stored in the `.rdb`**; the
+  master key lives in the OS keychain. The `.rdb` only holds ciphertext. (ADR-0007.)
+- **Master key** — the single 256-bit key in the keychain that seals/opens every secret.
 - **Variable / `{{name}}`** — placeholder resolved before dispatch. Precedence (high→low):
   secret → environment → collection.
+- **Export / Import** — the git-friendly YAML tree (`yaml-io.ts`) written from / read into
+  the RedDB store. Export omits secret values. The Bruno-style artifact. (ADR-0006.)
 - **Brand** — the white-label identity in `brand/brand.config.json`. `scripts/sync-brand.mjs`
   stamps it into the Tauri config, the theme tokens and the runtime constants.
 - **core** — `@red-requester/core`: the Zod schemas + variable resolver shared by the UI and

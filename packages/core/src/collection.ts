@@ -18,8 +18,8 @@ export const collectionFileSchema = z.object({
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
 
 /**
- * `environments/<name>.yaml`. Plain `vars` are stored in the file; `secretRefs` name
- * values kept in the OS keychain — they are NEVER written to YAML.
+ * YAML export shape of an environment (the git artifact). Plain `vars` are written;
+ * secret *values* are NEVER exported — only their names, as `secretRefs`.
  */
 export const environmentFileSchema = z.object({
   name: z.string(),
@@ -28,15 +28,47 @@ export const environmentFileSchema = z.object({
 });
 export type EnvironmentFile = z.infer<typeof environmentFileSchema>;
 
+/**
+ * A secret value sealed app-side (AES-256-GCM) before it is stored in the `.rdb`.
+ * The master key lives in the OS keychain; the `.rdb` only ever holds ciphertext.
+ */
+export const sealedSecretSchema = z.object({
+  iv: z.string(), // base64 nonce
+  ct: z.string(), // base64 ciphertext (+ GCM tag)
+});
+export type SealedSecret = z.infer<typeof sealedSecretSchema>;
+
+/**
+ * Runtime/persisted environment (what lives in the RedDB store). Like EnvironmentFile,
+ * but carries the sealed secret values keyed by name instead of bare refs.
+ */
+export const storedEnvironmentSchema = z.object({
+  name: z.string(),
+  vars: z.record(z.string(), z.string()).default({}),
+  secrets: z.record(z.string(), sealedSecretSchema).default({}),
+});
+export type StoredEnvironment = z.infer<typeof storedEnvironmentSchema>;
+
+/** Derive the git-safe YAML export (names only) from a stored environment. */
+export function environmentToFile(env: StoredEnvironment): EnvironmentFile {
+  return {
+    name: env.name,
+    vars: env.vars,
+    secretRefs: Object.keys(env.secrets),
+  };
+}
+
 /** A request file (`requests/<slug>.yaml`) is exactly a RequestDefinition. */
 export const requestFileSchema = requestDefinitionSchema;
 
-/** In-memory view the UI works with: a collection plus its loaded requests + envs. */
+/**
+ * In-memory view the UI works with: a collection plus its requests + environments.
+ * `id` is the collection's key in the RedDB store (also its export folder name).
+ */
 export const loadedCollectionSchema = z.object({
-  /** Absolute path of the collection folder. */
-  path: z.string(),
+  id: z.string(),
   collection: collectionFileSchema,
   requests: z.array(requestDefinitionSchema).default([]),
-  environments: z.array(environmentFileSchema).default([]),
+  environments: z.array(storedEnvironmentSchema).default([]),
 });
 export type LoadedCollection = z.infer<typeof loadedCollectionSchema>;

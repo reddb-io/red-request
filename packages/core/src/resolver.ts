@@ -130,6 +130,8 @@ export interface ResolvedRequest {
  * headers/query entries are dropped. Returns the resolved request plus the set of
  * placeholders that could not be resolved (so the UI can warn before sending).
  */
+const PATH_PARAM = /:([A-Za-z_][\w-]*)/g;
+
 export function resolveRequest(
   def: RequestDefinition,
   lookup: VariableScope
@@ -137,6 +139,14 @@ export function resolveRequest(
   const unresolved = new Set<string>();
   const url = resolveTemplate(def.url, lookup);
   url.unresolved.forEach((u) => unresolved.add(u));
+
+  // Substitute `:name` path params (values themselves may use {{vars}}).
+  const pathParams = resolveKvList(def.pathParams, lookup, unresolved);
+  const pathMap: VariableScope = {};
+  for (const p of pathParams) pathMap[p.name] = p.value;
+  let resolvedUrl = url.value.replace(PATH_PARAM, (m, name: string) =>
+    Object.prototype.hasOwnProperty.call(pathMap, name) ? pathMap[name]! : m
+  );
 
   const body = { ...def.body };
   const content = resolveTemplate(def.body.content, lookup);
@@ -152,9 +162,10 @@ export function resolveRequest(
   return {
     request: {
       ...def,
-      url: url.value,
+      url: resolvedUrl,
       headers: resolveKvList(def.headers, lookup, unresolved),
       query: resolveKvList(def.query, lookup, unresolved),
+      pathParams,
       body,
       auth: resolveAuth(def.auth, lookup, unresolved),
     },

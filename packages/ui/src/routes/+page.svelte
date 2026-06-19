@@ -20,10 +20,19 @@
     <div>
       <h1 class="mb-2 text-lg font-semibold">{brand.productName}</h1>
       <p class="max-w-md text-sm text-zinc-400">
-        This UI talks to a native bridge (engine + keychain + filesystem) that only exists
-        inside the desktop shell. Run <code class="mono text-[var(--color-accent)]"
+        This UI talks to a native bridge (engine + RedDB + keychain) that only exists inside
+        the desktop shell. Run <code class="mono text-[var(--color-accent)]"
           >pnpm desktop:dev</code
         > to launch the app.
+      </p>
+    </div>
+  </div>
+{:else if ws.loadError}
+  <div class="grid h-screen place-items-center px-8 text-center">
+    <div>
+      <h1 class="mb-2 text-lg font-semibold text-red-400">Storage error</h1>
+      <p class="max-w-md text-sm text-zinc-400">
+        The embedded RedDB store didn't come up: <span class="mono">{ws.loadError}</span>
       </p>
     </div>
   </div>

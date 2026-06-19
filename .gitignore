@@ -9,8 +9,9 @@ build/
 packages/ui/build/
 apps/desktop/src-tauri/target/
 
-# compiled sidecar binaries (rebuilt via `pnpm engine:build`)
-apps/desktop/src-tauri/binaries/red-requester-engine*
+# sidecar binaries — not vendored. The engine is rebuilt via `pnpm engine:build`;
+# the reddb `red-<triple>` binary is copied from red-ui (or built from reddb).
+apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/.gitkeep
 
 # local data / collections written at runtime
