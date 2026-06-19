@@ -11,6 +11,8 @@ export interface RecentProject {
   dir: string;
   name: string;
   last_opened: number;
+  pinned: boolean;
+  request_count: number;
 }
 
 export const projectInfo = (): Promise<ProjectInfo> =>
@@ -18,6 +20,12 @@ export const projectInfo = (): Promise<ProjectInfo> =>
 
 export const recentList = (): Promise<RecentProject[]> =>
   invoke<RecentProject[]>("recent_list");
+
+export const recentPin = (dir: string, pinned: boolean): Promise<void> =>
+  invoke<void>("recent_pin", { dir, pinned });
+
+export const recentSetCount = (dir: string, count: number): Promise<void> =>
+  invoke<void>("recent_set_count", { dir, count });
 
 /** Switch the embedded reddb to a project dir (or global with `null`). */
 export const openProject = (dir: string | null): Promise<ProjectInfo> =>

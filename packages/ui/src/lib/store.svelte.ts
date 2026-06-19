@@ -14,7 +14,12 @@ import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend, runnerRun } from "./rpc";
 import { isTauri } from "./tauri";
-import { projectInfo, openProject, type ProjectInfo } from "./project";
+import {
+  projectInfo,
+  openProject,
+  recentSetCount,
+  type ProjectInfo,
+} from "./project";
 
 class Workspace {
   ready = $state(false);
@@ -103,6 +108,14 @@ class Workspace {
       await repo.ensureStore();
       await repo.ensureSample();
       await this.reload();
+      // Persist this project's request count for the selector cards.
+      if (this.project?.is_project && this.project.project_dir) {
+        const total = this.collections.reduce(
+          (s, c) => s + c.requests.length,
+          0
+        );
+        void recentSetCount(this.project.project_dir, total);
+      }
     } catch (e) {
       this.loadError = e instanceof Error ? e.message : String(e);
     }

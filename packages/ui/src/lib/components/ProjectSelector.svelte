@@ -3,7 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { ws } from "../store.svelte";
   import { brand } from "../brand.generated";
-  import { recentList, type RecentProject } from "../project";
+  import { recentList, recentPin, type RecentProject } from "../project";
 
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
@@ -13,13 +13,35 @@
     recents = await recentList().catch(() => []);
   });
 
+  // Pinned first, then most-recently-used.
+  const sorted = $derived(
+    [...recents].sort(
+      (a, b) =>
+        Number(b.pinned) - Number(a.pinned) || b.last_opened - a.last_opened
+    )
+  );
+
   const filtered = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return recents;
-    return recents.filter(
+    if (!q) return sorted;
+    return sorted.filter(
       (r) => r.name.toLowerCase().includes(q) || r.dir.toLowerCase().includes(q)
     );
   });
+
+  async function togglePin(r: RecentProject) {
+    r.pinned = !r.pinned;
+    recents = [...recents];
+    await recentPin(r.dir, r.pinned).catch(() => {});
+  }
+
+  function fmtDate(sec: number): string {
+    return new Date(sec * 1000).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
 
   async function choose(dir: string | null) {
     if (busy) return;
@@ -30,14 +52,6 @@
   async function openFolder() {
     const picked = await open({ directory: true, title: "Open a project folder" });
     if (typeof picked === "string") await choose(picked);
-  }
-
-  function ago(sec: number): string {
-    const s = Math.floor(Date.now() / 1000 - sec);
-    if (s < 60) return "just now";
-    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-    return `${Math.floor(s / 86400)}d ago`;
   }
 </script>
 
@@ -99,18 +113,33 @@
     {:else}
       <div class="grid max-h-[52vh] grid-cols-2 gap-2 overflow-y-auto pr-1">
         {#each filtered as r (r.dir)}
-          <button
-            onclick={() => choose(r.dir)}
-            disabled={busy}
-            class="group flex flex-col items-start gap-1 rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
-          >
-            <span class="flex w-full items-center gap-2">
-              <span class="text-zinc-500 group-hover:text-[var(--color-accent)]">▸</span>
-              <span class="truncate text-sm font-medium text-zinc-100">{r.name}</span>
-            </span>
-            <span class="mono w-full truncate text-[10px] text-zinc-600">{r.dir}</span>
-            <span class="text-[10px] text-zinc-600">{ago(r.last_opened)}</span>
-          </button>
+          <div class="group relative">
+            <button
+              onclick={() => choose(r.dir)}
+              disabled={busy}
+              class="flex w-full flex-col items-start gap-1 rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3 pr-8 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
+            >
+              <span class="flex w-full items-center gap-2">
+                <span class="text-zinc-500 group-hover:text-[var(--color-accent)]">▸</span>
+                <span class="truncate text-sm font-medium text-zinc-100">{r.name}</span>
+              </span>
+              <span class="mono w-full truncate text-[10px] text-zinc-600">{r.dir}</span>
+              <span class="flex items-center gap-1.5 text-[10px] text-zinc-600">
+                <span>{r.request_count} {r.request_count === 1 ? "request" : "requests"}</span>
+                <span>·</span>
+                <span>{fmtDate(r.last_opened)}</span>
+              </span>
+            </button>
+            <button
+              onclick={() => togglePin(r)}
+              title={r.pinned ? "Unpin" : "Pin to top"}
+              class="absolute top-2 right-2 text-sm {r.pinned
+                ? 'text-[var(--color-accent)]'
+                : 'text-zinc-600 hover:text-zinc-300'}"
+            >
+              {r.pinned ? "★" : "☆"}
+            </button>
+          </div>
         {/each}
       </div>
     {/if}

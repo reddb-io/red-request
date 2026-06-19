@@ -408,6 +408,19 @@ struct RecentProject {
     dir: String,
     name: String,
     last_opened: u64,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    request_count: u64,
+}
+
+fn save_recents(list: &[RecentProject]) -> Result<(), String> {
+    let p = recents_path();
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let s = serde_json::to_string_pretty(list).map_err(|e| e.to_string())?;
+    std::fs::write(&p, s).map_err(|e| e.to_string())
 }
 
 fn recents_path() -> std::path::PathBuf {
@@ -439,6 +452,7 @@ fn recent_add_dir(dir: &str) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let mut list = recent_list();
+    let prev = list.iter().find(|r| r.dir == abs).cloned();
     list.retain(|r| r.dir != abs);
     list.insert(
         0,
@@ -446,16 +460,39 @@ fn recent_add_dir(dir: &str) {
             dir: abs,
             name,
             last_opened: now,
+            pinned: prev.as_ref().map(|p| p.pinned).unwrap_or(false),
+            request_count: prev.as_ref().map(|p| p.request_count).unwrap_or(0),
         },
     );
-    list.truncate(12);
-    let p = recents_path();
-    if let Some(parent) = p.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    list.truncate(20);
+    let _ = save_recents(&list);
+}
+
+#[tauri::command]
+fn recent_pin(dir: String, pinned: bool) -> Result<(), String> {
+    let mut list = recent_list();
+    for r in list.iter_mut() {
+        if r.dir == dir {
+            r.pinned = pinned;
+        }
     }
-    if let Ok(s) = serde_json::to_string_pretty(&list) {
-        let _ = std::fs::write(&p, s);
+    save_recents(&list)
+}
+
+#[tauri::command]
+fn recent_set_count(dir: String, count: u64) -> Result<(), String> {
+    let mut list = recent_list();
+    let mut changed = false;
+    for r in list.iter_mut() {
+        if r.dir == dir && r.request_count != count {
+            r.request_count = count;
+            changed = true;
+        }
     }
+    if changed {
+        save_recents(&list)?;
+    }
+    Ok(())
 }
 
 /// Switch the embedded reddb to another project (or the global store with `dir = None`)
@@ -780,6 +817,8 @@ pub fn run() {
             project_info,
             open_project,
             recent_list,
+            recent_pin,
+            recent_set_count,
             secret_seal,
             secret_open,
         ])
