@@ -2,11 +2,13 @@
   // A Mega-Man-stage-ish backdrop: vertical light pillars scrolling across at different
   // speeds/directions, overlapping (alpha) and bobbing. Pure CSS transforms/opacity → GPU.
   const palette = [
-    "255,32,86", // accent
-    "96,165,250", // blue
-    "167,139,250", // purple
-    "34,211,238", // cyan
-    "52,211,153", // emerald
+    "239,68,68", // vermelho
+    "249,115,22", // laranja
+    "153,27,27", // vermelho escuro
+    "194,65,12", // laranja escuro
+    "114,47,55", // vinho
+    "226,114,91", // terracota
+    "150,79,76", // marsala
   ];
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
