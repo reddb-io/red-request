@@ -1,0 +1,74 @@
+import { z } from "zod";
+import { authConfigSchema } from "./auth.js";
+
+export const httpMethodSchema = z.enum([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+export type HttpMethod = z.infer<typeof httpMethodSchema>;
+
+/** A header / query-param entry. `enabled: false` keeps it in the file but skips sending. */
+export const kvSchema = z.object({
+  name: z.string(),
+  value: z.string().default(""),
+  enabled: z.boolean().default(true),
+});
+export type Kv = z.infer<typeof kvSchema>;
+
+export const bodyTypeSchema = z.enum([
+  "none",
+  "json",
+  "raw",
+  "form",
+  "multipart",
+  "xml",
+  "graphql",
+]);
+export type BodyType = z.infer<typeof bodyTypeSchema>;
+
+export const requestBodySchema = z.object({
+  type: bodyTypeSchema.default("none"),
+  /** Raw content (JSON text, raw text, XML, GraphQL query). */
+  content: z.string().default(""),
+  /** Used when type is `form` / `multipart`. */
+  fields: z.array(kvSchema).default([]),
+  /** GraphQL variables (JSON text), only when type is `graphql`. */
+  variables: z.string().optional(),
+});
+export type RequestBody = z.infer<typeof requestBodySchema>;
+
+export const retrySchema = z.object({
+  maxAttempts: z.number().int().min(0).default(0),
+  backoff: z.enum(["linear", "exponential"]).default("exponential"),
+});
+export type RetryConfig = z.infer<typeof retrySchema>;
+
+/**
+ * A single request — serialized one-per-file under `requests/<slug>.yaml`.
+ * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
+ * fully serializable so it round-trips through YAML and the NDJSON-RPC bridge.
+ */
+export const requestDefinitionSchema = z.object({
+  id: z.string(),
+  name: z.string().default("New Request"),
+  method: httpMethodSchema.default("GET"),
+  url: z.string().default(""),
+  headers: z.array(kvSchema).default([]),
+  query: z.array(kvSchema).default([]),
+  body: requestBodySchema.default({ type: "none", content: "", fields: [] }),
+  auth: authConfigSchema.default({ type: "inherit" }),
+  timeout: z.number().int().positive().optional(),
+  retry: retrySchema.optional(),
+  /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
+  presetName: z.string().optional(),
+});
+export type RequestDefinition = z.infer<typeof requestDefinitionSchema>;
+
+export function newRequest(id: string): RequestDefinition {
+  return requestDefinitionSchema.parse({ id });
+}

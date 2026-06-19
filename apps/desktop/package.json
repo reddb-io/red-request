@@ -1,0 +1,16 @@
+{
+  "name": "@red-requester/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "check": "echo \"(desktop: rust checks run via cargo)\" && exit 0",
+    "test": "echo \"(desktop: no js tests)\" && exit 0",
+    "build:tauri": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0"
+  }
+}

@@ -1,0 +1,38 @@
+[package]
+name = "red-requester"
+version = "0.1.0"
+description = "Open-source white-label API client (recker-powered)"
+authors = ["RedDB.io"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "red_requester_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = [
+  "io-util",
+  "rt-multi-thread",
+  "macros",
+  "process",
+  "time",
+  "sync",
+] }
+keyring = { version = "3", features = [
+  "apple-native",
+  "windows-native",
+  "linux-native-sync-persistent",
+] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

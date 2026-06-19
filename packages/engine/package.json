@@ -1,0 +1,27 @@
+{
+  "name": "@red-requester/engine",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "recker sidecar — NDJSON-RPC over stdio, dispatches requests for red-requester.",
+  "license": "MIT",
+  "main": "./dist/main.js",
+  "bin": {
+    "red-requester-engine": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@red-requester/core": "workspace:*",
+    "recker": "1.0.103"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

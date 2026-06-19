@@ -1,0 +1,31 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+.svelte-kit/
+packages/ui/build/
+apps/desktop/src-tauri/target/
+
+# compiled sidecar binaries (rebuilt via `pnpm engine:build`)
+apps/desktop/src-tauri/binaries/red-requester-engine*
+!apps/desktop/src-tauri/binaries/.gitkeep
+
+# local data / collections written at runtime
+.data/
+*.local
+
+# os
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+npm-debug.log*
+
+# env
+.env
+.env.*
+!.env.example

@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "red-requester brand config",
+  "description": "Single source of truth for white-label identity. Consumed by scripts/sync-brand.mjs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "productName",
+    "binaryName",
+    "identifier",
+    "accentColor",
+    "bgTokens",
+    "deepLinkScheme"
+  ],
+  "properties": {
+    "$schema": { "type": "string" },
+    "productName": {
+      "type": "string",
+      "description": "Human-facing app name (window title, about box)."
+    },
+    "binaryName": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "kebab-case binary / bundle name."
+    },
+    "identifier": {
+      "type": "string",
+      "description": "Reverse-DNS bundle identifier (Tauri)."
+    },
+    "tagline": { "type": "string" },
+    "accentColor": { "type": "string", "pattern": "^#([0-9a-fA-F]{6})$" },
+    "bgTokens": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^#([0-9a-fA-F]{6})$"
+      }
+    },
+    "logoPath": { "type": "string" },
+    "deepLinkScheme": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]*$" },
+    "repoUrl": { "type": "string" },
+    "supportUrl": { "type": "string" }
+  }
+}

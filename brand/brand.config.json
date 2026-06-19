@@ -1,0 +1,18 @@
+{
+  "$schema": "./brand.schema.json",
+  "productName": "Red Requester",
+  "binaryName": "red-requester",
+  "identifier": "io.reddb.requester",
+  "tagline": "Open-source API client, powered by recker.",
+  "accentColor": "#ff2056",
+  "bgTokens": {
+    "bg-0": "#0b0b0d",
+    "bg-1": "#141417",
+    "bg-2": "#1c1c21",
+    "bg-3": "#26262d"
+  },
+  "logoPath": "brand/assets/logo.svg",
+  "deepLinkScheme": "redrequester",
+  "repoUrl": "https://github.com/reddb-io/red-requester",
+  "supportUrl": "https://github.com/reddb-io/red-requester/issues"
+}

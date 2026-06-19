@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@import "./lib/brand.generated.css";
+
+/* Base surface defaults (brand tokens come from brand.generated.css @theme). */
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--color-bg-0, #0b0b0d);
+  color: #e8e8ea;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.mono {
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-3, #26262d);
+  border-radius: 6px;
+}

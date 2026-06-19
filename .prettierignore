@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+.svelte-kit/
+**/target/
+apps/desktop/src-tauri/binaries/
+pnpm-lock.yaml
+*.generated.ts
+*.generated.css
