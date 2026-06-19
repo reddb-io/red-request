@@ -11,11 +11,13 @@ import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend } from "./rpc";
 import { isTauri } from "./tauri";
+import { projectInfo, type ProjectInfo } from "./project";
 
 class Workspace {
   ready = $state(false);
   bridgeMissing = $state(false);
   loadError = $state<string | null>(null);
+  project = $state<ProjectInfo | null>(null);
   collections = $state<LoadedCollection[]>([]);
 
   activeColId = $state<string | null>(null);
@@ -49,6 +51,14 @@ class Workspace {
       this.ready = true;
       return;
     }
+    this.project = await projectInfo().catch(() => null);
+    await this.loadStore();
+    this.ready = true;
+  }
+
+  /** (Re)load the store; sets loadError on failure. Used by init and Retry. */
+  async loadStore(): Promise<void> {
+    this.loadError = null;
     try {
       await repo.ensureStore();
       await repo.ensureSample();
@@ -56,7 +66,11 @@ class Workspace {
     } catch (e) {
       this.loadError = e instanceof Error ? e.message : String(e);
     }
-    this.ready = true;
+  }
+
+  async retry(): Promise<void> {
+    this.project = await projectInfo().catch(() => this.project);
+    await this.loadStore();
   }
 
   async reload(): Promise<void> {

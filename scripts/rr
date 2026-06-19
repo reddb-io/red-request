@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# rr — open a red-requester project rooted at the given directory (default: cwd).
+# The app then uses <dir>/.red/request/app.rdb (created if missing); with no dir it
+# uses the global ~/.red/request/app.rdb.
+#
+# After `pnpm desktop:build`, put this on your PATH, e.g.:
+#   ln -s "$PWD/scripts/rr" ~/.local/bin/rr
+set -euo pipefail
+dir="${1:-.}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+targets=(
+  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/release/red-requester"
+  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/debug/red-requester"
+  "/opt/cargo-target/release/red-requester"
+  "/opt/cargo-target/debug/red-requester"
+)
+for cand in "${targets[@]}"; do
+  if [ -x "$cand" ]; then exec "$cand" "$dir"; fi
+done
+echo "red-requester binary not found — run 'pnpm desktop:build' (or desktop:dev) first." >&2
+exit 1

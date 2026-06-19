@@ -53,12 +53,19 @@ struct DirEntry {
     is_dir: bool,
 }
 
+/// Filesystem root for YAML export/import — the directory holding `app.rdb`
+/// (`.red/request/`), so exports live next to the project DB.
 fn collections_root_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
+    let db = app
+        .state::<EmbeddedDb>()
+        .db_path
+        .lock()
         .map_err(|e| e.to_string())?
-        .join("collections");
+        .clone();
+    let dir = std::path::Path::new(&db)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "db path has no parent".to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -336,6 +343,54 @@ fn secret_open(iv: String, ct: String) -> Result<String, String> {
 struct EmbeddedDb {
     url: Mutex<Option<String>>,
     child: Mutex<Option<CommandChild>>,
+    db_path: Mutex<String>,
+    project_dir: Mutex<Option<String>>,
+    /// Serializes (re)spawn so a dead sidecar isn't replaced by several at once
+    /// (multiple `red server` on one .rdb corrupts the B-tree).
+    spawn_lock: tokio::sync::Mutex<()>,
+}
+
+/// Resolve which `.rdb` to open. A path arg (`rr .` / `rr <dir>`) → project mode at
+/// `<dir>/.red/request/app.rdb`; otherwise the global `~/.red/request/app.rdb`.
+/// (The `.red` dir name is the family convention; brandify later.)
+fn resolve_db_target() -> (std::path::PathBuf, Option<String>) {
+    let arg = std::env::args().skip(1).find(|a| !a.starts_with('-'));
+    if let Some(a) = arg {
+        let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let abs = std::fs::canonicalize(&a).unwrap_or_else(|_| base.join(&a));
+        let dir = if abs.is_file() {
+            abs.parent().map(|p| p.to_path_buf()).unwrap_or(abs.clone())
+        } else {
+            abs
+        };
+        let db = dir.join(".red").join("request").join("app.rdb");
+        return (db, Some(dir.to_string_lossy().to_string()));
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let db = std::path::Path::new(&home)
+        .join(".red")
+        .join("request")
+        .join("app.rdb");
+    (db, None)
+}
+
+#[derive(Serialize)]
+struct ProjectInfo {
+    db_path: String,
+    project_dir: Option<String>,
+    is_project: bool,
+}
+
+#[tauri::command]
+fn project_info(app: tauri::AppHandle) -> Result<ProjectInfo, String> {
+    let s = app.state::<EmbeddedDb>();
+    let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
+    let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
+    Ok(ProjectInfo {
+        is_project: project_dir.is_some(),
+        db_path,
+        project_dir,
+    })
 }
 
 /// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
@@ -374,11 +429,13 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
 }
 
 async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
-    let db_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("app.rdb");
+    let db_path = std::path::PathBuf::from(
+        app.state::<EmbeddedDb>()
+            .db_path
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone(),
+    );
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -412,7 +469,21 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
                 .map_err(|e| format!("failed to start reddb: {e}"))?
         }
     };
-    tauri::async_runtime::spawn(async move { while rx.recv().await.is_some() {} });
+    // Drain output; if the sidecar dies, clear the URL so the next request respawns it.
+    let watch = app.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(ev) = rx.recv().await {
+            if let CommandEvent::Terminated(_) = ev {
+                if let Some(s) = watch.try_state::<EmbeddedDb>() {
+                    if let Ok(mut u) = s.url.lock() {
+                        *u = None;
+                    }
+                }
+                eprintln!("[reddb] sidecar terminated");
+                break;
+            }
+        }
+    });
     reddb_wait_ready(&bind).await?;
     let state = app.state::<EmbeddedDb>();
     *state.url.lock().map_err(|e| e.to_string())? = Some(format!("http://{bind}"));
@@ -445,13 +516,25 @@ async fn reddb_request(
     path: String,
     body: Option<String>,
 ) -> Result<HttpReply, String> {
-    let base = app
-        .state::<EmbeddedDb>()
-        .url
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone()
-        .ok_or_else(|| "reddb not ready".to_string())?;
+    let current = || -> Result<Option<String>, String> {
+        Ok(app
+            .state::<EmbeddedDb>()
+            .url
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone())
+    };
+    let mut base = current()?;
+    if base.is_none() {
+        // Self-heal: serialize the respawn, re-check after acquiring the lock.
+        let db = app.state::<EmbeddedDb>();
+        let _guard = db.spawn_lock.lock().await;
+        if current()?.is_none() {
+            let _ = start_reddb(app.clone()).await;
+        }
+        base = current()?;
+    }
+    let base = base.ok_or_else(|| "reddb not ready".to_string())?;
     let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
     let mut rb = reqwest::Client::new()
         .request(m, format!("{base}{path}"))
@@ -534,6 +617,15 @@ pub fn run() {
                 Err(e) => eprintln!("[engine] {e}"),
             }
 
+            // Resolve which .rdb to open (project-local vs global) and record it.
+            let (db_path, project_dir) = resolve_db_target();
+            if let Ok(mut p) = app.state::<EmbeddedDb>().db_path.lock() {
+                *p = db_path.to_string_lossy().to_string();
+            }
+            if let Ok(mut d) = app.state::<EmbeddedDb>().project_dir.lock() {
+                *d = project_dir;
+            }
+
             // Start the embedded RedDB sidecar (async; the UI polls reddb_url()
             // until it is ready).
             let db_handle = app.handle().clone();
@@ -557,6 +649,7 @@ pub fn run() {
             engine_call,
             reddb_url,
             reddb_request,
+            project_info,
             secret_seal,
             secret_open,
         ])

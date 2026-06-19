@@ -49,6 +49,23 @@ pnpm desktop:dev       # launch the desktop app (Tauri)
 pnpm dev
 ```
 
+## Projects (`rr .`)
+
+A folder becomes a project when you open the app pointed at it — its data lives in
+`<folder>/.red/request/app.rdb`, which you can commit/version. With no folder, the app uses
+the global `~/.red/request/app.rdb`.
+
+```bash
+pnpm desktop:build              # build the app once
+ln -s "$PWD/scripts/rr" ~/.local/bin/rr
+rr .                            # open the project rooted here
+rr ~/work/my-api                # …or another folder
+rr                              # global store
+```
+
+Export to a git-friendly YAML tree (Export YAML in the sidebar) lands in
+`<project>/.red/request/_exports`.
+
 ## Rebrand (white-label)
 
 Edit `brand/brand.config.json`, drop your logo at the referenced path, then:

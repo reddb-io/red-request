@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
   import { brand } from "../brand.generated";
+  import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
   import type { LoadedCollection } from "@red-requester/core";
 
@@ -45,7 +46,14 @@
       class="grid h-6 w-6 place-items-center rounded bg-[var(--color-accent)] text-sm font-bold text-black"
       >R</span
     >
-    <span class="text-sm font-semibold">{brand.productName}</span>
+    <div class="flex min-w-0 flex-col leading-tight">
+      <span class="text-sm font-semibold">{brand.productName}</span>
+      {#if ws.project}
+        <span class="mono truncate text-[10px] text-zinc-500" title={ws.project.db_path}>
+          {projectLabel(ws.project)}
+        </span>
+      {/if}
+    </div>
   </div>
 
   <div class="flex-1 overflow-y-auto px-2 pb-4">

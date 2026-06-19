@@ -31,9 +31,14 @@
   <div class="grid h-screen place-items-center px-8 text-center">
     <div>
       <h1 class="mb-2 text-lg font-semibold text-red-400">Storage error</h1>
-      <p class="max-w-md text-sm text-zinc-400">
+      <p class="mx-auto mb-4 max-w-md text-sm text-zinc-400">
         The embedded RedDB store didn't come up: <span class="mono">{ws.loadError}</span>
       </p>
+      <button
+        onclick={() => ws.retry()}
+        class="rounded bg-[var(--color-accent)] px-4 py-1.5 text-sm font-semibold text-black"
+        >Retry</button
+      >
     </div>
   </div>
 {:else}
