@@ -9,6 +9,15 @@
     "114,47,55", // vinho
     "226,114,91", // terracota
     "150,79,76", // marsala
+    "220,20,60", // carmim (crimson)
+    "227,66,52", // vermelhão (vermilion)
+    "128,0,32", // borgonha (burgundy)
+    "128,0,0", // grená (maroon)
+    "183,65,14", // ferrugem (rust)
+    "240,128,128", // coral
+    "192,64,0", // mogno (mahogany)
+    "74,4,4", // sangue de boi (oxblood)
+    "178,34,34", // tijolo (firebrick)
   ];
   const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
