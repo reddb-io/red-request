@@ -56,6 +56,18 @@
     </div>
   </div>
 
+  <div class="flex gap-1 px-2 pb-2">
+    {#each ["requests", "dashboard"] as const as v (v)}
+      <button
+        onclick={() => (ws.view = v)}
+        class="flex-1 rounded px-2 py-1 text-xs capitalize"
+        class:bg-[var(--color-bg-2)]={ws.view === v}
+        class:text-[var(--color-accent)]={ws.view === v}
+        class:text-zinc-400={ws.view !== v}>{v}</button
+      >
+    {/each}
+  </div>
+
   <div class="flex-1 overflow-y-auto px-2 pb-4">
     {#each ws.collections as col (col.id)}
       <div class="mt-2">

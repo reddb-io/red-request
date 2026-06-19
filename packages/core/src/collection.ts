@@ -61,6 +61,25 @@ export function environmentToFile(env: StoredEnvironment): EnvironmentFile {
 /** A request file (`requests/<slug>.yaml`) is exactly a RequestDefinition. */
 export const requestFileSchema = requestDefinitionSchema;
 
+/** One recorded run (for the project dashboard). Stored in the `rr_history` KV. */
+export const historyEntrySchema = z.object({
+  id: z.string(),
+  reqId: z.string(),
+  collectionId: z.string(),
+  name: z.string(),
+  method: z.string(),
+  url: z.string(),
+  ts: z.number(),
+  status: z.number(),
+  ok: z.boolean(),
+  durationMs: z.number(),
+  size: z.number().default(0),
+  testsPassed: z.number().default(0),
+  testsFailed: z.number().default(0),
+  env: z.string().optional(),
+});
+export type HistoryEntry = z.infer<typeof historyEntrySchema>;
+
 /**
  * In-memory view the UI works with: a collection plus its requests + environments.
  * `id` is the collection's key in the RedDB store (also its export folder name).

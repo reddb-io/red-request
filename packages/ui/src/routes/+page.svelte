@@ -5,6 +5,7 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import RequestPanel from "$lib/components/RequestPanel.svelte";
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
+  import Dashboard from "$lib/components/Dashboard.svelte";
 
   onMount(() => {
     void ws.init();
@@ -44,9 +45,13 @@
 {:else}
   <div class="flex h-screen w-screen overflow-hidden">
     <Sidebar />
-    <div class="grid flex-1 grid-cols-2 overflow-hidden">
-      <RequestPanel />
-      <ResponsePanel />
-    </div>
+    {#if ws.view === "dashboard"}
+      <div class="flex-1 overflow-hidden"><Dashboard /></div>
+    {:else}
+      <div class="grid flex-1 grid-cols-2 overflow-hidden">
+        <RequestPanel />
+        <ResponsePanel />
+      </div>
+    {/if}
   </div>
 {/if}

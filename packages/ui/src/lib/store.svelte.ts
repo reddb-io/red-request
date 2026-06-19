@@ -6,6 +6,7 @@ import {
   type ResponseResult,
   type StoredEnvironment,
   type ScriptTest,
+  type HistoryEntry,
 } from "@red-requester/core";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
@@ -23,6 +24,7 @@ class Workspace {
   activeColId = $state<string | null>(null);
   activeReq = $state<RequestDefinition | null>(null);
   activeEnvName = $state<string | null>(null);
+  view = $state<"requests" | "dashboard">("requests");
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);
@@ -137,10 +139,48 @@ class Workspace {
         this.scriptError = sr.error ?? null;
         await this.applyVarChanges(sr.varChanges);
       }
+      await this.recordRun(
+        this.activeReq,
+        result.response,
+        result.effectiveUrl,
+        sr?.tests ?? []
+      );
     } catch (e) {
       this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.sending = false;
+    }
+  }
+
+  /** Record one run in history (best-effort; never breaks the send). */
+  private async recordRun(
+    req: RequestDefinition,
+    response: ResponseResult,
+    effectiveUrl: string,
+    tests: ScriptTest[]
+  ): Promise<void> {
+    if (!this.activeColId) return;
+    const ts = Date.now();
+    const entry: HistoryEntry = {
+      id: `${req.id}__${ts}`,
+      reqId: req.id,
+      collectionId: this.activeColId,
+      name: req.name,
+      method: req.method,
+      url: effectiveUrl || req.url,
+      ts,
+      status: response.status,
+      ok: response.ok,
+      durationMs: response.durationMs,
+      size: response.size,
+      testsPassed: tests.filter((t) => t.passed).length,
+      testsFailed: tests.filter((t) => !t.passed).length,
+      env: this.activeEnvName ?? undefined,
+    };
+    try {
+      await repo.saveHistory(entry);
+    } catch {
+      /* history is best-effort */
     }
   }
 

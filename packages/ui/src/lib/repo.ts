@@ -9,17 +9,22 @@ import {
   collectionFileSchema,
   requestDefinitionSchema,
   storedEnvironmentSchema,
+  historyEntrySchema,
   newRequest,
   type CollectionFile,
   type RequestDefinition,
   type StoredEnvironment,
   type LoadedCollection,
+  type HistoryEntry,
 } from "@red-requester/core";
 import * as db from "./reddb";
 
 export const COL = "rr_collections";
 export const REQ = "rr_requests";
 export const ENV = "rr_environments";
+export const HIST = "rr_history";
+
+const MAX_HISTORY_PER_REQ = 50;
 
 export function slugify(name: string): string {
   return (
@@ -39,6 +44,29 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(COL);
   await db.ensureKvCollection(REQ);
   await db.ensureKvCollection(ENV);
+  await db.ensureKvCollection(HIST);
+}
+
+/** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */
+export async function saveHistory(entry: HistoryEntry): Promise<void> {
+  await db.kvPut(HIST, entry.id, entry);
+  const all = await db.kvList<HistoryEntry>(HIST);
+  const mine = all
+    .map((e) => e.value)
+    .filter((e) => e.reqId === entry.reqId)
+    .sort((a, b) => b.ts - a.ts);
+  for (const old of mine.slice(MAX_HISTORY_PER_REQ)) {
+    await db.kvDelete(HIST, old.id);
+  }
+}
+
+/** All history entries, newest first (optionally scoped to a collection). */
+export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
+  const all = await db.kvList<HistoryEntry>(HIST);
+  return all
+    .map((e) => historyEntrySchema.parse(e.value))
+    .filter((e) => !colId || e.collectionId === colId)
+    .sort((a, b) => b.ts - a.ts);
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
