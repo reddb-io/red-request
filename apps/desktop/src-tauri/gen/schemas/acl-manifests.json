@@ -1898,6 +1898,67 @@
     "permission_sets": {},
     "global_scope_schema": null
   },
+  "dialog": {
+    "default_permission": {
+      "identifier": "default",
+      "description": "This permission set configures the types of dialogs\navailable from the dialog plugin.\n\n#### Granted Permissions\n\nAll dialog types are enabled.\n\n\n",
+      "permissions": ["allow-message", "allow-save", "allow-open"]
+    },
+    "permissions": {
+      "allow-ask": {
+        "identifier": "allow-ask",
+        "description": "Enables the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+        "commands": { "allow": ["message"], "deny": [] }
+      },
+      "allow-confirm": {
+        "identifier": "allow-confirm",
+        "description": "Enables the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `allow-message` and will be removed in v3)",
+        "commands": { "allow": ["message"], "deny": [] }
+      },
+      "allow-message": {
+        "identifier": "allow-message",
+        "description": "Enables the message command without any pre-configured scope.",
+        "commands": { "allow": ["message"], "deny": [] }
+      },
+      "allow-open": {
+        "identifier": "allow-open",
+        "description": "Enables the open command without any pre-configured scope.",
+        "commands": { "allow": ["open"], "deny": [] }
+      },
+      "allow-save": {
+        "identifier": "allow-save",
+        "description": "Enables the save command without any pre-configured scope.",
+        "commands": { "allow": ["save"], "deny": [] }
+      },
+      "deny-ask": {
+        "identifier": "deny-ask",
+        "description": "Denies the ask command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+        "commands": { "allow": [], "deny": ["message"] }
+      },
+      "deny-confirm": {
+        "identifier": "deny-confirm",
+        "description": "Denies the confirm command without any pre-configured scope. (**DEPRECATED**: This is now an alias to `deny-message` and will be removed in v3)",
+        "commands": { "allow": [], "deny": ["message"] }
+      },
+      "deny-message": {
+        "identifier": "deny-message",
+        "description": "Denies the message command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["message"] }
+      },
+      "deny-open": {
+        "identifier": "deny-open",
+        "description": "Denies the open command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["open"] }
+      },
+      "deny-save": {
+        "identifier": "deny-save",
+        "description": "Denies the save command without any pre-configured scope.",
+        "commands": { "allow": [], "deny": ["save"] }
+      }
+    },
+    "permission_sets": {},
+    "global_scope_schema": null
+  },
   "shell": {
     "default_permission": {
       "identifier": "default",

@@ -49,9 +49,14 @@
     <div class="flex min-w-0 flex-col leading-tight">
       <span class="text-sm font-semibold">{brand.productName}</span>
       {#if ws.project}
-        <span class="mono truncate text-[10px] text-zinc-500" title={ws.project.db_path}>
+        <button
+          onclick={() => ws.backToSelector()}
+          class="mono flex items-center gap-1 truncate text-[10px] text-zinc-500 hover:text-zinc-300"
+          title="Switch project — {ws.project.db_path}"
+        >
           {projectLabel(ws.project)}
-        </span>
+          <span class="text-zinc-600">⇄</span>
+        </button>
       {/if}
     </div>
   </div>

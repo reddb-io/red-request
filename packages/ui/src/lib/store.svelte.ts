@@ -14,12 +14,13 @@ import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend, runnerRun } from "./rpc";
 import { isTauri } from "./tauri";
-import { projectInfo, type ProjectInfo } from "./project";
+import { projectInfo, openProject, type ProjectInfo } from "./project";
 
 class Workspace {
   ready = $state(false);
   bridgeMissing = $state(false);
   loadError = $state<string | null>(null);
+  screen = $state<"selector" | "app">("selector");
   project = $state<ProjectInfo | null>(null);
   collections = $state<LoadedCollection[]>([]);
 
@@ -63,8 +64,36 @@ class Workspace {
       return;
     }
     this.project = await projectInfo().catch(() => null);
-    await this.loadStore();
+    // Launched via `rr <dir>` → straight into the project; otherwise show the selector.
+    if (this.project?.arg_launched) {
+      await this.loadStore();
+      this.screen = "app";
+    } else {
+      this.screen = "selector";
+    }
     this.ready = true;
+  }
+
+  /** Open a project dir (or global with `null`): switch reddb, reset, load, enter app. */
+  async chooseProject(dir: string | null): Promise<void> {
+    this.activeColId = null;
+    this.activeReq = null;
+    this.activeEnvName = null;
+    this.collections = [];
+    this.response = null;
+    this.runResult = null;
+    this.view = "requests";
+    this.project = await openProject(dir).catch((e) => {
+      this.loadError = e instanceof Error ? e.message : String(e);
+      return this.project;
+    });
+    await this.loadStore();
+    this.screen = "app";
+  }
+
+  /** Return to the project selector. */
+  backToSelector(): void {
+    this.screen = "selector";
   }
 
   /** (Re)load the store; sets loadError on failure. Used by init and Retry. */

@@ -4,6 +4,6 @@
     "description": "Default window capabilities. The engine sidecar is spawned from Rust, so no shell ACL is needed; the webview only calls app commands.",
     "local": true,
     "windows": ["main"],
-    "permissions": ["core:default", "deep-link:default"]
+    "permissions": ["core:default", "deep-link:default", "dialog:default"]
   }
 }

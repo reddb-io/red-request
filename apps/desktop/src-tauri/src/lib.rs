@@ -345,6 +345,9 @@ struct EmbeddedDb {
     child: Mutex<Option<CommandChild>>,
     db_path: Mutex<String>,
     project_dir: Mutex<Option<String>>,
+    /// Whether the app was launched with a directory arg (`rr <dir>`), in which case
+    /// the UI skips the project selector and opens straight in.
+    arg_launched: Mutex<bool>,
     /// Serializes (re)spawn so a dead sidecar isn't replaced by several at once
     /// (multiple `red server` on one .rdb corrupts the B-tree).
     spawn_lock: tokio::sync::Mutex<()>,
@@ -379,18 +382,136 @@ struct ProjectInfo {
     db_path: String,
     project_dir: Option<String>,
     is_project: bool,
+    arg_launched: bool,
 }
 
-#[tauri::command]
-fn project_info(app: tauri::AppHandle) -> Result<ProjectInfo, String> {
+fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
     let s = app.state::<EmbeddedDb>();
     let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
     let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
+    let arg_launched = *s.arg_launched.lock().map_err(|e| e.to_string())?;
     Ok(ProjectInfo {
         is_project: project_dir.is_some(),
         db_path,
         project_dir,
+        arg_launched,
     })
+}
+
+#[tauri::command]
+fn project_info(app: tauri::AppHandle) -> Result<ProjectInfo, String> {
+    project_info_for(&app)
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct RecentProject {
+    dir: String,
+    name: String,
+    last_opened: u64,
+}
+
+fn recents_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    std::path::Path::new(&home)
+        .join(".red")
+        .join("request")
+        .join("recents.json")
+}
+
+#[tauri::command]
+fn recent_list() -> Vec<RecentProject> {
+    std::fs::read_to_string(recents_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<RecentProject>>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn recent_add_dir(dir: &str) {
+    let abs = std::fs::canonicalize(dir)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| dir.to_string());
+    let name = std::path::Path::new(&abs)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| abs.clone());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut list = recent_list();
+    list.retain(|r| r.dir != abs);
+    list.insert(
+        0,
+        RecentProject {
+            dir: abs,
+            name,
+            last_opened: now,
+        },
+    );
+    list.truncate(12);
+    let p = recents_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(s) = serde_json::to_string_pretty(&list) {
+        let _ = std::fs::write(&p, s);
+    }
+}
+
+/// Switch the embedded reddb to another project (or the global store with `dir = None`)
+/// at runtime: stop the current sidecar, repoint the path, respawn, return the new info.
+#[tauri::command]
+async fn open_project(
+    app: tauri::AppHandle,
+    dir: Option<String>,
+) -> Result<ProjectInfo, String> {
+    let (db_path, project_dir) = match dir.as_deref() {
+        Some(d) => {
+            let abs = std::fs::canonicalize(d).unwrap_or_else(|_| std::path::PathBuf::from(d));
+            (
+                abs.join(".red")
+                    .join("request")
+                    .join("app.rdb")
+                    .to_string_lossy()
+                    .to_string(),
+                Some(abs.to_string_lossy().to_string()),
+            )
+        }
+        None => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            (
+                std::path::Path::new(&home)
+                    .join(".red")
+                    .join("request")
+                    .join("app.rdb")
+                    .to_string_lossy()
+                    .to_string(),
+                None,
+            )
+        }
+    };
+
+    let st = app.state::<EmbeddedDb>();
+    let _guard = st.spawn_lock.lock().await;
+    if let Ok(mut c) = st.child.lock() {
+        if let Some(child) = c.take() {
+            let _ = child.kill();
+        }
+    }
+    if let Ok(mut u) = st.url.lock() {
+        *u = None;
+    }
+    if let Ok(mut p) = st.db_path.lock() {
+        *p = db_path;
+    }
+    if let Ok(mut d) = st.project_dir.lock() {
+        *d = project_dir.clone();
+    }
+    start_reddb(app.clone()).await?;
+    if let Some(d) = &project_dir {
+        recent_add_dir(d);
+    }
+    project_info_for(&app)
 }
 
 /// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
@@ -574,6 +695,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(EngineState::default())
         .manage(EmbeddedDb::default())
         .setup(|app| {
@@ -622,6 +744,12 @@ pub fn run() {
             if let Ok(mut p) = app.state::<EmbeddedDb>().db_path.lock() {
                 *p = db_path.to_string_lossy().to_string();
             }
+            if let Ok(mut a) = app.state::<EmbeddedDb>().arg_launched.lock() {
+                *a = project_dir.is_some();
+            }
+            if let Some(d) = &project_dir {
+                recent_add_dir(d);
+            }
             if let Ok(mut d) = app.state::<EmbeddedDb>().project_dir.lock() {
                 *d = project_dir;
             }
@@ -650,6 +778,8 @@ pub fn run() {
             reddb_url,
             reddb_request,
             project_info,
+            open_project,
+            recent_list,
             secret_seal,
             secret_open,
         ])

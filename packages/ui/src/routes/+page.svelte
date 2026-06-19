@@ -6,6 +6,7 @@
   import RequestPanel from "$lib/components/RequestPanel.svelte";
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import Dashboard from "$lib/components/Dashboard.svelte";
+  import ProjectSelector from "$lib/components/ProjectSelector.svelte";
 
   onMount(() => {
     void ws.init();
@@ -28,6 +29,8 @@
       </p>
     </div>
   </div>
+{:else if ws.screen === "selector"}
+  <ProjectSelector />
 {:else if ws.loadError}
   <div class="grid h-screen place-items-center px-8 text-center">
     <div>
