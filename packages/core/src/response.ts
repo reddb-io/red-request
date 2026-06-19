@@ -39,6 +39,8 @@ export const responseResultSchema = z.object({
   size: z.number().default(0),
   durationMs: z.number().default(0),
   timings: timingsSchema.optional(),
+  /** Structured result for non-HTTP kinds (dns records, ping stats, whois parsed). */
+  meta: z.record(z.string(), z.unknown()).optional(),
   error: responseErrorSchema.optional(),
 });
 export type ResponseResult = z.infer<typeof responseResultSchema>;

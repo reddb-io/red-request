@@ -8,6 +8,36 @@ import {
 } from "@red-requester/core";
 import { dispatch } from "./recker.js";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
+import { runWhois, runDns, runTcp, runUdp, runPing } from "./protocols.js";
+
+/** Dispatch a non-HTTP kind to its protocol handler. */
+function dispatchProtocol(def: RequestDefinition): Promise<ResponseResult> {
+  const n = def.net;
+  switch (def.kind) {
+    case "tcp":
+      return runTcp(n.host, n.port, n.payload, n.timeoutMs);
+    case "udp":
+      return runUdp(n.host, n.port, n.payload, n.waitResponse, n.timeoutMs);
+    case "ping":
+      return runPing(n.host, n.port, n.count, n.timeoutMs);
+    case "whois":
+      return runWhois(n.host);
+    case "dns":
+      return runDns(n.host, n.recordType);
+    default:
+      return Promise.resolve({
+        status: 0,
+        statusText: "",
+        ok: false,
+        url: "",
+        headers: {},
+        bodyText: "",
+        size: 0,
+        durationMs: 0,
+        error: { message: `unsupported kind: ${def.kind}` },
+      });
+  }
+}
 
 export interface PipelineOutcome {
   response: ResponseResult;
@@ -25,7 +55,10 @@ export async function runPipeline(
   const vars: Record<string, string> = { ...variables };
   const pre = await runPreRequest(def, vars);
   const { request: resolved, unresolved } = resolveRequest(def, vars);
-  const response = await dispatch(resolved);
+  const response =
+    resolved.kind === "http"
+      ? await dispatch(resolved)
+      : await dispatchProtocol(resolved);
   const post = await runPostResponse(def.scripts.postResponse, response, vars);
   return {
     response,

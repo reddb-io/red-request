@@ -140,6 +140,24 @@ export async function ensureSample(): Promise<void> {
     headers: [{ name: "X-Demo", value: "red-requester", enabled: true }],
     body: { type: "json", content: '{\n  "name": "ada"\n}', fields: [] },
   });
+  // a couple of non-HTTP kinds for discovery
+  await saveRequest(colId, {
+    ...newRequest("dns-a"),
+    name: "DNS · {{host}}",
+    kind: "dns",
+    net: { ...newRequest("dns-a").net, host: "{{host}}", recordType: "A" },
+  });
+  await saveRequest(colId, {
+    ...newRequest("ping-host"),
+    name: "Ping · {{host}}",
+    kind: "ping",
+    net: {
+      ...newRequest("ping-host").net,
+      host: "{{host}}",
+      port: 443,
+      count: 4,
+    },
+  });
   await saveEnvironment(
     colId,
     storedEnvironmentSchema.parse({

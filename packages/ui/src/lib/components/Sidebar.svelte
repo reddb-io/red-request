@@ -36,6 +36,17 @@
     HEAD: "text-zinc-400",
     OPTIONS: "text-zinc-400",
   };
+  const kindColor: Record<string, string> = {
+    tcp: "text-cyan-400",
+    udp: "text-teal-400",
+    ping: "text-pink-400",
+    whois: "text-orange-400",
+    dns: "text-indigo-400",
+  };
+  const badge = (req: LoadedCollection["requests"][number]) =>
+    req.kind === "http"
+      ? { label: req.method, color: methodColor[req.method] ?? "text-zinc-400" }
+      : { label: req.kind.toUpperCase(), color: kindColor[req.kind] ?? "text-zinc-400" };
 </script>
 
 <aside
@@ -86,8 +97,8 @@
             class:bg-[var(--color-bg-2)]={ws.activeReq?.id === req.id &&
               ws.activeColId === col.id}
           >
-            <span class="mono w-12 shrink-0 text-[11px] font-bold {methodColor[req.method]}"
-              >{req.method}</span
+            <span class="mono w-12 shrink-0 text-[11px] font-bold {badge(req).color}"
+              >{badge(req).label}</span
             >
             <span class="truncate text-zinc-300">{req.name}</span>
           </button>

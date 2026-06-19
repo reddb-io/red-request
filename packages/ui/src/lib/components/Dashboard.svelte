@@ -22,7 +22,8 @@
     let withAuth = 0;
     let withScripts = 0;
     for (const r of reqs) {
-      byMethod[r.method] = (byMethod[r.method] ?? 0) + 1;
+      const key = r.kind === "http" ? r.method : r.kind.toUpperCase();
+      byMethod[key] = (byMethod[key] ?? 0) + 1;
       if (r.auth.type !== "none" && r.auth.type !== "inherit") withAuth++;
       if (r.scripts.preRequest.trim() || r.scripts.postResponse.trim()) withScripts++;
     }

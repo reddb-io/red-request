@@ -1,17 +1,31 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
-  import { httpMethodSchema } from "@red-requester/core";
+  import { httpMethodSchema, requestKindSchema } from "@red-requester/core";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
   import RunnerPanel from "./RunnerPanel.svelte";
+  import ProtocolForm from "./ProtocolForm.svelte";
 
   let showRunner = $state(false);
 
   const methods = httpMethodSchema.options;
-  type Tab = "params" | "path" | "headers" | "body" | "auth" | "scripts";
+  const kinds = requestKindSchema.options;
+  type Tab =
+    | "params"
+    | "path"
+    | "headers"
+    | "body"
+    | "auth"
+    | "scripts"
+    | "config";
   let tab = $state<Tab>("params");
-  const tabs: Tab[] = ["params", "path", "headers", "body", "auth", "scripts"];
+  const httpTabs: Tab[] = ["params", "path", "headers", "body", "auth", "scripts"];
+  const netTabs: Tab[] = ["config", "scripts"];
+  const tabs = $derived(ws.activeReq?.kind === "http" ? httpTabs : netTabs);
+  $effect(() => {
+    if (!tabs.includes(tab)) tab = tabs[0]!;
+  });
   const bodyTypes = ["none", "json", "raw", "form", "xml", "graphql"] as const;
 
   // Path params auto-detected from `:name` segments in the URL.
@@ -52,16 +66,27 @@
     </div>
 
     <div class="flex items-center gap-2 px-3 py-2">
-      <select bind:value={ws.activeReq.method} class="{field} font-bold">
-        {#each methods as m (m)}
-          <option value={m}>{m}</option>
+      <select bind:value={ws.activeReq.kind} class="{field} font-bold uppercase">
+        {#each kinds as k (k)}
+          <option value={k}>{k}</option>
         {/each}
       </select>
-      <input
-        bind:value={ws.activeReq.url}
-        placeholder={"https://{{host}}/users/:id"}
-        class="{field} flex-1"
-      />
+      {#if ws.activeReq.kind === "http"}
+        <select bind:value={ws.activeReq.method} class="{field} font-bold">
+          {#each methods as m (m)}
+            <option value={m}>{m}</option>
+          {/each}
+        </select>
+        <input
+          bind:value={ws.activeReq.url}
+          placeholder={"https://{{host}}/users/:id"}
+          class="{field} flex-1"
+        />
+      {:else}
+        <span class="mono flex-1 truncate px-2 text-sm text-zinc-400">
+          {ws.activeReq.net.host || "set target in Config →"}
+        </span>
+      {/if}
       <button
         onclick={() => ws.send()}
         disabled={ws.sending}
@@ -135,6 +160,8 @@
               placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"}></textarea>
           </div>
         </div>
+      {:else if tab === "config"}
+        <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
       {:else}
         <div class="flex flex-col gap-2">
           <select bind:value={ws.activeReq.body.type} class={field}>

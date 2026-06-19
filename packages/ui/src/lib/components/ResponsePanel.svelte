@@ -150,6 +150,19 @@
 
     <div class="flex-1 overflow-auto p-3">
       {#if tab === "body"}
+        {#if r.meta}
+          <div class="mb-2 flex flex-wrap gap-2 text-[11px] text-zinc-400">
+            {#each Object.entries(r.meta) as [k, v] (k)}
+              {#if typeof v === "number" || typeof v === "string"}
+                <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5"
+                  ><b class="text-zinc-200"
+                    >{typeof v === "number" ? Math.round(v * 10) / 10 : v}</b
+                  > {k}</span
+                >
+              {/if}
+            {/each}
+          </div>
+        {/if}
         <pre class="mono text-xs whitespace-pre-wrap text-zinc-200">{prettyBody}</pre>
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">

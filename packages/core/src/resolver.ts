@@ -159,6 +159,19 @@ export function resolveRequest(
   }
   body.fields = resolveKvList(def.body.fields, lookup, unresolved);
 
+  // Resolve non-HTTP target fields and, for those kinds, surface a human target URL.
+  const host = resolveTemplate(def.net.host, lookup);
+  host.unresolved.forEach((u) => unresolved.add(u));
+  const payload = resolveTemplate(def.net.payload, lookup);
+  payload.unresolved.forEach((u) => unresolved.add(u));
+  const net = { ...def.net, host: host.value, payload: payload.value };
+  if (def.kind !== "http") {
+    resolvedUrl =
+      def.kind === "whois" || def.kind === "dns"
+        ? net.host
+        : `${net.host}:${net.port}`;
+  }
+
   return {
     request: {
       ...def,
@@ -167,6 +180,7 @@ export function resolveRequest(
       query: resolveKvList(def.query, lookup, unresolved),
       pathParams,
       body,
+      net,
       auth: resolveAuth(def.auth, lookup, unresolved),
     },
     unresolved: [...unresolved],

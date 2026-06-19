@@ -55,6 +55,42 @@ export const scriptsSchema = z.object({
 });
 export type Scripts = z.infer<typeof scriptsSchema>;
 
+/** Request protocol. `http` is the default; the rest use `net` config below. */
+export const requestKindSchema = z.enum([
+  "http",
+  "tcp",
+  "udp",
+  "ping",
+  "whois",
+  "dns",
+]);
+export type RequestKind = z.infer<typeof requestKindSchema>;
+
+export const dnsRecordTypeSchema = z.enum([
+  "A",
+  "AAAA",
+  "MX",
+  "TXT",
+  "NS",
+  "CNAME",
+  "SOA",
+  "SRV",
+  "CAA",
+]);
+export type DnsRecordType = z.infer<typeof dnsRecordTypeSchema>;
+
+/** Params for non-HTTP kinds. `host` doubles as the domain/name for whois/dns. */
+export const netConfigSchema = z.object({
+  host: z.string().default(""),
+  port: z.number().int().min(0).max(65535).default(0),
+  payload: z.string().default(""),
+  waitResponse: z.boolean().default(true),
+  recordType: dnsRecordTypeSchema.default("A"),
+  count: z.number().int().min(1).max(50).default(4),
+  timeoutMs: z.number().int().min(100).max(60000).default(5000),
+});
+export type NetConfig = z.infer<typeof netConfigSchema>;
+
 /**
  * A single request — serialized one-per-file under `requests/<slug>.yaml`.
  * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
@@ -63,8 +99,18 @@ export type Scripts = z.infer<typeof scriptsSchema>;
 export const requestDefinitionSchema = z.object({
   id: z.string(),
   name: z.string().default("New Request"),
+  kind: requestKindSchema.default("http"),
   method: httpMethodSchema.default("GET"),
   url: z.string().default(""),
+  net: netConfigSchema.default({
+    host: "",
+    port: 0,
+    payload: "",
+    waitResponse: true,
+    recordType: "A",
+    count: 4,
+    timeoutMs: 5000,
+  }),
   headers: z.array(kvSchema).default([]),
   query: z.array(kvSchema).default([]),
   /** Positional path params (`:name` segments in the URL). */
