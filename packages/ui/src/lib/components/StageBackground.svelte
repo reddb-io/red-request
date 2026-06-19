@@ -1,6 +1,11 @@
 <script lang="ts">
-  // A Mega-Man-stage-ish backdrop: vertical light pillars scrolling across at different
-  // speeds/directions, overlapping (alpha) and bobbing. Pure CSS transforms/opacity → GPU.
+  // Mega-Man-stage backdrop on a single <canvas> — vertical light pillars scrolling at
+  // varied speeds/directions, bobbing + pulsing. One rAF loop, no CSS blur/compositing, so
+  // it's cheap. Pauses when the tab is hidden; honors prefers-reduced-motion.
+  import { onMount } from "svelte";
+
+  let canvas: HTMLCanvasElement;
+
   const palette = [
     "239,68,68", // vermelho
     "249,115,22", // laranja
@@ -9,102 +14,119 @@
     "114,47,55", // vinho
     "226,114,91", // terracota
     "150,79,76", // marsala
-    "220,20,60", // carmim (crimson)
-    "227,66,52", // vermelhão (vermilion)
-    "128,0,32", // borgonha (burgundy)
-    "128,0,0", // grená (maroon)
-    "183,65,14", // ferrugem (rust)
+    "220,20,60", // carmim
+    "227,66,52", // vermelhão
+    "128,0,32", // borgonha
+    "128,0,0", // grená
+    "183,65,14", // ferrugem
     "240,128,128", // coral
-    "192,64,0", // mogno (mahogany)
-    "74,4,4", // sangue de boi (oxblood)
-    "178,34,34", // tijolo (firebrick)
+    "192,64,0", // mogno
+    "74,4,4", // sangue de boi
+    "178,34,34", // tijolo
   ];
-  const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
-  const bars = Array.from({ length: 22 }, () => {
-    const dir = Math.random() < 0.5 ? 1 : -1;
-    const dur = rnd(10, 38);
-    return {
-      w: rnd(5, 46),
-      x0: dir > 0 ? -12 : 112,
-      x1: dir > 0 ? 112 : -12,
-      dur,
-      delay: -rnd(0, dur),
-      op: rnd(0.05, 0.17).toFixed(3),
-      blur: (Math.random() < 0.45 ? rnd(0, 2.4) : 0).toFixed(2),
-      bob: rnd(-38, 38).toFixed(0),
-      bobDur: rnd(2.6, 6).toFixed(2),
-      c: palette[Math.floor(Math.random() * palette.length)],
+  onMount(() => {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let w = 1;
+    let h = 1;
+
+    function resize() {
+      const r = canvas.getBoundingClientRect();
+      w = Math.max(1, r.width);
+      h = Math.max(1, r.height);
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    resize();
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const bars = Array.from({ length: 16 }, () => {
+      const dir = Math.random() < 0.5 ? 1 : -1;
+      return {
+        x: rnd(-0.1, 1.1) * w,
+        w: rnd(5, 46),
+        speed: dir * rnd(8, 58), // px/s
+        c: palette[Math.floor(Math.random() * palette.length)]!,
+        alpha: rnd(0.05, 0.18),
+        phase: rnd(0, Math.PI * 2),
+        amp: rnd(8, 38), // vertical bob px
+        freq: rnd(0.2, 0.7),
+      };
+    });
+
+    function draw(now: number, dt: number) {
+      ctx!.clearRect(0, 0, w, h);
+      const ts = now / 1000;
+      for (const b of bars) {
+        b.x += b.speed * dt;
+        if (b.x > w + 60) b.x = -60;
+        else if (b.x < -60) b.x = w + 60;
+        const yoff = Math.sin(ts * b.freq + b.phase) * b.amp;
+        const a = b.alpha * (1 + 0.7 * Math.sin(ts * b.freq * 1.3 + b.phase));
+        const top = -60 + yoff;
+        const g = ctx!.createLinearGradient(0, top, 0, h + 60 + yoff);
+        g.addColorStop(0, `rgba(${b.c},0)`);
+        g.addColorStop(0.28, `rgba(${b.c},${a})`);
+        g.addColorStop(0.72, `rgba(${b.c},${a})`);
+        g.addColorStop(1, `rgba(${b.c},0)`);
+        ctx!.fillStyle = g;
+        ctx!.fillRect(b.x, top, b.w, h + 120);
+      }
+    }
+
+    let raf = 0;
+    let last = performance.now();
+    function frame(now: number) {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      draw(now, dt);
+      raf = requestAnimationFrame(frame);
+    }
+
+    function start() {
+      last = performance.now();
+      raf = requestAnimationFrame(frame);
+    }
+    function stop() {
+      cancelAnimationFrame(raf);
+    }
+
+    if (reduced) {
+      draw(performance.now(), 0); // static single frame
+    } else {
+      start();
+    }
+
+    const onVis = () => {
+      if (reduced) return;
+      if (document.hidden) stop();
+      else start();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      stop();
+      ro.disconnect();
+      document.removeEventListener("visibilitychange", onVis);
     };
   });
 </script>
 
-<div class="stage" aria-hidden="true">
-  {#each bars as b, i (i)}
-    <div
-      class="track"
-      style="--x0:{b.x0}vw; --x1:{b.x1}vw; --dur:{b.dur}s; --delay:{b.delay}s; width:{b.w}px; filter: blur({b.blur}px);"
-    >
-      <div
-        class="bar"
-        style="--c:{b.c}; --op:{b.op}; --bob:{b.bob}px; --bobDur:{b.bobDur}s;"
-      ></div>
-    </div>
-  {/each}
-</div>
+<canvas bind:this={canvas} class="stage" aria-hidden="true"></canvas>
 
 <style>
   .stage {
     position: absolute;
     inset: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-  .track {
-    position: absolute;
-    top: -5%;
-    left: 0;
-    height: 110%;
-    transform: translateX(var(--x0));
-    animation: passX var(--dur) linear var(--delay) infinite;
-    will-change: transform;
-  }
-  .bar {
+    display: block;
     width: 100%;
     height: 100%;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(var(--c), 0.9) 26%,
-      rgba(var(--c), 0.9) 74%,
-      transparent 100%
-    );
-    opacity: var(--op);
-    animation: bobY var(--bobDur) ease-in-out infinite alternate;
-    will-change: transform, opacity;
-  }
-  @keyframes passX {
-    from {
-      transform: translateX(var(--x0));
-    }
-    to {
-      transform: translateX(var(--x1));
-    }
-  }
-  @keyframes bobY {
-    from {
-      transform: translateY(0);
-      opacity: var(--op);
-    }
-    to {
-      transform: translateY(var(--bob));
-      opacity: calc(var(--op) * 2.1);
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .track,
-    .bar {
-      animation: none;
-    }
+    pointer-events: none;
   }
 </style>
