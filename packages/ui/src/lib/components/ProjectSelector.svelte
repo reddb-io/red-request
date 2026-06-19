@@ -4,6 +4,7 @@
   import { ws } from "../store.svelte";
   import { brand } from "../brand.generated";
   import { recentList, recentPin, type RecentProject } from "../project";
+  import StageBackground from "./StageBackground.svelte";
 
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
@@ -55,8 +56,10 @@
   }
 </script>
 
-<div class="grid h-screen place-items-center bg-[var(--color-bg-0)] px-6">
-  <div class="w-[640px]">
+<div class="relative h-screen overflow-hidden bg-[var(--color-bg-0)]">
+  <StageBackground />
+  <div class="relative z-10 grid h-full place-items-center px-6">
+    <div class="w-[640px]">
     <div class="mb-6 flex items-center gap-3">
       <span
         class="grid h-9 w-9 place-items-center rounded-lg bg-[var(--color-accent)] text-lg font-bold text-black"
@@ -147,5 +150,6 @@
     {#if busy}
       <p class="mt-3 text-center text-xs text-zinc-500">Opening…</p>
     {/if}
+    </div>
   </div>
 </div>
