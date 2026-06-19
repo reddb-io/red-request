@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
+  import type { ResponseResult } from "@red-requester/core";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
 
@@ -35,7 +36,64 @@
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
     return `${(n / 1024 / 1024).toFixed(2)} MB`;
   }
+
+  // --- timing waterfall ---
+  type Timings = NonNullable<ResponseResult["timings"]>;
+  const PHASES = [
+    { key: "dns", label: "DNS", color: "#60a5fa" },
+    { key: "tcp", label: "TCP", color: "#a78bfa" },
+    { key: "tls", label: "TLS", color: "#fbbf24" },
+    { key: "firstByte", label: "Wait", color: "var(--color-accent)" },
+    { key: "total", label: "Download", color: "#34d399" },
+  ] as const;
+
+  function segments(t: Timings | undefined): { label: string; ms: number; color: string }[] {
+    if (!t) return [];
+    let prev = t.queuing ?? 0;
+    const out: { label: string; ms: number; color: string }[] = [];
+    for (const ph of PHASES) {
+      const cur = t[ph.key];
+      if (typeof cur !== "number") continue;
+      const ms = cur - prev;
+      if (ms > 0.05) out.push({ label: ph.label, ms, color: ph.color });
+      prev = Math.max(prev, cur);
+    }
+    return out;
+  }
+
+  const totalMs = (h: { timings?: Timings; durationMs: number }) =>
+    h.timings?.total ?? h.durationMs;
+
+  const avg = $derived(
+    ws.reqHistory.length
+      ? Math.round(
+          ws.reqHistory.reduce((s, h) => s + h.durationMs, 0) / ws.reqHistory.length
+        )
+      : null
+  );
+  const maxTotal = $derived(Math.max(1, ...ws.reqHistory.map(totalMs)));
+
+  function ago(ts: number): string {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) return `${Math.floor(s / 60)}m`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h`;
+    return `${Math.floor(s / 86400)}d`;
+  }
 </script>
+
+{#snippet bar(t: Timings | undefined, h: number)}
+  {@const segs = segments(t)}
+  {@const tot = segs.reduce((s, x) => s + x.ms, 0) || 1}
+  <div class="flex overflow-hidden rounded" style="height:{h}px; width:100%">
+    {#each segs as s (s.label)}
+      <div
+        style="width:{((s.ms / tot) * 100).toFixed(2)}%; background:{s.color}"
+        title="{s.label} {s.ms.toFixed(0)}ms"
+      ></div>
+    {/each}
+  </div>
+{/snippet}
 
 <section class="flex h-full flex-col bg-[var(--color-bg-0)]">
   {#if ws.errorMsg}
@@ -105,16 +163,51 @@
           </tbody>
         </table>
       {:else if tab === "timings"}
-        <table class="mono w-full text-xs">
-          <tbody>
-            {#each Object.entries(r.timings ?? {}) as [k, v] (k)}
-              <tr class="border-b border-[var(--color-bg-2)]">
-                <td class="py-1 pr-4 text-zinc-400">{k}</td>
-                <td class="py-1 text-zinc-200">{Number(v).toFixed(1)} ms</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <div class="flex flex-col gap-4">
+          <div>
+            <div class="mb-1.5 flex items-center gap-3 text-xs">
+              {#if avg !== null}
+                <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5 text-zinc-400">
+                  endpoint avg <b class="text-zinc-100">{avg}ms</b>
+                  <span class="text-zinc-600">· {ws.reqHistory.length} runs</span>
+                </span>
+              {/if}
+              <span class="text-zinc-500">this run {totalMs(r).toFixed(0)}ms</span>
+            </div>
+            {@render bar(r.timings, 18)}
+            <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-zinc-400">
+              {#each segments(r.timings) as s (s.label)}
+                <span class="flex items-center gap-1">
+                  <span class="inline-block h-2 w-2 rounded-sm" style="background:{s.color}"></span>
+                  {s.label} {s.ms.toFixed(0)}ms
+                </span>
+              {/each}
+            </div>
+          </div>
+
+          {#if ws.reqHistory.length > 1}
+            <div>
+              <div class="mb-1.5 text-[10px] tracking-wide text-zinc-500 uppercase">
+                Recent runs
+              </div>
+              <div class="flex flex-col gap-1">
+                {#each ws.reqHistory.slice(0, 15) as h (h.id)}
+                  <div class="flex items-center gap-2 text-[11px]">
+                    <span class="mono w-14 shrink-0 text-zinc-500"
+                      >{totalMs(h).toFixed(0)}ms</span
+                    >
+                    <div class="flex-1">
+                      <div style="width:{((totalMs(h) / maxTotal) * 100).toFixed(1)}%">
+                        {@render bar(h.timings, 9)}
+                      </div>
+                    </div>
+                    <span class="w-10 shrink-0 text-right text-zinc-600">{ago(h.ts)}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
       {:else}
         <div class="flex flex-col gap-3 text-xs">
           {#if ws.scriptError}

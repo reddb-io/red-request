@@ -41,6 +41,9 @@ class Workspace {
   runResult = $state<RunnerResult | null>(null);
   runError = $state<string | null>(null);
 
+  /** History for the active request (newest first) — powers the Timings panel. */
+  reqHistory = $state<HistoryEntry[]>([]);
+
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
   }
@@ -102,6 +105,7 @@ class Workspace {
     this.response = null;
     this.errorMsg = null;
     this.unresolved = [];
+    void this.refreshReqHistory();
   }
 
   private async buildVariables(): Promise<Record<string, string>> {
@@ -157,6 +161,7 @@ class Workspace {
       this.errorMsg = e instanceof Error ? e.message : String(e);
     } finally {
       this.sending = false;
+      void this.refreshReqHistory();
     }
   }
 
@@ -183,6 +188,7 @@ class Workspace {
       ok: response.ok,
       durationMs: response.durationMs,
       size: response.size,
+      timings: response.timings,
       testsPassed: tests.filter((t) => t.passed).length,
       testsFailed: tests.filter((t) => !t.passed).length,
       env: this.activeEnvName ?? undefined,
@@ -252,6 +258,22 @@ class Workspace {
       this.runError = e instanceof Error ? e.message : String(e);
     } finally {
       this.running = false;
+      void this.refreshReqHistory();
+    }
+  }
+
+  /** Load history for the active request (newest first). */
+  async refreshReqHistory(): Promise<void> {
+    const req = this.activeReq;
+    if (!req || !this.activeColId) {
+      this.reqHistory = [];
+      return;
+    }
+    try {
+      const all = await repo.loadHistory(this.activeColId);
+      this.reqHistory = all.filter((h) => h.reqId === req.id);
+    } catch {
+      /* best-effort */
     }
   }
 

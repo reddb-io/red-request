@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { authConfigSchema } from "./auth.js";
 import { requestDefinitionSchema } from "./request.js";
+import { timingsSchema } from "./response.js";
 
 /**
  * `collection.yaml` at the root of a collection folder. Variables and auth defined here
@@ -74,6 +75,7 @@ export const historyEntrySchema = z.object({
   ok: z.boolean(),
   durationMs: z.number(),
   size: z.number().default(0),
+  timings: timingsSchema.optional(),
   testsPassed: z.number().default(0),
   testsFailed: z.number().default(0),
   env: z.string().optional(),
