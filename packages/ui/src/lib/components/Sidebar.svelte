@@ -34,8 +34,8 @@
     PUT: "text-blue-400",
     PATCH: "text-purple-400",
     DELETE: "text-red-400",
-    HEAD: "text-zinc-400",
-    OPTIONS: "text-zinc-400",
+    HEAD: "text-fg-muted",
+    OPTIONS: "text-fg-muted",
   };
   const kindColor: Record<string, string> = {
     tcp: "text-cyan-400",
@@ -46,8 +46,8 @@
   };
   const badge = (req: LoadedCollection["requests"][number]) =>
     req.kind === "http"
-      ? { label: req.method, color: methodColor[req.method] ?? "text-zinc-400" }
-      : { label: req.kind.toUpperCase(), color: kindColor[req.kind] ?? "text-zinc-400" };
+      ? { label: req.method, color: methodColor[req.method] ?? "text-fg-muted" }
+      : { label: req.kind.toUpperCase(), color: kindColor[req.kind] ?? "text-fg-muted" };
 
   // folder collapse state + inline "new folder" input
   let collapsed = $state(new Set<string>());

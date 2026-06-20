@@ -12,7 +12,7 @@
   let parseError = $state<string | null>(null);
 
   function statusColor(s: number): string {
-    if (s === 0) return "text-zinc-500";
+    if (s === 0) return "text-fg-subtle";
     if (s < 300) return "text-emerald-400";
     if (s < 400) return "text-blue-400";
     if (s < 500) return "text-amber-400";

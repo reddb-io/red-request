@@ -19,8 +19,8 @@
     PUT: "text-blue-400",
     PATCH: "text-purple-400",
     DELETE: "text-red-400",
-    HEAD: "text-zinc-400",
-    OPTIONS: "text-zinc-400",
+    HEAD: "text-fg-muted",
+    OPTIONS: "text-fg-muted",
   };
   type Tab =
     | "params"

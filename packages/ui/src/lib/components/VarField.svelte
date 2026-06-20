@@ -177,7 +177,7 @@
   const frame = $derived(
     flush
       ? "bg-transparent"
-      : "rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] transition focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+      : "rounded-md border border-border bg-[var(--color-bg-2)] transition focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
   );
 </script>
 
@@ -185,7 +185,7 @@
   <div
     bind:this={backdrop}
     aria-hidden="true"
-    class="{shared} pointer-events-none absolute inset-0 overflow-hidden text-zinc-200"
+    class="{shared} pointer-events-none absolute inset-0 overflow-hidden text-fg"
   >{#each segments as s, i (i)}{#if s.kind === "plain"}<span>{s.text}</span
         >{:else}<span
           data-token
@@ -199,7 +199,7 @@
 
   {#if tip}
     <div
-      class="pointer-events-none fixed z-[60] max-w-xs truncate rounded border border-[var(--color-bg-3)] bg-[var(--color-bg-0)] px-2 py-1 text-xs text-zinc-200 shadow-xl"
+      class="pointer-events-none fixed z-[60] max-w-xs truncate rounded border border-border bg-[var(--color-bg-0)] px-2 py-1 text-xs text-fg shadow-xl"
       style="left: {tip.x}px; top: {tip.y}px"
     >
       {tip.text}
@@ -214,7 +214,7 @@
       {rows}
       aria-label={ariaLabel}
       spellcheck="false"
-      class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-zinc-600"
+      class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={refreshMenu}
       onclick={refreshMenu}
@@ -234,7 +234,7 @@
       {placeholder}
       aria-label={ariaLabel}
       spellcheck="false"
-      class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-zinc-600"
+      class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={refreshMenu}
       onclick={refreshMenu}
@@ -251,7 +251,7 @@
 
   {#if showMenu}
     <ul
-      class="absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] py-1 shadow-xl"
+      class="absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto rounded-md border border-border bg-[var(--color-bg-1)] py-1 shadow-xl"
     >
       {#each menuItems as item, i (item)}
         <li>
@@ -263,8 +263,8 @@
             }}
             class="mono flex w-full items-center gap-2 px-2 py-1 text-left text-sm {i ===
             menuIndex
-              ? 'bg-[var(--color-bg-2)] text-zinc-100'
-              : 'text-zinc-400'} hover:bg-[var(--color-bg-2)]"
+              ? 'bg-[var(--color-bg-2)] text-fg-strong'
+              : 'text-fg-muted'} hover:bg-[var(--color-bg-2)]"
           >
             <span class="text-[10px] text-emerald-400">⬩</span>
             <span class="truncate">{item}</span>
