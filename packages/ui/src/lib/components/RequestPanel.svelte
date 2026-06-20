@@ -11,6 +11,15 @@
 
   const methods = httpMethodSchema.options;
   const kinds = requestKindSchema.options;
+  const methodColor: Record<string, string> = {
+    GET: "text-emerald-400",
+    POST: "text-amber-400",
+    PUT: "text-blue-400",
+    PATCH: "text-purple-400",
+    DELETE: "text-red-400",
+    HEAD: "text-zinc-400",
+    OPTIONS: "text-zinc-400",
+  };
   type Tab =
     | "params"
     | "path"
@@ -77,41 +86,73 @@
     </div>
 
     <div class="flex items-center gap-2 px-3 py-2">
-      <select bind:value={ws.activeReq.kind} class="{field} font-bold uppercase">
-        {#each kinds as k (k)}
-          <option value={k}>{k}</option>
-        {/each}
-      </select>
-      {#if ws.activeReq.kind === "http"}
-        <select bind:value={ws.activeReq.method} class="{field} font-bold">
-          {#each methods as m (m)}
-            <option value={m}>{m}</option>
+      <!-- request kind: compact pill with a custom chevron (no native select chrome) -->
+      <div class="relative shrink-0">
+        <select
+          bind:value={ws.activeReq.kind}
+          aria-label="Request type"
+          class="h-8 cursor-pointer appearance-none rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] pr-6 pl-2.5 text-xs font-semibold tracking-wide text-zinc-300 uppercase outline-none hover:bg-[var(--color-bg-3)] focus:ring-1 focus:ring-[var(--color-accent)]"
+        >
+          {#each kinds as k (k)}
+            <option value={k} class="bg-[var(--color-bg-1)] text-zinc-200">{k}</option>
           {/each}
         </select>
-        <input
-          bind:value={ws.activeReq.url}
-          placeholder={"https://{{host}}/users/:id"}
-          class="{field} flex-1"
-        />
+        <span
+          class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[8px] text-zinc-500"
+          >▼</span
+        >
+      </div>
+
+      {#if ws.activeReq.kind === "http"}
+        <!-- method + url joined as one bar, like Insomnia/Postman -->
+        <div
+          class="flex h-8 flex-1 items-center overflow-hidden rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+        >
+          <div class="relative shrink-0">
+            <select
+              bind:value={ws.activeReq.method}
+              aria-label="HTTP method"
+              class="h-8 cursor-pointer appearance-none bg-transparent pr-6 pl-3 text-sm font-bold outline-none {methodColor[
+                ws.activeReq.method
+              ] ?? 'text-zinc-300'}"
+            >
+              {#each methods as m (m)}
+                <option value={m} class="bg-[var(--color-bg-1)] text-zinc-200">{m}</option>
+              {/each}
+            </select>
+            <span
+              class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-[8px] text-zinc-500"
+              >▼</span
+            >
+          </div>
+          <span class="h-4 w-px shrink-0 bg-[var(--color-bg-3)]"></span>
+          <input
+            bind:value={ws.activeReq.url}
+            placeholder={"https://{{host}}/users/:id"}
+            class="mono h-8 flex-1 bg-transparent px-3 text-sm text-zinc-200 outline-none"
+          />
+        </div>
       {:else}
-        <span class="mono flex-1 truncate px-2 text-sm text-zinc-400">
+        <span
+          class="mono flex h-8 flex-1 items-center truncate rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] px-3 text-sm text-zinc-400"
+        >
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
       <button
         onclick={() => ws.send()}
         disabled={ws.sending}
-        class="rounded bg-[var(--color-accent)] px-4 py-1 text-sm font-semibold text-black disabled:opacity-50"
+        class="h-8 shrink-0 rounded-md bg-[var(--color-accent)] px-4 text-sm font-semibold text-black disabled:opacity-50"
         >{ws.sending ? "…" : "Send"}</button
       >
       <button
         onclick={() => ws.save()}
-        class="rounded border border-[var(--color-bg-3)] px-3 py-1 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
+        class="h-8 shrink-0 rounded-md border border-[var(--color-bg-3)] px-3 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
         >Save</button
       >
       <button
         onclick={() => (showRunner = true)}
-        class="rounded border border-[var(--color-bg-3)] px-3 py-1 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
+        class="h-8 shrink-0 rounded-md border border-[var(--color-bg-3)] px-3 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)]"
         title="Run loops: repeat, data-driven, or flow">Run…</button
       >
     </div>
