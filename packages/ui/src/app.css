@@ -79,8 +79,8 @@ button {
 
   /* ---- buttons ---- */
   .btn {
-    @apply inline-flex h-7 cursor-pointer items-center justify-center gap-1.5
-      rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors
+    @apply inline-flex h-6 cursor-pointer items-center justify-center gap-1.5
+      rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors
       select-none disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
@@ -93,16 +93,16 @@ button {
     @apply text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
   }
   .btn-sm {
-    @apply h-6 gap-1 px-2 text-xs;
+    @apply h-5 gap-1 px-2 text-xs;
   }
   .btn-icon {
-    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded
+    @apply inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded
       text-fg-subtle transition-colors hover:text-fg disabled:opacity-50;
   }
 
   /* ---- selectable list row (sidebar requests, env list, …) ---- */
   .row {
-    @apply flex w-full cursor-pointer items-center gap-2 rounded py-1.5 text-left
+    @apply flex w-full cursor-pointer items-center gap-1.5 rounded py-1 text-left
       text-sm text-fg transition-colors hover:bg-[var(--color-bg-2)];
   }
   .row.is-active {
@@ -120,18 +120,18 @@ button {
 
   /* ---- form controls ---- */
   .input {
-    @apply h-7 w-full rounded-md border border-border bg-[var(--color-bg-2)] px-2.5
+    @apply h-6 w-full rounded-md border border-border bg-[var(--color-bg-2)] px-2
       text-sm text-fg outline-none transition-colors placeholder:text-fg-faint
       focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
   }
   .textarea {
-    @apply w-full rounded-md border border-border bg-[var(--color-bg-2)] p-2 text-sm
+    @apply w-full rounded-md border border-border bg-[var(--color-bg-2)] p-1.5 text-sm
       text-fg outline-none placeholder:text-fg-faint focus:border-[var(--color-accent)]
       focus:ring-1 focus:ring-[var(--color-accent)];
   }
   .select {
-    @apply h-7 w-full cursor-pointer appearance-none rounded-md border border-border
-      bg-[var(--color-bg-2)] py-0 pr-7 pl-2.5 text-sm text-fg outline-none transition-colors
+    @apply h-6 w-full cursor-pointer appearance-none rounded-md border border-border
+      bg-[var(--color-bg-2)] py-0 pr-6 pl-2 text-sm text-fg outline-none transition-colors
       focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2371717a' stroke-width='1.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
@@ -141,7 +141,7 @@ button {
 
   /* ---- tabs ---- */
   .tab {
-    @apply cursor-pointer px-2 py-2 text-sm capitalize text-fg-muted transition-colors hover:text-fg;
+    @apply cursor-pointer px-2 py-1.5 text-sm capitalize text-fg-muted transition-colors hover:text-fg;
   }
   .tab.is-active {
     @apply text-[var(--color-accent)];
