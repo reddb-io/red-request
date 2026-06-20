@@ -84,7 +84,7 @@
 </script>
 
 <aside
-  class="flex h-full w-64 shrink-0 flex-col border-r border-[var(--color-bg-3)] bg-[var(--color-bg-1)]"
+  class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-[var(--color-bg-1)]"
 >
   <div class="flex items-center gap-2 px-4 py-3">
     <span
@@ -96,11 +96,11 @@
       {#if ws.project}
         <button
           onclick={() => ws.backToSelector()}
-          class="mono flex items-center gap-1 truncate text-[10px] text-zinc-500 hover:text-zinc-300"
+          class="mono flex items-center gap-1 truncate text-[10px] text-fg-subtle hover:text-fg"
           title="Switch project — {ws.project.db_path}"
         >
           {projectLabel(ws.project)}
-          <span class="text-zinc-600">⇄</span>
+          <span class="text-fg-faint">⇄</span>
         </button>
       {/if}
     </div>
@@ -113,7 +113,7 @@
         class="flex-1 rounded px-2 py-1 text-xs capitalize"
         class:bg-[var(--color-bg-2)]={ws.view === v}
         class:text-[var(--color-accent)]={ws.view === v}
-        class:text-zinc-400={ws.view !== v}>{v}</button
+        class:text-fg-muted={ws.view !== v}>{v}</button
       >
     {/each}
   </div>
@@ -127,15 +127,15 @@
           : 'pl-2'}"
         class:bg-[var(--color-bg-2)]={ws.activeReq?.id === req.id && ws.activeColId === col.id}
       >
-        <span class="mono w-11 shrink-0 text-[11px] font-bold {badge(req).color}"
+        <span class="badge mono w-11 shrink-0 {badge(req).color}"
           >{badge(req).label}</span
         >
-        <span class="truncate text-zinc-300">{req.name}</span>
+        <span class="truncate text-fg">{req.name}</span>
       </button>
       <button
         onclick={() => ws.deleteRequest(req.id)}
         title="Delete request"
-        class="absolute top-1.5 right-1 text-zinc-600 opacity-0 group-hover/req:opacity-100 hover:text-red-400"
+        class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-red-400"
         >✕</button
       >
     </div>
@@ -146,18 +146,18 @@
       {@const g = grouped(col)}
       <div class="mt-2">
         <div class="flex items-center justify-between px-2 py-1">
-          <span class="truncate text-xs font-semibold tracking-wide text-zinc-500 uppercase">
+          <span class="label truncate">
             {col.collection.name}
           </span>
-          <span class="flex shrink-0 gap-1 text-zinc-500">
-            <button onclick={() => ws.addRequest("")} title="New request" class="hover:text-zinc-200">＋</button>
+          <span class="flex shrink-0 gap-1 text-fg-subtle">
+            <button onclick={() => ws.addRequest("")} title="New request" class="hover:text-fg">＋</button>
             <button
               onclick={() => {
                 addingFolderFor = addingFolderFor === col.id ? null : col.id;
                 folderName = "";
               }}
               title="New folder"
-              class="hover:text-zinc-200">🗀</button
+              class="hover:text-fg">🗀</button
             >
           </span>
         </div>
@@ -166,7 +166,7 @@
           <input
             bind:value={folderName}
             placeholder="folder name"
-            class="mono mb-1 ml-2 w-[calc(100%-1rem)] rounded bg-[var(--color-bg-2)] px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+            class="input mono mb-1 ml-2 w-[calc(100%-1rem)]"
             onkeydown={(e) => {
               if (e.key === "Enter") submitFolder(col.id);
               if (e.key === "Escape") addingFolderFor = null;
@@ -183,14 +183,14 @@
           <div class="group/folder relative mt-0.5 flex items-center">
             <button
               onclick={() => toggle(key)}
-              class="flex flex-1 items-center gap-1 rounded px-2 py-1 text-left text-xs text-zinc-300 hover:bg-[var(--color-bg-2)]"
+              class="flex flex-1 items-center gap-1 rounded px-2 py-1 text-left text-xs text-fg hover:bg-[var(--color-bg-2)]"
             >
-              <span class="text-zinc-500">{collapsed.has(key) ? "▸" : "▾"}</span>
+              <span class="text-fg-subtle">{collapsed.has(key) ? "▸" : "▾"}</span>
               <span class="truncate">{f.name}</span>
-              <span class="text-[10px] text-zinc-600">{f.requests.length}</span>
+              <span class="text-[10px] text-fg-faint">{f.requests.length}</span>
             </button>
-            <span class="absolute right-1 flex gap-1 text-zinc-600 opacity-0 group-hover/folder:opacity-100">
-              <button onclick={() => ws.addRequest(f.name)} title="New request here" class="hover:text-zinc-200">＋</button>
+            <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
+              <button onclick={() => ws.addRequest(f.name)} title="New request here" class="hover:text-fg">＋</button>
               <button onclick={() => ws.deleteFolder(f.name)} title="Delete folder (requests move to root)" class="hover:text-red-400">✕</button>
             </span>
           </div>
@@ -199,7 +199,7 @@
               {@render reqRow(col, req, true)}
             {/each}
             {#if f.requests.length === 0}
-              <div class="py-1 pl-6 text-[10px] text-zinc-600">empty</div>
+              <div class="hint py-1 pl-6 text-[10px]">empty</div>
             {/if}
           {/if}
         {/each}
@@ -207,21 +207,21 @@
     {/each}
   </div>
 
-  <div class="border-t border-[var(--color-bg-3)] p-2">
+  <div class="border-t border-border p-2">
     <div class="flex gap-1">
       <button
         onclick={doExport}
-        class="flex-1 rounded border border-[var(--color-bg-3)] px-2 py-1 text-xs text-zinc-300 hover:bg-[var(--color-bg-2)]"
+        class="btn btn-ghost btn-sm flex-1"
         title="Write a git-friendly YAML tree (no secret values)">Export YAML</button
       >
       <button
         onclick={doImport}
-        class="flex-1 rounded border border-[var(--color-bg-3)] px-2 py-1 text-xs text-zinc-300 hover:bg-[var(--color-bg-2)]"
+        class="btn btn-ghost btn-sm flex-1"
         title="Read the YAML tree back into the store">Import</button
       >
     </div>
     {#if status}
-      <div class="mt-1 truncate text-[10px] text-zinc-500" title={status}>{status}</div>
+      <div class="hint mt-1 truncate text-[10px] text-fg-subtle" title={status}>{status}</div>
     {/if}
   </div>
 </aside>

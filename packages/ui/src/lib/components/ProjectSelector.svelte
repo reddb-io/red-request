@@ -66,8 +66,8 @@
         >R</span
       >
       <div class="leading-tight">
-        <h1 class="text-sm font-semibold text-zinc-100">{brand.productName}</h1>
-        <p class="text-[11px] text-zinc-500">Open a project</p>
+        <h1 class="text-sm font-semibold text-fg-strong">{brand.productName}</h1>
+        <p class="text-[11px] text-fg-subtle">Open a project</p>
       </div>
     </div>
 
@@ -75,26 +75,26 @@
       <input
         bind:value={query}
         placeholder="Search projects…"
-        class="mono flex-1 rounded-lg bg-[var(--color-bg-2)] px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+        class="input mono flex-1"
       />
       <button
         onclick={openFolder}
         disabled={busy}
-        class="rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-black disabled:opacity-50"
+        class="btn btn-primary"
         >Open folder…</button
       >
       <button
         onclick={() => choose(null)}
         disabled={busy}
-        class="rounded-lg border border-[var(--color-bg-3)] px-3 py-2 text-sm text-zinc-300 hover:bg-[var(--color-bg-2)] disabled:opacity-50"
+        class="btn btn-ghost"
         title="Use the global store (~/.red/request/app.rdb)">Global</button
       >
     </div>
 
     <div class="mb-1.5 flex items-center justify-between px-1">
-      <span class="text-[10px] tracking-wide text-zinc-500 uppercase">Recent</span>
+      <span class="label text-[10px]">Recent</span>
       {#if recents.length}
-        <span class="text-[10px] text-zinc-600">
+        <span class="hint text-[10px] text-fg-faint">
           {filtered.length}{filtered.length !== recents.length ? `/${recents.length}` : ""}
         </span>
       {/if}
@@ -102,14 +102,14 @@
 
     {#if recents.length === 0}
       <div
-        class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] px-3 py-6 text-center text-xs text-zinc-600"
+        class="panel px-3 py-6 text-center text-xs text-fg-faint"
       >
         No recent projects. Open a folder to start one — its data lives in
         <code class="mono">.red/request/app.rdb</code>.
       </div>
     {:else if filtered.length === 0}
       <div
-        class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] px-3 py-6 text-center text-xs text-zinc-600"
+        class="panel px-3 py-6 text-center text-xs text-fg-faint"
       >
         No projects match “{query}”.
       </div>
@@ -120,14 +120,14 @@
             <button
               onclick={() => choose(r.dir)}
               disabled={busy}
-              class="flex w-full flex-col items-start gap-1 rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3 pr-8 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
+              class="panel flex w-full flex-col items-start gap-1 p-3 pr-8 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
             >
               <span class="flex w-full items-center gap-2">
-                <span class="text-zinc-500 group-hover:text-[var(--color-accent)]">▸</span>
-                <span class="truncate text-sm font-medium text-zinc-100">{r.name}</span>
+                <span class="text-fg-subtle group-hover:text-[var(--color-accent)]">▸</span>
+                <span class="truncate text-sm font-medium text-fg-strong">{r.name}</span>
               </span>
-              <span class="mono w-full truncate text-[10px] text-zinc-600">{r.dir}</span>
-              <span class="flex items-center gap-1.5 text-[10px] text-zinc-600">
+              <span class="mono w-full truncate text-[10px] text-fg-faint">{r.dir}</span>
+              <span class="flex items-center gap-1.5 text-[10px] text-fg-faint">
                 <span>{r.request_count} {r.request_count === 1 ? "request" : "requests"}</span>
                 <span>·</span>
                 <span>{fmtDate(r.last_opened)}</span>
@@ -138,7 +138,7 @@
               title={r.pinned ? "Unpin" : "Pin to top"}
               class="absolute top-2 right-2 text-sm {r.pinned
                 ? 'text-[var(--color-accent)]'
-                : 'text-zinc-600 hover:text-zinc-300'}"
+                : 'text-fg-faint hover:text-fg'}"
             >
               {r.pinned ? "★" : "☆"}
             </button>
@@ -148,7 +148,7 @@
     {/if}
 
     {#if busy}
-      <p class="mt-3 text-center text-xs text-zinc-500">Opening…</p>
+      <p class="mt-3 text-center text-xs text-fg-subtle">Opening…</p>
     {/if}
     </div>
   </div>

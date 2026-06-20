@@ -13,8 +13,6 @@
   }: { kind: RequestKind; net: NetConfig } = $props();
 
   const recordTypes = dnsRecordTypeSchema.options;
-  const field =
-    "mono rounded bg-[var(--color-bg-2)] px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]";
   const hostLabel = $derived(
     kind === "whois" ? "domain" : kind === "dns" ? "name" : "host"
   );
@@ -22,7 +20,7 @@
 
 <div class="flex flex-col gap-3">
   <label class="flex items-center gap-2 text-sm">
-    <span class="w-24 text-zinc-400">{hostLabel}</span>
+    <span class="w-24 text-fg-muted">{hostLabel}</span>
     <div class="flex-1">
       <VarField
         bind:value={net.host}
@@ -37,14 +35,14 @@
 
   {#if kind === "tcp" || kind === "udp" || kind === "ping"}
     <label class="flex items-center gap-2 text-sm">
-      <span class="w-24 text-zinc-400">port</span>
-      <input type="number" min="0" max="65535" bind:value={net.port} class="{field} w-28" />
+      <span class="w-24 text-fg-muted">port</span>
+      <input type="number" min="0" max="65535" bind:value={net.port} class="input w-28" />
     </label>
   {/if}
 
   {#if kind === "tcp" || kind === "udp"}
     <label class="flex items-start gap-2 text-sm">
-      <span class="w-24 pt-1 text-zinc-400">payload</span>
+      <span class="w-24 pt-1 text-fg-muted">payload</span>
       <div class="flex-1">
         <VarField
           bind:value={net.payload}
@@ -61,23 +59,23 @@
 
   {#if kind === "udp"}
     <label class="flex items-center gap-2 text-sm">
-      <span class="w-24 text-zinc-400">wait reply</span>
+      <span class="w-24 text-fg-muted">wait reply</span>
       <input type="checkbox" bind:checked={net.waitResponse} class="accent-[var(--color-accent)]" />
     </label>
   {/if}
 
   {#if kind === "ping"}
     <label class="flex items-center gap-2 text-sm">
-      <span class="w-24 text-zinc-400">count</span>
-      <input type="number" min="1" max="50" bind:value={net.count} class="{field} w-28" />
+      <span class="w-24 text-fg-muted">count</span>
+      <input type="number" min="1" max="50" bind:value={net.count} class="input w-28" />
     </label>
-    <p class="text-xs text-zinc-600">TCP-connect ping (no root needed). Defaults to port 80.</p>
+    <p class="hint">TCP-connect ping (no root needed). Defaults to port 80.</p>
   {/if}
 
   {#if kind === "dns"}
     <label class="flex items-center gap-2 text-sm">
-      <span class="w-24 text-zinc-400">record</span>
-      <select bind:value={net.recordType} class={field}>
+      <span class="w-24 text-fg-muted">record</span>
+      <select bind:value={net.recordType} class="select">
         {#each recordTypes as t (t)}
           <option value={t}>{t}</option>
         {/each}
@@ -87,9 +85,9 @@
 
   {#if kind !== "whois"}
     <label class="flex items-center gap-2 text-sm">
-      <span class="w-24 text-zinc-400">timeout</span>
-      <input type="number" min="100" max="60000" bind:value={net.timeoutMs} class="{field} w-28" />
-      <span class="text-xs text-zinc-600">ms</span>
+      <span class="w-24 text-fg-muted">timeout</span>
+      <input type="number" min="100" max="60000" bind:value={net.timeoutMs} class="input w-28" />
+      <span class="hint">ms</span>
     </label>
   {/if}
 </div>

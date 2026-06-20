@@ -1,6 +1,23 @@
 @import "tailwindcss";
 @import "./lib/brand.generated.css";
 
+/* ============================================================================
+   Design system — semantic tokens + component classes.
+   Brand tokens (accent, bg-0..3) come from brand.generated.css. Everything below
+   is the shared vocabulary; components compose these classes instead of repeating
+   inline utility chains. Layout (flex/grid/gap) stays inline; styling lives here.
+   ============================================================================ */
+@theme {
+  /* foreground / text ramp (was scattered text-zinc-*) */
+  --color-fg: #e4e4e7; /* primary item text   (zinc-200) */
+  --color-fg-strong: #f4f4f5; /* headings            (zinc-100) */
+  --color-fg-muted: #a1a1aa; /* secondary / labels  (zinc-400) */
+  --color-fg-subtle: #71717a; /* tertiary            (zinc-500) */
+  --color-fg-faint: #52525b; /* placeholders/faint  (zinc-600) */
+  /* hairline borders */
+  --color-border: var(--color-bg-3);
+}
+
 /* Base surface defaults (brand tokens come from brand.generated.css @theme). */
 :root {
   color-scheme: dark;
@@ -46,4 +63,80 @@ button {
 ::-webkit-scrollbar-thumb {
   background: var(--color-bg-3, #26262d);
   border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------------------
+   Component classes. Compose with layout utilities at call sites.
+   --------------------------------------------------------------------------- */
+@layer components {
+  /* ---- surfaces ---- */
+  .panel {
+    @apply rounded-lg border border-border bg-[var(--color-bg-1)];
+  }
+  .panel-2 {
+    @apply rounded-md border border-border bg-[var(--color-bg-2)];
+  }
+
+  /* ---- buttons ---- */
+  .btn {
+    @apply inline-flex h-7 cursor-pointer items-center justify-center gap-1.5
+      rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors
+      select-none disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-[var(--color-accent)] text-black hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply border border-border text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
+  }
+  .btn-subtle {
+    @apply text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
+  }
+  .btn-sm {
+    @apply h-6 gap-1 px-2 text-xs;
+  }
+  .btn-icon {
+    @apply inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded
+      text-fg-subtle transition-colors hover:text-fg disabled:opacity-50;
+  }
+
+  /* ---- form controls ---- */
+  .input {
+    @apply h-7 w-full rounded-md border border-border bg-[var(--color-bg-2)] px-2.5
+      text-sm text-fg outline-none transition-colors placeholder:text-fg-faint
+      focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
+  }
+  .textarea {
+    @apply w-full rounded-md border border-border bg-[var(--color-bg-2)] p-2 text-sm
+      text-fg outline-none placeholder:text-fg-faint focus:border-[var(--color-accent)]
+      focus:ring-1 focus:ring-[var(--color-accent)];
+  }
+  .select {
+    @apply h-7 w-full cursor-pointer appearance-none rounded-md border border-border
+      bg-[var(--color-bg-2)] py-0 pr-7 pl-2.5 text-sm text-fg outline-none transition-colors
+      focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2371717a' stroke-width='1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 0.6rem;
+  }
+
+  /* ---- tabs ---- */
+  .tab {
+    @apply cursor-pointer px-2 py-2 text-sm capitalize text-fg-muted transition-colors hover:text-fg;
+  }
+  .tab.is-active {
+    @apply text-[var(--color-accent)];
+  }
+
+  /* ---- typography + badges ---- */
+  .label {
+    @apply text-[11px] font-semibold tracking-wide text-fg-subtle uppercase;
+  }
+  .hint {
+    @apply text-xs text-fg-faint;
+  }
+  .badge {
+    @apply rounded px-1.5 py-0.5 text-[10px] font-semibold;
+  }
 }

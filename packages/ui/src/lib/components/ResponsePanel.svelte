@@ -103,19 +103,19 @@
   {/if}
 
   {#if !r}
-    <div class="grid flex-1 place-items-center text-sm text-zinc-600">
+    <div class="grid flex-1 place-items-center text-sm text-fg-faint">
       Send a request to see the response.
     </div>
   {:else}
     <div
-      class="flex items-center gap-4 border-b border-[var(--color-bg-3)] px-4 py-2 text-sm"
+      class="flex items-center gap-4 border-b border-border px-4 py-2 text-sm"
     >
       <span class="mono font-bold {statusColor(r.status)}">
         {r.status || "—"}
         {r.statusText}
       </span>
-      <span class="text-zinc-500">{r.durationMs} ms</span>
-      <span class="text-zinc-500">{fmtSize(r.size)}</span>
+      <span class="text-fg-subtle">{r.durationMs} ms</span>
+      <span class="text-fg-subtle">{fmtSize(r.size)}</span>
       {#if r.error}
         <span class="text-red-400">{r.error.message}</span>
       {/if}
@@ -126,21 +126,19 @@
       {/if}
     </div>
 
-    <div class="flex gap-1 border-b border-[var(--color-bg-3)] px-3 py-1 text-sm">
+    <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
       {#each ["body", "headers", "timings"] as const as t (t)}
         <button
           onclick={() => (tab = t)}
-          class="rounded px-2 py-1 capitalize"
-          class:text-[var(--color-accent)]={tab === t}
-          class:text-zinc-400={tab !== t}>{t}</button
+          class="tab"
+          class:is-active={tab === t}>{t}</button
         >
       {/each}
       {#if hasScripts}
         <button
           onclick={() => (tab = "tests")}
-          class="rounded px-2 py-1 capitalize"
-          class:text-[var(--color-accent)]={tab === "tests"}
-          class:text-zinc-400={tab !== "tests"}
+          class="tab"
+          class:is-active={tab === "tests"}
         >
           tests
           {#if failed}<span class="ml-1 text-red-400">{failed}✗</span>{:else if ws.tests.length}<span class="ml-1 text-emerald-400">✓</span>{/if}
@@ -151,11 +149,11 @@
     <div class="flex-1 overflow-auto p-3">
       {#if tab === "body"}
         {#if r.meta}
-          <div class="mb-2 flex flex-wrap gap-2 text-[11px] text-zinc-400">
+          <div class="mb-2 flex flex-wrap gap-2 text-[11px] text-fg-muted">
             {#each Object.entries(r.meta) as [k, v] (k)}
               {#if typeof v === "number" || typeof v === "string"}
                 <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5"
-                  ><b class="text-zinc-200"
+                  ><b class="text-fg"
                     >{typeof v === "number" ? Math.round(v * 10) / 10 : v}</b
                   > {k}</span
                 >
@@ -163,14 +161,14 @@
             {/each}
           </div>
         {/if}
-        <pre class="mono text-xs whitespace-pre-wrap text-zinc-200">{prettyBody}</pre>
+        <pre class="mono text-xs whitespace-pre-wrap text-fg">{prettyBody}</pre>
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
           <tbody>
             {#each Object.entries(r.headers) as [k, v] (k)}
               <tr class="border-b border-[var(--color-bg-2)]">
-                <td class="py-1 pr-4 text-zinc-400">{k}</td>
-                <td class="py-1 break-all text-zinc-200">{v}</td>
+                <td class="py-1 pr-4 text-fg-muted">{k}</td>
+                <td class="py-1 break-all text-fg">{v}</td>
               </tr>
             {/each}
           </tbody>
@@ -180,15 +178,15 @@
           <div>
             <div class="mb-1.5 flex items-center gap-3 text-xs">
               {#if avg !== null}
-                <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5 text-zinc-400">
-                  endpoint avg <b class="text-zinc-100">{avg}ms</b>
-                  <span class="text-zinc-600">· {ws.reqHistory.length} runs</span>
+                <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5 text-fg-muted">
+                  endpoint avg <b class="text-fg-strong">{avg}ms</b>
+                  <span class="text-fg-faint">· {ws.reqHistory.length} runs</span>
                 </span>
               {/if}
-              <span class="text-zinc-500">this run {totalMs(r).toFixed(0)}ms</span>
+              <span class="text-fg-subtle">this run {totalMs(r).toFixed(0)}ms</span>
             </div>
             {@render bar(r.timings, 18)}
-            <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-zinc-400">
+            <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-fg-muted">
               {#each segments(r.timings) as s (s.label)}
                 <span class="flex items-center gap-1">
                   <span class="inline-block h-2 w-2 rounded-sm" style="background:{s.color}"></span>
@@ -200,13 +198,13 @@
 
           {#if ws.reqHistory.length > 1}
             <div>
-              <div class="mb-1.5 text-[10px] tracking-wide text-zinc-500 uppercase">
+              <div class="label mb-1.5 text-[10px]">
                 Recent runs
               </div>
               <div class="flex flex-col gap-1">
                 {#each ws.reqHistory.slice(0, 15) as h (h.id)}
                   <div class="flex items-center gap-2 text-[11px]">
-                    <span class="mono w-14 shrink-0 text-zinc-500"
+                    <span class="mono w-14 shrink-0 text-fg-subtle"
                       >{totalMs(h).toFixed(0)}ms</span
                     >
                     <div class="flex-1">
@@ -214,7 +212,7 @@
                         {@render bar(h.timings, 9)}
                       </div>
                     </div>
-                    <span class="w-10 shrink-0 text-right text-zinc-600">{ago(h.ts)}</span>
+                    <span class="w-10 shrink-0 text-right text-fg-faint">{ago(h.ts)}</span>
                   </div>
                 {/each}
               </div>
@@ -235,7 +233,7 @@
                   <span class={t.passed ? "text-emerald-400" : "text-red-400"}>
                     {t.passed ? "✓" : "✗"}
                   </span>
-                  <span class="text-zinc-200">{t.name}</span>
+                  <span class="text-fg">{t.name}</span>
                   {#if !t.passed && t.error}<span class="text-red-400/80">— {t.error}</span>{/if}
                 </div>
               {/each}
@@ -243,12 +241,12 @@
           {/if}
           {#if ws.logs.length}
             <div>
-              <div class="mb-1 text-[10px] tracking-wide text-zinc-500 uppercase">console</div>
-              <pre class="mono whitespace-pre-wrap text-zinc-400">{ws.logs.join("\n")}</pre>
+              <div class="label mb-1 text-[10px]">console</div>
+              <pre class="mono whitespace-pre-wrap text-fg-muted">{ws.logs.join("\n")}</pre>
             </div>
           {/if}
           {#if !ws.tests.length && !ws.logs.length && !ws.scriptError}
-            <p class="text-zinc-600">No script output.</p>
+            <p class="text-fg-faint">No script output.</p>
           {/if}
         </div>
       {/if}

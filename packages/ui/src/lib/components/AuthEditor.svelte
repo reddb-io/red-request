@@ -36,15 +36,12 @@
     const t = (e.target as HTMLSelectElement).value as AuthType;
     auth = structuredClone(defaults[t]);
   }
-
-  const field =
-    "mono w-full rounded bg-[var(--color-bg-2)] px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]";
 </script>
 
 <div class="flex flex-col gap-3">
   <label class="flex items-center gap-2 text-sm">
-    <span class="w-24 text-zinc-400">Type</span>
-    <select value={auth.type} onchange={onType} class={field}>
+    <span class="w-24 text-fg-muted">Type</span>
+    <select value={auth.type} onchange={onType} class="select">
       {#each SELECTABLE_AUTH_TYPES as t (t)}
         <option value={t}>{t}</option>
       {/each}
@@ -59,12 +56,12 @@
   {:else if auth.type === "apiKey"}
     <VarField bind:value={auth.key} known={ws.knownVars} values={ws.varTitles} dense placeholder="header / param name" />
     <VarField bind:value={auth.value} known={ws.knownVars} values={ws.varTitles} dense placeholder={"value (secrets via {{NAME}})"} />
-    <select bind:value={auth.in} class={field}>
+    <select bind:value={auth.in} class="select">
       <option value="header">header</option>
       <option value="query">query</option>
     </select>
   {:else if auth.type === "oauth2"}
-    <select bind:value={auth.grantType} class={field}>
+    <select bind:value={auth.grantType} class="select">
       <option value="client_credentials">client_credentials</option>
       <option value="password">password</option>
       <option value="authorization_code">authorization_code</option>
@@ -78,6 +75,6 @@
     <VarField bind:value={auth.region} known={ws.knownVars} values={ws.varTitles} dense placeholder="region" />
     <VarField bind:value={auth.service} known={ws.knownVars} values={ws.varTitles} dense placeholder="service (e.g. s3)" />
   {:else}
-    <p class="text-sm text-zinc-500">No authentication.</p>
+    <p class="text-sm text-fg-subtle">No authentication.</p>
   {/if}
 </div>

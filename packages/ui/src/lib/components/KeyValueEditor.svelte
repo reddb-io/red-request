@@ -33,14 +33,14 @@
       </div>
       <button
         onclick={() => removeAt(i)}
-        class="px-2 text-zinc-500 hover:text-[var(--color-accent)]"
+        class="btn-icon"
         aria-label="remove">✕</button
       >
     </div>
   {/each}
   <button
     onclick={add}
-    class="mt-1 self-start rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200"
+    class="btn btn-subtle btn-sm mt-1 self-start"
     >+ add</button
   >
 </div>

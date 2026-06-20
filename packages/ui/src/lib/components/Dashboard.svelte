@@ -78,7 +78,7 @@
   }
 
   function statusColor(s: number): string {
-    if (s === 0) return "text-zinc-500";
+    if (s === 0) return "text-fg-subtle";
     if (s < 300) return "text-emerald-400";
     if (s < 400) return "text-blue-400";
     if (s < 500) return "text-amber-400";
@@ -88,55 +88,55 @@
 
 <section class="flex h-full flex-col overflow-auto bg-[var(--color-bg-0)] p-5">
   <div class="mb-4 flex items-center justify-between">
-    <h1 class="text-base font-semibold text-zinc-200">
+    <h1 class="text-base font-semibold text-fg">
       {col?.collection.name ?? "Dashboard"}
     </h1>
     <button
       onclick={load}
-      class="rounded border border-[var(--color-bg-3)] px-2 py-1 text-xs text-zinc-300 hover:bg-[var(--color-bg-2)]"
+      class="btn btn-ghost btn-sm"
       >{loading ? "…" : "Refresh"}</button
     >
   </div>
 
   <!-- Catalog -->
   <div class="mb-5 grid grid-cols-4 gap-3">
-    <div class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3">
-      <div class="text-2xl font-bold text-zinc-100">{catalog.total}</div>
-      <div class="text-xs text-zinc-500">requests</div>
-      <div class="mono mt-2 flex flex-wrap gap-1 text-[10px] text-zinc-400">
+    <div class="panel p-3">
+      <div class="text-2xl font-bold text-fg-strong">{catalog.total}</div>
+      <div class="text-xs text-fg-subtle">requests</div>
+      <div class="mono mt-2 flex flex-wrap gap-1 text-[10px] text-fg-muted">
         {#each Object.entries(catalog.byMethod) as [m, n] (m)}
           <span class="rounded bg-[var(--color-bg-2)] px-1">{m} {n}</span>
         {/each}
       </div>
     </div>
-    <div class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3">
-      <div class="text-2xl font-bold text-zinc-100">{catalog.withAuth}</div>
-      <div class="text-xs text-zinc-500">with auth</div>
+    <div class="panel p-3">
+      <div class="text-2xl font-bold text-fg-strong">{catalog.withAuth}</div>
+      <div class="text-xs text-fg-subtle">with auth</div>
     </div>
-    <div class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3">
-      <div class="text-2xl font-bold text-zinc-100">{catalog.withScripts}</div>
-      <div class="text-xs text-zinc-500">with scripts</div>
+    <div class="panel p-3">
+      <div class="text-2xl font-bold text-fg-strong">{catalog.withScripts}</div>
+      <div class="text-xs text-fg-subtle">with scripts</div>
     </div>
-    <div class="rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3">
-      <div class="text-2xl font-bold text-zinc-100">{catalog.envs}</div>
-      <div class="text-xs text-zinc-500">environments</div>
+    <div class="panel p-3">
+      <div class="text-2xl font-bold text-fg-strong">{catalog.envs}</div>
+      <div class="text-xs text-fg-subtle">environments</div>
     </div>
   </div>
 
   <!-- Tests aggregate -->
-  <div class="mb-5 flex gap-4 rounded-lg border border-[var(--color-bg-3)] bg-[var(--color-bg-1)] p-3 text-sm">
-    <span class="text-zinc-400">{totals.runs} runs recorded</span>
+  <div class="panel mb-5 flex gap-4 p-3 text-sm">
+    <span class="text-fg-muted">{totals.runs} runs recorded</span>
     <span class="text-emerald-400">{totals.passed} tests passed</span>
-    <span class={totals.failed ? "text-red-400" : "text-zinc-500"}>{totals.failed} failed</span>
+    <span class={totals.failed ? "text-red-400" : "text-fg-subtle"}>{totals.failed} failed</span>
   </div>
 
   <!-- Per-request history + latency -->
-  <h2 class="mb-2 text-xs font-semibold tracking-wide text-zinc-400 uppercase">
+  <h2 class="label mb-2">
     History &amp; latency
   </h2>
   <table class="w-full text-sm">
-    <thead class="text-left text-[11px] text-zinc-500">
-      <tr class="border-b border-[var(--color-bg-3)]">
+    <thead class="text-left text-[11px] text-fg-subtle">
+      <tr class="border-b border-border">
         <th class="py-1 pr-3 font-medium">Request</th>
         <th class="py-1 pr-3 font-medium">Runs</th>
         <th class="py-1 pr-3 font-medium">OK%</th>
@@ -149,15 +149,15 @@
       {#each perReq as p (p.req.id)}
         <tr class="border-b border-[var(--color-bg-2)]">
           <td class="py-1.5 pr-3">
-            <span class="mono text-[11px] text-zinc-500">{p.req.method}</span>
-            <span class="text-zinc-200">{p.req.name}</span>
+            <span class="mono text-[11px] text-fg-subtle">{p.req.method}</span>
+            <span class="text-fg">{p.req.name}</span>
           </td>
-          <td class="py-1.5 pr-3 text-zinc-300">{p.runs}</td>
-          <td class="py-1.5 pr-3 {p.okRate === 100 ? 'text-emerald-400' : p.okRate === null ? 'text-zinc-600' : 'text-amber-400'}">
+          <td class="py-1.5 pr-3 text-fg">{p.runs}</td>
+          <td class="py-1.5 pr-3 {p.okRate === 100 ? 'text-emerald-400' : p.okRate === null ? 'text-fg-faint' : 'text-amber-400'}">
             {p.okRate === null ? "—" : `${p.okRate}%`}
           </td>
-          <td class="mono py-1.5 pr-3 text-zinc-400">{p.runs ? `${p.avgMs}ms` : "—"}</td>
-          <td class="mono py-1.5 pr-3 {p.last ? statusColor(p.last.status) : 'text-zinc-600'}">
+          <td class="mono py-1.5 pr-3 text-fg-muted">{p.runs ? `${p.avgMs}ms` : "—"}</td>
+          <td class="mono py-1.5 pr-3 {p.last ? statusColor(p.last.status) : 'text-fg-faint'}">
             {p.last ? p.last.status : "—"}
           </td>
           <td class="py-1.5">
@@ -171,7 +171,7 @@
                 />
               </svg>
             {:else}
-              <span class="text-[10px] text-zinc-600">—</span>
+              <span class="text-[10px] text-fg-faint">—</span>
             {/if}
           </td>
         </tr>
@@ -179,6 +179,6 @@
     </tbody>
   </table>
   {#if perReq.every((p) => p.runs === 0)}
-    <p class="mt-3 text-xs text-zinc-600">No runs yet — send some requests to populate the dashboard.</p>
+    <p class="hint mt-3">No runs yet — send some requests to populate the dashboard.</p>
   {/if}
 </section>
