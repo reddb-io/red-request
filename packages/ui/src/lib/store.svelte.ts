@@ -63,6 +63,19 @@ class Workspace {
     return this.environments.find((e) => e.name === this.activeEnvName) ?? null;
   }
 
+  /** Variable names resolvable in the current scope (collection + env + secrets). */
+  get knownVars(): string[] {
+    const col = this.activeCollection;
+    if (!col) return [];
+    const names = new Set<string>(Object.keys(col.collection.vars));
+    const env = this.activeEnv;
+    if (env) {
+      for (const k of Object.keys(env.vars)) names.add(k);
+      for (const k of Object.keys(env.secrets)) names.add(k);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }
+
   async init(): Promise<void> {
     if (!isTauri) {
       this.bridgeMissing = true;

@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { Kv } from "@red-request/core";
+  import { ws } from "../store.svelte";
+  import VarField from "./VarField.svelte";
 
   let { items = $bindable(), placeholder = "name" }: {
     items: Kv[];
@@ -23,16 +25,12 @@
         class="accent-[var(--color-accent)]"
         aria-label="enabled"
       />
-      <input
-        bind:value={item.name}
-        {placeholder}
-        class="mono flex-1 rounded bg-[var(--color-bg-2)] px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-      />
-      <input
-        bind:value={item.value}
-        placeholder="value"
-        class="mono flex-1 rounded bg-[var(--color-bg-2)] px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-      />
+      <div class="flex-1">
+        <VarField bind:value={item.name} known={ws.knownVars} dense {placeholder} />
+      </div>
+      <div class="flex-1">
+        <VarField bind:value={item.value} known={ws.knownVars} dense placeholder="value" />
+      </div>
       <button
         onclick={() => removeAt(i)}
         class="px-2 text-zinc-500 hover:text-[var(--color-accent)]"

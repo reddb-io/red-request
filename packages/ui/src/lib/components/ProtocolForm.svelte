@@ -4,6 +4,8 @@
     type NetConfig,
     type RequestKind,
   } from "@red-request/core";
+  import { ws } from "../store.svelte";
+  import VarField from "./VarField.svelte";
 
   let {
     kind,
@@ -21,11 +23,15 @@
 <div class="flex flex-col gap-3">
   <label class="flex items-center gap-2 text-sm">
     <span class="w-24 text-zinc-400">{hostLabel}</span>
-    <input
-      bind:value={net.host}
-      placeholder={kind === "whois" || kind === "dns" ? "example.com" : "{{host}}"}
-      class="{field} flex-1"
-    />
+    <div class="flex-1">
+      <VarField
+        bind:value={net.host}
+        known={ws.knownVars}
+        dense
+        ariaLabel={hostLabel}
+        placeholder={kind === "whois" || kind === "dns" ? "example.com" : "{{host}}"}
+      />
+    </div>
   </label>
 
   {#if kind === "tcp" || kind === "udp" || kind === "ping"}
@@ -38,7 +44,16 @@
   {#if kind === "tcp" || kind === "udp"}
     <label class="flex items-start gap-2 text-sm">
       <span class="w-24 pt-1 text-zinc-400">payload</span>
-      <textarea bind:value={net.payload} rows="3" placeholder="bytes to send (optional)" class="{field} flex-1"></textarea>
+      <div class="flex-1">
+        <VarField
+          bind:value={net.payload}
+          known={ws.knownVars}
+          multiline
+          rows={3}
+          ariaLabel="payload"
+          placeholder="bytes to send (optional)"
+        />
+      </div>
     </label>
   {/if}
 

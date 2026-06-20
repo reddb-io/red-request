@@ -6,6 +6,7 @@
   import EnvBar from "./EnvBar.svelte";
   import RunnerPanel from "./RunnerPanel.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
+  import VarField from "./VarField.svelte";
 
   let showRunner = $state(false);
 
@@ -106,7 +107,7 @@
       {#if ws.activeReq.kind === "http"}
         <!-- method + url joined as one bar, like Insomnia/Postman -->
         <div
-          class="flex h-8 flex-1 items-center overflow-hidden rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+          class="flex h-8 flex-1 items-center rounded-md border border-[var(--color-bg-3)] bg-[var(--color-bg-2)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
         >
           <div class="relative shrink-0">
             <select
@@ -126,11 +127,15 @@
             >
           </div>
           <span class="h-4 w-px shrink-0 bg-[var(--color-bg-3)]"></span>
-          <input
-            bind:value={ws.activeReq.url}
-            placeholder={"https://{{host}}/users/:id"}
-            class="mono h-8 flex-1 bg-transparent px-3 text-sm text-zinc-200 outline-none"
-          />
+          <div class="min-w-0 flex-1">
+            <VarField
+              bind:value={ws.activeReq.url}
+              known={ws.knownVars}
+              flush
+              ariaLabel="URL"
+              placeholder={"https://{{host}}/users/:id"}
+            />
+          </div>
         </div>
       {:else}
         <span
@@ -224,12 +229,14 @@
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
           {:else if ws.activeReq.body.type !== "none"}
-            <textarea
+            <VarField
               bind:value={ws.activeReq.body.content}
-              rows="12"
+              known={ws.knownVars}
+              multiline
+              rows={12}
+              ariaLabel="Request body"
               placeholder={"request body (vars via {{NAME}})"}
-              class={area}
-            ></textarea>
+            />
           {/if}
         </div>
       {/if}
