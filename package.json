@@ -15,6 +15,7 @@
     "desktop:build": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
     "engine:build": "node scripts/build-engine.mjs",
     "reddb:sync": "node scripts/sync-reddb.mjs",
+    "reddb:migration-demo": "node scripts/reddb-migration-demo.mjs",
     "brand:sync": "node scripts/sync-brand.mjs",
     "build": "pnpm -r build",
     "check": "pnpm -r check",
