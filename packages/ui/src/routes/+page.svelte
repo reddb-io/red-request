@@ -17,10 +17,14 @@
   });
 
   function onKey(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-      if (ws.screen !== "app") return;
+    if (ws.screen !== "app") return;
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key.toLowerCase() === "k") {
       e.preventDefault();
       cmdOpen = !cmdOpen;
+    } else if (mod && e.key === "Enter" && ws.activeReq && !ws.sending) {
+      e.preventDefault();
+      void ws.send();
     }
   }
 </script>

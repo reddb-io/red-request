@@ -142,6 +142,7 @@
       <button
         onclick={() => ws.send()}
         disabled={ws.sending}
+        title="Send (⌘↵ / Ctrl+↵)"
         class="btn btn-primary shrink-0"
         >{ws.sending ? "…" : "Send"}</button
       >
