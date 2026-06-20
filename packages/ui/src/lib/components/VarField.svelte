@@ -251,7 +251,7 @@
 
   {#if showMenu}
     <ul
-      class="absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto rounded-md border border-border bg-[var(--color-bg-1)] py-1 shadow-xl"
+      class="panel absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto py-1 shadow-xl"
     >
       {#each menuItems as item, i (item)}
         <li>
