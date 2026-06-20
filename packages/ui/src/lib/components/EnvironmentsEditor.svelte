@@ -2,6 +2,7 @@
   import type { Kv, StoredEnvironment } from "@red-request/core";
   import { ws } from "../store.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
+  import Modal from "./ui/Modal.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -77,14 +78,7 @@
   }
 </script>
 
-<div
-  class="fixed inset-0 z-50 grid place-items-center bg-black/60"
-  onclick={(e) => e.target === e.currentTarget && onClose()}
-  role="presentation"
->
-  <div
-    class="flex h-[80vh] w-[860px] overflow-hidden rounded-xl border border-border bg-[var(--color-bg-1)] shadow-2xl"
-  >
+<Modal {onClose} class="flex h-[80vh] w-[860px] rounded-xl">
     <!-- env list -->
     <div class="flex w-56 shrink-0 flex-col border-r border-border">
       <div class="label px-3 py-2">
@@ -192,5 +186,4 @@
         </div>
       {/if}
     </div>
-  </div>
-</div>
+</Modal>

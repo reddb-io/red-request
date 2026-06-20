@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
+  import Tooltip from "./ui/Tooltip.svelte";
   import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
@@ -150,15 +151,23 @@
             {col.collection.name}
           </span>
           <span class="flex shrink-0 gap-1 text-fg-subtle">
-            <button onclick={() => ws.addRequest("")} title="New request" class="hover:text-fg">＋</button>
-            <button
-              onclick={() => {
-                addingFolderFor = addingFolderFor === col.id ? null : col.id;
-                folderName = "";
-              }}
-              title="New folder"
-              class="hover:text-fg">🗀</button
-            >
+            <Tooltip text="New request">
+              {#snippet children(p)}
+                <button {...p} onclick={() => ws.addRequest("")} class="hover:text-fg">＋</button>
+              {/snippet}
+            </Tooltip>
+            <Tooltip text="New folder">
+              {#snippet children(p)}
+                <button
+                  {...p}
+                  onclick={() => {
+                    addingFolderFor = addingFolderFor === col.id ? null : col.id;
+                    folderName = "";
+                  }}
+                  class="hover:text-fg">🗀</button
+                >
+              {/snippet}
+            </Tooltip>
           </span>
         </div>
 

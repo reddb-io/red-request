@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
+  import Modal from "./ui/Modal.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -38,18 +39,11 @@
   }
 </script>
 
-<div
-  class="fixed inset-0 z-50 grid place-items-center bg-black/60"
-  onclick={(e) => e.target === e.currentTarget && onClose()}
-  role="presentation"
->
-  <div
-    class="flex h-[80vh] w-[760px] flex-col overflow-hidden rounded-xl border border-border bg-[var(--color-bg-1)] shadow-2xl"
-  >
-    <div class="flex items-center justify-between border-b border-border px-4 py-2">
-      <h2 class="text-sm font-semibold text-fg">Run</h2>
-      <button onclick={onClose} class="text-fg-subtle hover:text-fg">✕</button>
-    </div>
+<Modal {onClose} class="flex h-[80vh] w-[760px] flex-col rounded-xl">
+  <div class="flex items-center justify-between border-b border-border px-4 py-2">
+    <h2 class="text-sm font-semibold text-fg">Run</h2>
+    <button onclick={onClose} class="btn-icon" aria-label="close">✕</button>
+  </div>
 
     <div class="flex gap-1 border-b border-border px-3 text-sm">
       {#each ["repeat", "data", "flow"] as const as m (m)}
@@ -135,5 +129,4 @@
         <p class="text-sm text-fg-faint">Configure a mode and press Run.</p>
       {/if}
     </div>
-  </div>
-</div>
+</Modal>
