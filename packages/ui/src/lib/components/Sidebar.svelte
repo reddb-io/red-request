@@ -150,12 +150,8 @@
 
   <div class="flex gap-1 px-2 pb-2">
     {#each ["requests", "dashboard"] as const as v (v)}
-      <button
-        onclick={() => (ws.view = v)}
-        class="flex-1 rounded px-2 py-1 text-xs capitalize"
-        class:bg-[var(--color-bg-2)]={ws.view === v}
-        class:text-[var(--color-accent)]={ws.view === v}
-        class:text-fg-muted={ws.view !== v}>{v}</button
+      <button onclick={() => (ws.view = v)} class="seg" class:is-active={ws.view === v}
+        >{v}</button
       >
     {/each}
   </div>
@@ -174,10 +170,8 @@
     >
       <button
         onclick={() => ws.selectRequest(col.id, req.id)}
-        class="flex w-full items-center gap-2 rounded py-1.5 pr-6 text-left text-sm hover:bg-[var(--color-bg-2)] {indent
-          ? 'pl-6'
-          : 'pl-2'}"
-        class:bg-[var(--color-bg-2)]={ws.activeReq?.id === req.id && ws.activeColId === col.id}
+        class="row pr-6 {indent ? 'pl-6' : 'pl-2'}"
+        class:is-active={ws.activeReq?.id === req.id && ws.activeColId === col.id}
       >
         <span class="badge mono w-11 shrink-0 {badge(req).color}"
           >{badge(req).label}</span
@@ -343,7 +337,7 @@
           >
             <button
               onclick={() => toggle(key)}
-              class="flex flex-1 items-center gap-1 rounded px-2 py-1 text-left text-xs text-fg hover:bg-[var(--color-bg-2)]"
+              class="row flex-1 gap-1 px-2 py-1 text-xs"
             >
               <span class="text-fg-subtle">{collapsed.has(key) ? "▸" : "▾"}</span>
               <span class="truncate">{f.name}</span>

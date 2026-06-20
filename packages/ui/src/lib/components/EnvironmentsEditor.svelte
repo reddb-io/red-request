@@ -88,8 +88,8 @@
         {#each ws.environments as env (env.name)}
           <button
             onclick={() => select(env)}
-            class="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-[var(--color-bg-2)]"
-            class:bg-[var(--color-bg-2)]={selected?.name === env.name}
+            class="row justify-between px-2"
+            class:is-active={selected?.name === env.name}
           >
             <span class="truncate text-fg">{env.name}</span>
             <span class="text-[10px] text-fg-subtle"
