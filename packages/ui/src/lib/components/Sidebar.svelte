@@ -82,6 +82,15 @@
     renamingColId = null;
   }
 
+  // drag-and-drop requests between folders (within the active collection)
+  let draggingId = $state<string | null>(null);
+  let dropKey = $state<string | null>(null);
+  function dropInto(colId: string, folder: string) {
+    if (draggingId && ws.activeColId === colId) void ws.moveRequest(draggingId, folder);
+    draggingId = null;
+    dropKey = null;
+  }
+
   function toggle(key: string) {
     if (collapsed.has(key)) collapsed.delete(key);
     else collapsed.add(key);
@@ -152,7 +161,17 @@
   </div>
 
   {#snippet reqRow(col: LoadedCollection, req: LoadedCollection["requests"][number], indent: boolean)}
-    <div class="group/req relative">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="group/req relative"
+      class:opacity-40={draggingId === req.id}
+      draggable="true"
+      ondragstart={() => (draggingId = req.id)}
+      ondragend={() => {
+        draggingId = null;
+        dropKey = null;
+      }}
+    >
       <button
         onclick={() => ws.selectRequest(col.id, req.id)}
         class="flex w-full items-center gap-2 rounded py-1.5 pr-6 text-left text-sm hover:bg-[var(--color-bg-2)] {indent
@@ -217,7 +236,22 @@
     {#each ws.collections as col (col.id)}
       {@const g = grouped(col)}
       <div class="mt-2">
-        <div class="group/col flex items-center justify-between px-2 py-1">
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="group/col flex items-center justify-between rounded px-2 py-1"
+          class:ring-1={dropKey === `${col.id}::root`}
+          class:ring-[var(--color-accent)]={dropKey === `${col.id}::root`}
+          ondragover={(e) => {
+            if (!draggingId) return;
+            e.preventDefault();
+            dropKey = `${col.id}::root`;
+          }}
+          ondragleave={() => (dropKey = null)}
+          ondrop={(e) => {
+            e.preventDefault();
+            dropInto(col.id, "");
+          }}
+        >
           {#if renamingColId === col.id}
             <!-- svelte-ignore a11y_autofocus -->
             <input
@@ -291,7 +325,22 @@
 
         {#each g.folders as f (f.name)}
           {@const key = `${col.id}::${f.name}`}
-          <div class="group/folder relative mt-0.5 flex items-center">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="group/folder relative mt-0.5 flex items-center rounded"
+            class:ring-1={dropKey === key}
+            class:ring-[var(--color-accent)]={dropKey === key}
+            ondragover={(e) => {
+              if (!draggingId) return;
+              e.preventDefault();
+              dropKey = key;
+            }}
+            ondragleave={() => (dropKey = null)}
+            ondrop={(e) => {
+              e.preventDefault();
+              dropInto(col.id, f.name);
+            }}
+          >
             <button
               onclick={() => toggle(key)}
               class="flex flex-1 items-center gap-1 rounded px-2 py-1 text-left text-xs text-fg hover:bg-[var(--color-bg-2)]"
