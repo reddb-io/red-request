@@ -166,9 +166,9 @@
     }
   }
 
-  const pad = $derived(dense ? "px-2" : "px-3");
+  const pad = $derived(dense ? "px-2" : "px-2.5");
   const metrics = $derived(
-    multiline ? "py-1.5 leading-5" : dense ? "h-7 leading-7" : "h-8 leading-8"
+    multiline ? "py-1.5 leading-5" : dense ? "h-6 leading-6" : "h-7 leading-7"
   );
   const wrap = $derived(
     multiline ? "whitespace-pre-wrap break-words" : "whitespace-pre"

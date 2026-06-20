@@ -108,7 +108,7 @@
       {#if ws.activeReq.kind === "http"}
         <!-- method + url joined as one bar, like Insomnia/Postman -->
         <div
-          class="flex h-8 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+          class="flex h-7 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
         >
           <!-- method stays borderless/transparent to preserve the joined-bar look -->
           <Select
@@ -116,7 +116,7 @@
             items={methods.map((m) => ({ value: m, label: m, class: methodColor[m] }))}
             bare
             ariaLabel="HTTP method"
-            class="h-8 px-3 text-sm font-bold"
+            class="h-7 px-2.5 text-sm font-bold"
           />
           <span class="h-4 w-px shrink-0 bg-[var(--color-bg-3)]"></span>
           <div class="min-w-0 flex-1">
@@ -134,7 +134,7 @@
         </div>
       {:else}
         <span
-          class="mono flex h-8 flex-1 items-center truncate rounded-md border border-border bg-[var(--color-bg-2)] px-3 text-sm text-fg-muted"
+          class="mono flex h-7 flex-1 items-center truncate rounded-md border border-border bg-[var(--color-bg-2)] px-2.5 text-sm text-fg-muted"
         >
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
