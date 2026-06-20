@@ -2,6 +2,9 @@
   import { ws } from "../store.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
   import Menu from "./ui/Menu.svelte";
+  import ImportModal from "./ui/ImportModal.svelte";
+
+  let showImport = $state(false);
   import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
@@ -253,6 +256,7 @@
             <Menu
               items={[
                 { label: "Rename", onSelect: () => startRenameCol(col) },
+                { label: "Import cURL…", onSelect: () => (showImport = true) },
                 {
                   label: "Delete collection",
                   onSelect: () => ws.deleteCollection(col.id),
@@ -340,3 +344,7 @@
     {/if}
   </div>
 </aside>
+
+{#if showImport}
+  <ImportModal onClose={() => (showImport = false)} />
+{/if}

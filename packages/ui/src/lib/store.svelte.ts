@@ -2,6 +2,7 @@ import {
   mergeScopes,
   storedEnvironmentSchema,
   newRequest,
+  curlToRequest,
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
@@ -425,6 +426,20 @@ class Workspace {
       folder,
       url: "https://",
     };
+    await repo.saveRequest(this.activeColId, req);
+    col.requests.push(req);
+    col.collection.order.push(id);
+    this.selectRequest(this.activeColId, id);
+  }
+
+  /** Import a curl command as a new request and select it. */
+  async importCurl(text: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId || !text.trim()) return;
+    const id = `req-${Date.now().toString(36)}-${Math.floor(
+      Math.random() * 1296
+    ).toString(36)}`;
+    const req = curlToRequest(text, id);
     await repo.saveRequest(this.activeColId, req);
     col.requests.push(req);
     col.collection.order.push(id);
