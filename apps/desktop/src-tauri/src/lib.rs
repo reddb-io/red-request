@@ -593,17 +593,12 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
     }
 }
 
-async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
-    let db_path = std::path::PathBuf::from(
-        app.state::<EmbeddedDb>()
-            .db_path
-            .lock()
-            .map_err(|e| e.to_string())?
-            .clone(),
-    );
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+/// Spawn one reddb sidecar for `db_path` and wait until it answers /stats.
+/// On readiness failure the child is killed (so a failed start can't orphan a process).
+async fn spawn_reddb_once(
+    app: &tauri::AppHandle,
+    db_path: &std::path::Path,
+) -> Result<(String, CommandChild), String> {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
@@ -649,7 +644,59 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
             }
         }
     });
-    reddb_wait_ready(&bind).await?;
+    if let Err(e) = reddb_wait_ready(&bind).await {
+        let _ = child.kill();
+        return Err(e);
+    }
+    Ok((bind, child))
+}
+
+async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
+    let db_path = std::path::PathBuf::from(
+        app.state::<EmbeddedDb>()
+            .db_path
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone(),
+    );
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let (bind, child) = match spawn_reddb_once(&app, &db_path).await {
+        Ok(pair) => pair,
+        Err(e) => {
+            // reddb couldn't open the file. A non-empty existing file is almost certainly an
+            // older on-disk format (RedDB file format is not backward-compatible across major
+            // versions) — back it up next to itself and start fresh rather than leaving the
+            // app permanently broken. An empty/missing file means a real error: propagate it.
+            let nonempty = std::fs::metadata(&db_path)
+                .map(|m| m.len() > 0)
+                .unwrap_or(false);
+            if !nonempty {
+                return Err(e);
+            }
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let bak = db_path.with_file_name(format!(
+                "{}.incompatible-{stamp}.bak",
+                db_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "app.rdb".to_string())
+            ));
+            std::fs::rename(&db_path, &bak).map_err(|re| {
+                format!("reddb could not open the database ({e}) and backup failed: {re}")
+            })?;
+            eprintln!(
+                "[reddb] could not open {db_path:?} ({e}); backed it up to {bak:?} and started fresh"
+            );
+            spawn_reddb_once(&app, &db_path).await?
+        }
+    };
+
     let state = app.state::<EmbeddedDb>();
     *state.url.lock().map_err(|e| e.to_string())? = Some(format!("http://{bind}"));
     *state.child.lock().map_err(|e| e.to_string())? = Some(child);
