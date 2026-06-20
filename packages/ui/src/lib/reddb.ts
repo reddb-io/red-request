@@ -64,29 +64,32 @@ export async function kvDelete(collection: string, key: string): Promise<void> {
   await request("DELETE", `/collections/${collection}/kvs/${key}`);
 }
 
-interface QueryRow {
-  values?: { key?: string; value?: string };
+interface ScanItem {
+  data?: { named?: { key?: string; value?: string } };
 }
 
 /**
- * List every entry of a KV collection. We use the SQL `/query` endpoint rather than
- * `/collections/{c}/scan` because scan is unreliable in reddb 0.1.5 (returns [] even
- * when rows exist); `SELECT key, value` returns them correctly.
+ * List every entry of a KV collection via the KV-native `/scan` endpoint.
+ *
+ * We deliberately do NOT use `POST /query {SELECT key,value}`: in reddb 1.11.0 a SQL SELECT
+ * declares the collection's model as `table`, after which KV writes are rejected with
+ * `INVALID_OPERATION: collection is declared as 'table' and does not allow 'kv' operations`.
+ * `/scan` returns the same rows (`items[].data.named.{key,value}`) and keeps the model `kv`.
+ * (In 0.1.5 `/scan` was broken — fixed in 1.11.0, the version we now bundle.)
  */
 export async function kvList<T>(
   collection: string
 ): Promise<Array<{ key: string; value: T }>> {
-  const r = await request("POST", "/query", {
-    query: `SELECT key, value FROM ${collection}`,
-  });
+  const r = await request("GET", `/collections/${collection}/scan`);
   if (r.status >= 300) return [];
-  const j = JSON.parse(r.body) as { result?: { records?: QueryRow[] } };
+  const j = JSON.parse(r.body) as { items?: ScanItem[] };
   const out: Array<{ key: string; value: T }> = [];
-  for (const rec of j.result?.records ?? []) {
-    const v = rec.values;
-    if (v?.key == null || v.value == null) continue;
+  for (const it of j.items ?? []) {
+    const k = it.data?.named?.key;
+    const v = it.data?.named?.value;
+    if (k == null || v == null) continue;
     try {
-      out.push({ key: v.key, value: JSON.parse(v.value) as T });
+      out.push({ key: k, value: JSON.parse(v) as T });
     } catch {
       /* skip malformed */
     }
