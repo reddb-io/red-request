@@ -1,6 +1,6 @@
 // Minimal RedDB KV client. All HTTP is proxied through the Rust `reddb_request` command
 // (reqwest) — the webview's native fetch to http://127.0.0.1 is blocked as mixed content,
-// and Rust gives us correct request framing for reddb 0.1.5. Values are JSON strings.
+// and Rust gives us correct request framing for the embedded reddb. Values are JSON strings.
 import { invoke } from "@tauri-apps/api/core";
 
 interface HttpReply {
@@ -31,9 +31,40 @@ async function request(
   throw new Error("embedded RedDB did not become ready");
 }
 
-/** Create a KV collection (idempotent — a 400 CollectionExists is fine). */
+/** Read a collection's declared model (`kv`/`table`/`mixed`/…), or null if it doesn't exist. */
+async function collectionModel(name: string): Promise<string | null> {
+  // Query the system table (always `table` model, so this SELECT can't mis-declare anything).
+  const r = await request("POST", "/query", {
+    query: `SELECT model FROM red.collections WHERE name = '${name}'`,
+  });
+  if (r.status >= 300) return null;
+  try {
+    const j = JSON.parse(r.body) as {
+      result?: { records?: Array<{ values?: { model?: string } }> };
+    };
+    return j.result?.records?.[0]?.values?.model ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ensure `name` is usable as a KV collection.
+ *
+ * In reddb 1.11.0 a collection's model is fixed by first use: the first `PUT …/kvs/{key}`
+ * auto-creates it as model `kv` (exactly what we want), so we deliberately do NOT pre-create
+ * it — a bare `POST /collections` only yields a transient `mixed` model and can't set `kv`.
+ * The hazard is a store written by an OLDER build, whose `kvList` used `SELECT` and thus
+ * locked these collections to model `table`, which now rejects KV writes with
+ * `INVALID_OPERATION`. `POST` is idempotent and won't change an existing model, so we heal:
+ * if the collection already exists with a non-`kv` model, drop it (its rows are already
+ * invisible to our `/scan` reader) and let the first `kvPut` recreate it as `kv`.
+ */
 export async function ensureKvCollection(name: string): Promise<void> {
-  await request("POST", "/collections", { name, kind: "kv" });
+  const model = await collectionModel(name);
+  if (model && model !== "kv") {
+    await request("DELETE", `/collections/${name}`);
+  }
 }
 
 export async function kvPut(
