@@ -224,7 +224,7 @@
           <button
             {...p}
             aria-label="request actions"
-            class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-fg data-[state=open]:opacity-100"
+            class="btn-icon absolute top-1.5 right-1 opacity-0 group-hover/req:opacity-100 data-[state=open]:opacity-100"
             >⋯</button
           >
         {/snippet}
@@ -272,7 +272,7 @@
           <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
               {#snippet children(p)}
-                <button {...p} onclick={() => ws.addRequest("")} class="hover:text-fg">＋</button>
+                <button {...p} onclick={() => ws.addRequest("")} class="btn-icon">＋</button>
               {/snippet}
             </Tooltip>
             <Tooltip text="New folder">
@@ -283,7 +283,7 @@
                     addingFolderFor = addingFolderFor === col.id ? null : col.id;
                     folderName = "";
                   }}
-                  class="hover:text-fg">🗀</button
+                  class="btn-icon">🗀</button
                 >
               {/snippet}
             </Tooltip>
@@ -299,7 +299,7 @@
               ]}
             >
               {#snippet trigger(p)}
-                <button {...p} aria-label="collection actions" class="hover:text-fg"
+                <button {...p} aria-label="collection actions" class="btn-icon"
                   >⋯</button
                 >
               {/snippet}
@@ -352,12 +352,12 @@
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
               <Tooltip text="New request here">
                 {#snippet children(p)}
-                  <button {...p} onclick={() => ws.addRequest(f.name)} class="hover:text-fg">＋</button>
+                  <button {...p} onclick={() => ws.addRequest(f.name)} class="btn-icon">＋</button>
                 {/snippet}
               </Tooltip>
               <Tooltip text="Delete folder (requests move to root)">
                 {#snippet children(p)}
-                  <button {...p} onclick={() => ws.deleteFolder(f.name)} class="hover:text-red-400">✕</button>
+                  <button {...p} onclick={() => ws.deleteFolder(f.name)} class="btn-icon hover:text-red-400">✕</button>
                 {/snippet}
               </Tooltip>
             </span>

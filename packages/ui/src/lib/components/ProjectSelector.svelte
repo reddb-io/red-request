@@ -139,9 +139,9 @@
                 <button
                   {...p}
                   onclick={() => togglePin(r)}
-                  class="absolute top-2 right-2 text-sm {r.pinned
+                  class="btn-icon absolute top-2 right-2 {r.pinned
                     ? 'text-[var(--color-accent)]'
-                    : 'text-fg-faint hover:text-fg'}"
+                    : ''}"
                 >
                   {r.pinned ? "★" : "☆"}
                 </button>

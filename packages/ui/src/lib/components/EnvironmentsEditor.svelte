@@ -108,7 +108,7 @@
           class="input min-w-0 flex-1"
           onkeydown={(e) => e.key === "Enter" && addEnv()}
         />
-        <button onclick={addEnv} class="btn btn-primary px-2">+</button>
+        <button onclick={addEnv} class="btn btn-primary">+</button>
       </div>
     </div>
 
@@ -123,13 +123,13 @@
             class="bg-transparent text-sm font-semibold text-fg-strong outline-none"
           />
           <div class="flex gap-2 text-sm">
-            <button onclick={dupEnv} class="text-fg-muted hover:text-fg">Duplicate</button>
-            <button onclick={delEnv} class="text-fg-muted hover:text-red-400">Delete</button>
+            <button onclick={dupEnv} class="btn btn-ghost btn-sm">Duplicate</button>
+            <button onclick={delEnv} class="btn btn-ghost btn-sm hover:text-red-400">Delete</button>
           </div>
         {:else}
           <span class="text-sm text-fg-subtle">Select or create an environment</span>
         {/if}
-        <button onclick={onClose} class="ml-3 text-fg-subtle hover:text-fg">✕</button>
+        <button onclick={onClose} class="btn-icon ml-3">✕</button>
       </div>
 
       {#if selected}
@@ -158,7 +158,7 @@
                     <span class="text-[11px] text-emerald-500">•••• set</span>
                     <button
                       onclick={() => ws.removeSecret(selected!, name)}
-                      class="text-fg-subtle hover:text-red-400">✕</button
+                      class="btn-icon hover:text-red-400">✕</button
                     >
                   </span>
                 </div>
