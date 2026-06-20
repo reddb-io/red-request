@@ -5,6 +5,7 @@
   import { brand } from "../brand.generated";
   import { recentList, recentPin, type RecentProject } from "../project";
   import StageBackground from "./StageBackground.svelte";
+  import Tooltip from "./ui/Tooltip.svelte";
 
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
@@ -133,15 +134,19 @@
                 <span>{fmtDate(r.last_opened)}</span>
               </span>
             </button>
-            <button
-              onclick={() => togglePin(r)}
-              title={r.pinned ? "Unpin" : "Pin to top"}
-              class="absolute top-2 right-2 text-sm {r.pinned
-                ? 'text-[var(--color-accent)]'
-                : 'text-fg-faint hover:text-fg'}"
-            >
-              {r.pinned ? "★" : "☆"}
-            </button>
+            <Tooltip text={r.pinned ? "Unpin" : "Pin to top"}>
+              {#snippet children(p)}
+                <button
+                  {...p}
+                  onclick={() => togglePin(r)}
+                  class="absolute top-2 right-2 text-sm {r.pinned
+                    ? 'text-[var(--color-accent)]'
+                    : 'text-fg-faint hover:text-fg'}"
+                >
+                  {r.pinned ? "★" : "☆"}
+                </button>
+              {/snippet}
+            </Tooltip>
           </div>
         {/each}
       </div>

@@ -95,14 +95,18 @@
     <div class="flex min-w-0 flex-col leading-tight">
       <span class="text-sm font-semibold">{brand.productName}</span>
       {#if ws.project}
-        <button
-          onclick={() => ws.backToSelector()}
-          class="mono flex items-center gap-1 truncate text-[10px] text-fg-subtle hover:text-fg"
-          title="Switch project — {ws.project.db_path}"
-        >
-          {projectLabel(ws.project)}
-          <span class="text-fg-faint">⇄</span>
-        </button>
+        <Tooltip text="Switch project — {ws.project.db_path}" side="bottom">
+          {#snippet children(p)}
+            <button
+              {...p}
+              onclick={() => ws.backToSelector()}
+              class="mono flex items-center gap-1 truncate text-[10px] text-fg-subtle hover:text-fg"
+            >
+              {projectLabel(ws.project)}
+              <span class="text-fg-faint">⇄</span>
+            </button>
+          {/snippet}
+        </Tooltip>
       {/if}
     </div>
   </div>
@@ -133,12 +137,16 @@
         >
         <span class="truncate text-fg">{req.name}</span>
       </button>
-      <button
-        onclick={() => ws.deleteRequest(req.id)}
-        title="Delete request"
-        class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-red-400"
-        >✕</button
-      >
+      <Tooltip text="Delete request">
+        {#snippet children(p)}
+          <button
+            {...p}
+            onclick={() => ws.deleteRequest(req.id)}
+            class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-red-400"
+            >✕</button
+          >
+        {/snippet}
+      </Tooltip>
     </div>
   {/snippet}
 
@@ -199,8 +207,16 @@
               <span class="text-[10px] text-fg-faint">{f.requests.length}</span>
             </button>
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
-              <button onclick={() => ws.addRequest(f.name)} title="New request here" class="hover:text-fg">＋</button>
-              <button onclick={() => ws.deleteFolder(f.name)} title="Delete folder (requests move to root)" class="hover:text-red-400">✕</button>
+              <Tooltip text="New request here">
+                {#snippet children(p)}
+                  <button {...p} onclick={() => ws.addRequest(f.name)} class="hover:text-fg">＋</button>
+                {/snippet}
+              </Tooltip>
+              <Tooltip text="Delete folder (requests move to root)">
+                {#snippet children(p)}
+                  <button {...p} onclick={() => ws.deleteFolder(f.name)} class="hover:text-red-400">✕</button>
+                {/snippet}
+              </Tooltip>
             </span>
           </div>
           {#if !collapsed.has(key)}
