@@ -407,6 +407,26 @@ class Workspace {
     this.selectRequest(this.activeColId, id);
   }
 
+  /** Duplicate a request (same folder) and select the copy. */
+  async duplicateRequest(reqId: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    const src = col.requests.find((r) => r.id === reqId);
+    if (!src) return;
+    const id = `req-${Date.now().toString(36)}-${Math.floor(
+      Math.random() * 1296
+    ).toString(36)}`;
+    const copy = {
+      ...(structuredClone($state.snapshot(src)) as RequestDefinition),
+      id,
+      name: `${src.name} (copy)`,
+    };
+    await repo.saveRequest(this.activeColId, copy);
+    col.requests.push(copy);
+    col.collection.order.push(id);
+    this.selectRequest(this.activeColId, id);
+  }
+
   async addFolder(name: string): Promise<void> {
     const col = this.activeCollection;
     if (!col || !name.trim()) return;

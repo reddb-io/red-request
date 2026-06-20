@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
+  import Menu from "./ui/Menu.svelte";
   import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
@@ -137,16 +138,25 @@
         >
         <span class="truncate text-fg">{req.name}</span>
       </button>
-      <Tooltip text="Delete request">
-        {#snippet children(p)}
+      <Menu
+        items={[
+          { label: "Duplicate", onSelect: () => ws.duplicateRequest(req.id) },
+          {
+            label: "Delete",
+            onSelect: () => ws.deleteRequest(req.id),
+            destructive: true,
+          },
+        ]}
+      >
+        {#snippet trigger(p)}
           <button
             {...p}
-            onclick={() => ws.deleteRequest(req.id)}
-            class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-red-400"
-            >✕</button
+            aria-label="request actions"
+            class="absolute top-1.5 right-1 text-fg-faint opacity-0 group-hover/req:opacity-100 hover:text-fg data-[state=open]:opacity-100"
+            >⋯</button
           >
         {/snippet}
-      </Tooltip>
+      </Menu>
     </div>
   {/snippet}
 
