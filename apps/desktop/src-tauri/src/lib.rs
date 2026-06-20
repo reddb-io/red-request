@@ -165,20 +165,27 @@ fn spawn_engine(
     app: &tauri::AppHandle,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
     let shell = app.shell();
-    // Production: the bundled, bun-compiled sidecar binary.
-    if let Some(Ok(pair)) = shell.sidecar("red-request-engine").ok().map(|c| c.spawn()) {
-        return Ok(pair);
-    }
-    // Dev (`tauri dev`): the sidecar binary isn't built, so run the engine's
-    // compiled JS with `node` from PATH. Path is resolved relative to this crate.
+    // Prefer Node when the built engine JS is present (dev, or any host with node):
+    // recker's per-phase connection timings (dns/tcp/tls) only populate on Node — the
+    // Bun-compiled binary returns them as 0. Fall back to the bundled sidecar otherwise.
     let engine_js = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../packages/engine/dist/main.js");
+    if engine_js.exists() {
+        if let Ok(pair) = shell
+            .command("node")
+            .args([engine_js.to_string_lossy().to_string()])
+            .spawn()
+        {
+            return Ok(pair);
+        }
+    }
+    // Packaged: the bundled, bun-compiled sidecar binary.
     shell
-        .command("node")
-        .args([engine_js.to_string_lossy().to_string()])
+        .sidecar("red-request-engine")
+        .map_err(|e| e.to_string())?
         .spawn()
         .map(|(rx, child)| (rx, child))
-        .map_err(|e| format!("failed to start engine (no sidecar binary, and `node` failed): {e}"))
+        .map_err(|e| format!("failed to start engine sidecar: {e}"))
 }
 
 fn handle_engine_line(app: &tauri::AppHandle, line: &str) {

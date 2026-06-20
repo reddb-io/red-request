@@ -62,6 +62,17 @@
         bind:value={ws.activeReq.name}
         class="flex-1 bg-transparent text-sm font-medium text-zinc-200 outline-none"
       />
+      <select
+        value={ws.activeReq.folder}
+        onchange={(e) => ws.moveRequest(ws.activeReq!.id, e.currentTarget.value)}
+        title="Folder"
+        class="{field} text-xs text-zinc-400"
+      >
+        <option value="">(root)</option>
+        {#each ws.activeCollection?.collection.folders ?? [] as f (f)}
+          <option value={f}>{f}</option>
+        {/each}
+      </select>
       <EnvBar />
     </div>
 

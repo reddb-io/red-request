@@ -15,6 +15,8 @@ export const collectionFileSchema = z.object({
   auth: authConfigSchema.default({ type: "none" }),
   /** Ordered request ids (file slugs) for stable sidebar ordering. */
   order: z.array(z.string()).default([]),
+  /** Folder names for grouping requests (incl. empty folders). */
+  folders: z.array(z.string()).default([]),
 });
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
 

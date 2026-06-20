@@ -99,6 +99,8 @@ export type NetConfig = z.infer<typeof netConfigSchema>;
 export const requestDefinitionSchema = z.object({
   id: z.string(),
   name: z.string().default("New Request"),
+  /** Folder this request lives in (a name; "" = collection root). */
+  folder: z.string().default(""),
   kind: requestKindSchema.default("http"),
   method: httpMethodSchema.default("GET"),
   url: z.string().default(""),

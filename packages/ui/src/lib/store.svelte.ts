@@ -1,6 +1,7 @@
 import {
   mergeScopes,
   storedEnvironmentSchema,
+  newRequest,
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
@@ -342,6 +343,89 @@ class Workspace {
       const idx = col.requests.findIndex((r) => r.id === snap.id);
       if (idx >= 0) col.requests[idx] = snap;
       else col.requests.push(snap);
+    }
+  }
+
+  // --- collection structure (requests + folders) --------------------------
+
+  private async persistCollection(): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    await repo.saveCollectionMeta(
+      this.activeColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+  }
+
+  /** Create a new request (optionally inside a folder) and select it. */
+  async addRequest(folder = ""): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    const id = `req-${Date.now().toString(36)}-${Math.floor(
+      Math.random() * 1296
+    ).toString(36)}`;
+    const req: RequestDefinition = {
+      ...newRequest(id),
+      name: "New Request",
+      folder,
+      url: "https://",
+    };
+    await repo.saveRequest(this.activeColId, req);
+    col.requests.push(req);
+    col.collection.order.push(id);
+    this.selectRequest(this.activeColId, id);
+  }
+
+  async addFolder(name: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !name.trim()) return;
+    if (col.collection.folders.includes(name)) return;
+    col.collection.folders.push(name);
+    await this.persistCollection();
+  }
+
+  /** Delete a folder; its requests move back to the collection root. */
+  async deleteFolder(name: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    col.collection.folders = col.collection.folders.filter((f) => f !== name);
+    for (const r of col.requests) {
+      if (r.folder === name) {
+        r.folder = "";
+        await repo.saveRequest(
+          this.activeColId,
+          $state.snapshot(r) as RequestDefinition
+        );
+      }
+    }
+    await this.persistCollection();
+  }
+
+  /** Move a request to a folder ("" = root) and persist. */
+  async moveRequest(reqId: string, folder: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    const req = col.requests.find((r) => r.id === reqId);
+    if (!req) return;
+    req.folder = folder;
+    if (this.activeReq?.id === reqId) this.activeReq.folder = folder;
+    await repo.saveRequest(
+      this.activeColId,
+      $state.snapshot(req) as RequestDefinition
+    );
+  }
+
+  async deleteRequest(reqId: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId) return;
+    await repo.deleteRequest(this.activeColId, reqId);
+    col.requests = col.requests.filter((r) => r.id !== reqId);
+    col.collection.order = col.collection.order.filter((id) => id !== reqId);
+    await this.persistCollection();
+    if (this.activeReq?.id === reqId) {
+      this.activeReq = null;
+      const first = col.requests[0];
+      if (first) this.selectRequest(this.activeColId, first.id);
     }
   }
 

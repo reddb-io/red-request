@@ -60,14 +60,14 @@
   <StageBackground />
   <div class="relative z-10 grid h-full place-items-center px-6">
     <div class="w-[640px]">
-    <div class="mb-6 flex items-center gap-3">
+    <div class="mb-5 flex items-center gap-2.5">
       <span
-        class="grid h-9 w-9 place-items-center rounded-lg bg-[var(--color-accent)] text-lg font-bold text-black"
+        class="grid h-7 w-7 place-items-center rounded-md bg-[var(--color-accent)] text-sm font-bold text-black"
         >R</span
       >
-      <div>
-        <h1 class="text-lg font-semibold text-zinc-100">{brand.productName}</h1>
-        <p class="text-xs text-zinc-500">Open a project</p>
+      <div class="leading-tight">
+        <h1 class="text-sm font-semibold text-zinc-100">{brand.productName}</h1>
+        <p class="text-[11px] text-zinc-500">Open a project</p>
       </div>
     </div>
 
