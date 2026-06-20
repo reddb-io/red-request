@@ -46,7 +46,12 @@
   const pathSet = $derived(new Set(pathNames ?? []));
   const enablePath = $derived(pathNames !== undefined);
 
-  type Seg = { text: string; kind: "plain" | "ok" | "bad"; title?: string };
+  type Seg = {
+    text: string;
+    kind: "plain" | "ok" | "bad";
+    token?: "var" | "path";
+    title?: string;
+  };
   const segments = $derived.by<Seg[]>(() => {
     const v = value ?? "";
     const out: Seg[] = [];
@@ -64,6 +69,7 @@
         out.push({
           text: m[1],
           kind: ok ? "ok" : "bad",
+          token: "var",
           title: ok ? (values[name] ?? "") : "undefined variable",
         });
       } else {
@@ -72,6 +78,7 @@
         out.push({
           text: m[3]!,
           kind: ok ? "ok" : "bad",
+          token: "path",
           title: ok ? (pathValues[name] || "(no value)") : "undefined path param",
         });
       }
@@ -183,9 +190,11 @@
         >{:else}<span
           data-token
           data-title={s.title}
-          class="rounded-sm {s.kind === 'ok'
-            ? 'bg-emerald-500/15 text-emerald-300'
-            : 'bg-red-500/15 text-red-300'}">{s.text}</span
+          class="rounded-sm {s.kind === 'bad'
+            ? 'bg-red-500/15 text-red-300'
+            : s.token === 'path'
+              ? 'bg-sky-500/15 text-sky-300'
+              : 'bg-emerald-500/15 text-emerald-300'}">{s.text}</span
         >{/if}{/each}</div>
 
   {#if tip}

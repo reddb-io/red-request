@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
+  import VarField from "./VarField.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -76,7 +77,14 @@
           <div class="mb-1 text-xs text-zinc-500">
             Dataset (JSON array of objects — keys become variables per iteration)
           </div>
-          <textarea bind:value={datasetText} rows="5" class="{field} w-full"></textarea>
+          <VarField
+            bind:value={datasetText}
+            known={ws.knownVars}
+            values={ws.varTitles}
+            multiline
+            rows={5}
+            ariaLabel="Dataset JSON"
+          />
           {#if parseError}<div class="mt-1 text-xs text-red-400">{parseError}</div>{/if}
         </div>
       {:else}
