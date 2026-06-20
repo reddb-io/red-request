@@ -67,6 +67,18 @@
     renamingId = null;
   }
 
+  // inline collection rename
+  let renamingColId = $state<string | null>(null);
+  let colRenameValue = $state("");
+  function startRenameCol(col: LoadedCollection) {
+    renamingColId = col.id;
+    colRenameValue = col.collection.name;
+  }
+  async function commitRenameCol() {
+    if (renamingColId) await ws.renameCollection(renamingColId, colRenameValue);
+    renamingColId = null;
+  }
+
   function toggle(key: string) {
     if (collapsed.has(key)) collapsed.delete(key);
     else collapsed.add(key);
@@ -202,11 +214,25 @@
     {#each ws.collections as col (col.id)}
       {@const g = grouped(col)}
       <div class="mt-2">
-        <div class="flex items-center justify-between px-2 py-1">
-          <span class="label truncate">
-            {col.collection.name}
-          </span>
-          <span class="flex shrink-0 gap-1 text-fg-subtle">
+        <div class="group/col flex items-center justify-between px-2 py-1">
+          {#if renamingColId === col.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              bind:value={colRenameValue}
+              autofocus
+              onblur={commitRenameCol}
+              onkeydown={(e) => {
+                if (e.key === "Enter") commitRenameCol();
+                if (e.key === "Escape") renamingColId = null;
+              }}
+              class="input h-6"
+            />
+          {:else}
+            <span class="label truncate">
+              {col.collection.name}
+            </span>
+          {/if}
+          <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
               {#snippet children(p)}
                 <button {...p} onclick={() => ws.addRequest("")} class="hover:text-fg">＋</button>
@@ -224,6 +250,22 @@
                 >
               {/snippet}
             </Tooltip>
+            <Menu
+              items={[
+                { label: "Rename", onSelect: () => startRenameCol(col) },
+                {
+                  label: "Delete collection",
+                  onSelect: () => ws.deleteCollection(col.id),
+                  destructive: true,
+                },
+              ]}
+            >
+              {#snippet trigger(p)}
+                <button {...p} aria-label="collection actions" class="hover:text-fg"
+                  >⋯</button
+                >
+              {/snippet}
+            </Menu>
           </span>
         </div>
 

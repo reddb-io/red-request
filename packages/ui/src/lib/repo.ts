@@ -108,6 +108,27 @@ export const saveEnvironment = (colId: string, env: StoredEnvironment) =>
 export const deleteEnvironment = (colId: string, name: string) =>
   db.kvDelete(ENV, envKey(colId, name));
 
+/** Delete a whole collection: its meta + every owned request, environment and history row. */
+export async function deleteCollection(colId: string): Promise<void> {
+  const [reqs, envs, hist] = await Promise.all([
+    db.kvList<RequestDefinition>(REQ),
+    db.kvList<StoredEnvironment>(ENV),
+    db.kvList<HistoryEntry>(HIST),
+  ]);
+  await Promise.all([
+    ...reqs
+      .filter((r) => ownedBy(colId, r.key))
+      .map((r) => db.kvDelete(REQ, r.key)),
+    ...envs
+      .filter((e) => ownedBy(colId, e.key))
+      .map((e) => db.kvDelete(ENV, e.key)),
+    ...hist
+      .filter((h) => h.value.collectionId === colId)
+      .map((h) => db.kvDelete(HIST, h.key)),
+  ]);
+  await db.kvDelete(COL, colId);
+}
+
 /** Seed a runnable example collection the first time the store is empty. */
 export async function ensureSample(): Promise<void> {
   const existing = await db.kvList<CollectionFile>(COL);

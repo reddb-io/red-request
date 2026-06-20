@@ -388,6 +388,30 @@ class Workspace {
     );
   }
 
+  /** Rename a collection and persist. */
+  async renameCollection(colId: string, name: string): Promise<void> {
+    const col = this.collections.find((c) => c.id === colId);
+    if (!col || !name.trim()) return;
+    col.collection.name = name.trim();
+    await repo.saveCollectionMeta(
+      colId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+  }
+
+  /** Delete a collection (and everything it owns); select another if it was active. */
+  async deleteCollection(colId: string): Promise<void> {
+    await repo.deleteCollection(colId);
+    this.collections = this.collections.filter((c) => c.id !== colId);
+    if (this.activeColId === colId) {
+      this.activeReq = null;
+      this.activeColId = this.collections[0]?.id ?? null;
+      const first = this.collections[0];
+      if (first?.requests[0])
+        this.selectRequest(first.id, first.requests[0].id);
+    }
+  }
+
   /** Create a new request (optionally inside a folder) and select it. */
   async addRequest(folder = ""): Promise<void> {
     const col = this.activeCollection;
