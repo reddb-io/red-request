@@ -10,6 +10,8 @@ html,
 body {
   height: 100%;
   margin: 0;
+  /* Denser desktop scale: rem-based text + spacing shrink ~12.5% from the 16px default. */
+  font-size: 14px;
   background: var(--color-bg-0, #0b0b0d);
   color: #e8e8ea;
   font-family:
