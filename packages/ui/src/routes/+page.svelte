@@ -7,12 +7,25 @@
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import Dashboard from "$lib/components/Dashboard.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
+  import CommandPalette from "$lib/components/ui/CommandPalette.svelte";
   import { Tooltip } from "bits-ui";
+
+  let cmdOpen = $state(false);
 
   onMount(() => {
     void ws.init();
   });
+
+  function onKey(e: KeyboardEvent) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      if (ws.screen !== "app") return;
+      e.preventDefault();
+      cmdOpen = !cmdOpen;
+    }
+  }
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <svelte:head><title>{brand.productName}</title></svelte:head>
 
@@ -55,5 +68,6 @@
         </div>
       {/if}
     </div>
+    <CommandPalette bind:open={cmdOpen} />
   {/if}
 </Tooltip.Provider>
