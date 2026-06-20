@@ -80,6 +80,13 @@
             <Command.GroupHeading class="label px-2 py-1">Actions</Command.GroupHeading>
             <Command.GroupItems>
               {@render action("New request", "create", () => ws.addRequest(""))}
+              {#if ws.activeReq}
+                {@render action("Send request", "⏎", () => ws.send())}
+                {@render action("Save request", "save", () => ws.save())}
+                {@render action("Duplicate request", "copy", () =>
+                  ws.duplicateRequest(ws.activeReq!.id)
+                )}
+              {/if}
               {@render action("Dashboard", "view", () => (ws.view = "dashboard"))}
               {@render action("Requests", "view", () => (ws.view = "requests"))}
               {@render action("Switch project…", "selector", () => ws.backToSelector())}

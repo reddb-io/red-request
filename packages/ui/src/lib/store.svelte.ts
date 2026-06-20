@@ -466,6 +466,20 @@ class Workspace {
     );
   }
 
+  /** Rename a request and persist. */
+  async renameRequest(reqId: string, name: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col || !this.activeColId || !name.trim()) return;
+    const req = col.requests.find((r) => r.id === reqId);
+    if (!req) return;
+    req.name = name.trim();
+    if (this.activeReq?.id === reqId) this.activeReq.name = name.trim();
+    await repo.saveRequest(
+      this.activeColId,
+      $state.snapshot(req) as RequestDefinition
+    );
+  }
+
   async deleteRequest(reqId: string): Promise<void> {
     const col = this.activeCollection;
     if (!col || !this.activeColId) return;

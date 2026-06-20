@@ -55,6 +55,18 @@
   let addingFolderFor = $state<string | null>(null);
   let folderName = $state("");
 
+  // inline request rename
+  let renamingId = $state<string | null>(null);
+  let renameValue = $state("");
+  function startRename(req: LoadedCollection["requests"][number]) {
+    renamingId = req.id;
+    renameValue = req.name;
+  }
+  async function commitRename() {
+    if (renamingId) await ws.renameRequest(renamingId, renameValue);
+    renamingId = null;
+  }
+
   function toggle(key: string) {
     if (collapsed.has(key)) collapsed.delete(key);
     else collapsed.add(key);
@@ -136,11 +148,37 @@
         <span class="badge mono w-11 shrink-0 {badge(req).color}"
           >{badge(req).label}</span
         >
-        <span class="truncate text-fg">{req.name}</span>
+        {#if renamingId === req.id}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            bind:value={renameValue}
+            autofocus
+            onclick={(e) => e.stopPropagation()}
+            onblur={commitRename}
+            onkeydown={(e) => {
+              if (e.key === "Enter") commitRename();
+              if (e.key === "Escape") renamingId = null;
+            }}
+            class="input h-6 flex-1"
+          />
+        {:else}
+          <span class="truncate text-fg">{req.name}</span>
+        {/if}
       </button>
       <Menu
         items={[
           { label: "Duplicate", onSelect: () => ws.duplicateRequest(req.id) },
+          { label: "Rename", onSelect: () => startRename(req) },
+          {
+            label: "Move to",
+            children: [
+              { label: "(root)", onSelect: () => ws.moveRequest(req.id, "") },
+              ...col.collection.folders.map((f) => ({
+                label: f,
+                onSelect: () => ws.moveRequest(req.id, f),
+              })),
+            ],
+          },
           {
             label: "Delete",
             onSelect: () => ws.deleteRequest(req.id),
