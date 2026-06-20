@@ -52,13 +52,13 @@
   </label>
 
   {#if auth.type === "basic" || auth.type === "digest"}
-    <VarField bind:value={auth.username} known={ws.knownVars} dense placeholder="username" />
-    <VarField bind:value={auth.password} known={ws.knownVars} dense placeholder={"password (secrets via {{NAME}})"} />
+    <VarField bind:value={auth.username} known={ws.knownVars} values={ws.varTitles} dense placeholder="username" />
+    <VarField bind:value={auth.password} known={ws.knownVars} values={ws.varTitles} dense placeholder={"password (secrets via {{NAME}})"} />
   {:else if auth.type === "bearer"}
-    <VarField bind:value={auth.token} known={ws.knownVars} dense placeholder={"token (secrets via {{NAME}})"} />
+    <VarField bind:value={auth.token} known={ws.knownVars} values={ws.varTitles} dense placeholder={"token (secrets via {{NAME}})"} />
   {:else if auth.type === "apiKey"}
-    <VarField bind:value={auth.key} known={ws.knownVars} dense placeholder="header / param name" />
-    <VarField bind:value={auth.value} known={ws.knownVars} dense placeholder={"value (secrets via {{NAME}})"} />
+    <VarField bind:value={auth.key} known={ws.knownVars} values={ws.varTitles} dense placeholder="header / param name" />
+    <VarField bind:value={auth.value} known={ws.knownVars} values={ws.varTitles} dense placeholder={"value (secrets via {{NAME}})"} />
     <select bind:value={auth.in} class={field}>
       <option value="header">header</option>
       <option value="query">query</option>
@@ -69,14 +69,14 @@
       <option value="password">password</option>
       <option value="authorization_code">authorization_code</option>
     </select>
-    <VarField bind:value={auth.tokenUrl} known={ws.knownVars} dense placeholder="token URL" />
-    <VarField bind:value={auth.clientId} known={ws.knownVars} dense placeholder="client id" />
-    <VarField bind:value={auth.clientSecret} known={ws.knownVars} dense placeholder="client secret" />
+    <VarField bind:value={auth.tokenUrl} known={ws.knownVars} values={ws.varTitles} dense placeholder="token URL" />
+    <VarField bind:value={auth.clientId} known={ws.knownVars} values={ws.varTitles} dense placeholder="client id" />
+    <VarField bind:value={auth.clientSecret} known={ws.knownVars} values={ws.varTitles} dense placeholder="client secret" />
   {:else if auth.type === "awsSigV4"}
-    <VarField bind:value={auth.accessKeyId} known={ws.knownVars} dense placeholder="access key id" />
-    <VarField bind:value={auth.secretAccessKey} known={ws.knownVars} dense placeholder="secret access key" />
-    <VarField bind:value={auth.region} known={ws.knownVars} dense placeholder="region" />
-    <VarField bind:value={auth.service} known={ws.knownVars} dense placeholder="service (e.g. s3)" />
+    <VarField bind:value={auth.accessKeyId} known={ws.knownVars} values={ws.varTitles} dense placeholder="access key id" />
+    <VarField bind:value={auth.secretAccessKey} known={ws.knownVars} values={ws.varTitles} dense placeholder="secret access key" />
+    <VarField bind:value={auth.region} known={ws.knownVars} values={ws.varTitles} dense placeholder="region" />
+    <VarField bind:value={auth.service} known={ws.knownVars} values={ws.varTitles} dense placeholder="service (e.g. s3)" />
   {:else}
     <p class="text-sm text-zinc-500">No authentication.</p>
   {/if}

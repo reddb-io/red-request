@@ -27,6 +27,7 @@
       <VarField
         bind:value={net.host}
         known={ws.knownVars}
+        values={ws.varTitles}
         dense
         ariaLabel={hostLabel}
         placeholder={kind === "whois" || kind === "dns" ? "example.com" : "{{host}}"}
@@ -48,6 +49,7 @@
         <VarField
           bind:value={net.payload}
           known={ws.knownVars}
+        values={ws.varTitles}
           multiline
           rows={3}
           ariaLabel="payload"

@@ -7,6 +7,12 @@
   type Props = {
     value: string;
     known?: string[];
+    /** name → hover tooltip text for {{vars}}. */
+    values?: Record<string, string>;
+    /** when provided, also highlight `:name` path params against this list. */
+    pathNames?: string[];
+    /** name → hover tooltip text for path params. */
+    pathValues?: Record<string, string>;
     placeholder?: string;
     multiline?: boolean;
     rows?: number;
@@ -17,6 +23,9 @@
   let {
     value = $bindable(""),
     known = [],
+    values = {},
+    pathNames = undefined,
+    pathValues = {},
     placeholder = "",
     multiline = false,
     rows = 6,
@@ -34,17 +43,38 @@
   let tokenStart = $state(-1);
 
   const knownSet = $derived(new Set(known));
+  const pathSet = $derived(new Set(pathNames ?? []));
+  const enablePath = $derived(pathNames !== undefined);
 
-  type Seg = { text: string; kind: "plain" | "ok" | "bad" };
+  type Seg = { text: string; kind: "plain" | "ok" | "bad"; title?: string };
   const segments = $derived.by<Seg[]>(() => {
     const v = value ?? "";
     const out: Seg[] = [];
-    const re = /\{\{\s*([^{}]*?)\s*\}\}/g;
+    // {{var}} (groups 1/2) or :pathParam (groups 3/4, only when enabled)
+    const re = enablePath
+      ? /(\{\{\s*([^{}]*?)\s*\}\})|(:([A-Za-z_]\w*))/g
+      : /(\{\{\s*([^{}]*?)\s*\}\})/g;
     let last = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(v))) {
       if (m.index > last) out.push({ text: v.slice(last, m.index), kind: "plain" });
-      out.push({ text: m[0], kind: knownSet.has(m[1]!) ? "ok" : "bad" });
+      if (m[1] !== undefined) {
+        const name = m[2]!;
+        const ok = knownSet.has(name);
+        out.push({
+          text: m[1],
+          kind: ok ? "ok" : "bad",
+          title: ok ? (values[name] ?? "") : "undefined variable",
+        });
+      } else {
+        const name = m[4]!;
+        const ok = pathSet.has(name);
+        out.push({
+          text: m[3]!,
+          kind: ok ? "ok" : "bad",
+          title: ok ? (pathValues[name] || "(no value)") : "undefined path param",
+        });
+      }
       last = m.index + m[0].length;
     }
     if (last < v.length) out.push({ text: v.slice(last), kind: "plain" });
@@ -55,6 +85,29 @@
     if (!backdrop || !el) return;
     backdrop.scrollLeft = el.scrollLeft;
     backdrop.scrollTop = el.scrollTop;
+  }
+
+  // Hover tooltip: hit-test the token rects under the pointer (backdrop stays behind, so
+  // the input keeps full editing/click behaviour).
+  let tip = $state<{ text: string; x: number; y: number } | null>(null);
+  function onMove(e: MouseEvent) {
+    if (!backdrop) return;
+    for (const t of backdrop.querySelectorAll<HTMLElement>("[data-token]")) {
+      const r = t.getBoundingClientRect();
+      if (
+        e.clientX >= r.left &&
+        e.clientX <= r.right &&
+        e.clientY >= r.top &&
+        e.clientY <= r.bottom
+      ) {
+        const txt = t.dataset.title ?? "";
+        if (txt) {
+          tip = { text: txt, x: r.left, y: r.bottom + 4 };
+          return;
+        }
+      }
+    }
+    tip = null;
   }
 
   function refreshMenu() {
@@ -128,10 +181,21 @@
     class="{shared} pointer-events-none absolute inset-0 overflow-hidden text-zinc-200"
   >{#each segments as s, i (i)}{#if s.kind === "plain"}<span>{s.text}</span
         >{:else}<span
+          data-token
+          data-title={s.title}
           class="rounded-sm {s.kind === 'ok'
             ? 'bg-emerald-500/15 text-emerald-300'
             : 'bg-red-500/15 text-red-300'}">{s.text}</span
         >{/if}{/each}</div>
+
+  {#if tip}
+    <div
+      class="pointer-events-none fixed z-[60] max-w-xs truncate rounded border border-[var(--color-bg-3)] bg-[var(--color-bg-0)] px-2 py-1 text-xs text-zinc-200 shadow-xl"
+      style="left: {tip.x}px; top: {tip.y}px"
+    >
+      {tip.text}
+    </div>
+  {/if}
 
   {#if multiline}
     <textarea
@@ -147,7 +211,12 @@
       onclick={refreshMenu}
       onkeydown={onKeydown}
       onscroll={syncScroll}
-      onblur={() => (showMenu = false)}
+      onmousemove={onMove}
+      onmouseleave={() => (tip = null)}
+      onblur={() => {
+        showMenu = false;
+        tip = null;
+      }}
     ></textarea>
   {:else}
     <input
@@ -162,7 +231,12 @@
       onclick={refreshMenu}
       onkeydown={onKeydown}
       onscroll={syncScroll}
-      onblur={() => (showMenu = false)}
+      onmousemove={onMove}
+      onmouseleave={() => (tip = null)}
+      onblur={() => {
+        showMenu = false;
+        tip = null;
+      }}
     />
   {/if}
 

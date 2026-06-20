@@ -63,17 +63,35 @@ class Workspace {
     return this.environments.find((e) => e.name === this.activeEnvName) ?? null;
   }
 
-  /** Variable names resolvable in the current scope (collection + env + secrets). */
-  get knownVars(): string[] {
+  /** Variable info in the current scope: name → resolved value + whether it's a secret.
+   *  Precedence (later wins): collection vars < env vars < secrets. */
+  get varInfo(): Record<string, { value: string; secret: boolean }> {
+    const out: Record<string, { value: string; secret: boolean }> = {};
     const col = this.activeCollection;
-    if (!col) return [];
-    const names = new Set<string>(Object.keys(col.collection.vars));
+    if (!col) return out;
+    for (const [k, v] of Object.entries(col.collection.vars))
+      out[k] = { value: v, secret: false };
     const env = this.activeEnv;
     if (env) {
-      for (const k of Object.keys(env.vars)) names.add(k);
-      for (const k of Object.keys(env.secrets)) names.add(k);
+      for (const [k, v] of Object.entries(env.vars))
+        out[k] = { value: v, secret: false };
+      for (const k of Object.keys(env.secrets))
+        out[k] = { value: "", secret: true };
     }
-    return [...names].sort((a, b) => a.localeCompare(b));
+    return out;
+  }
+
+  /** Variable names resolvable in the current scope. */
+  get knownVars(): string[] {
+    return Object.keys(this.varInfo).sort((a, b) => a.localeCompare(b));
+  }
+
+  /** name → hover-tooltip text (value for vars; masked for secrets — never the plaintext). */
+  get varTitles(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [k, info] of Object.entries(this.varInfo))
+      out[k] = info.secret ? "🔒 secret" : info.value || "(empty)";
+    return out;
   }
 
   async init(): Promise<void> {

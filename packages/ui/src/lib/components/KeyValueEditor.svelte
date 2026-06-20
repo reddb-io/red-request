@@ -26,10 +26,10 @@
         aria-label="enabled"
       />
       <div class="flex-1">
-        <VarField bind:value={item.name} known={ws.knownVars} dense {placeholder} />
+        <VarField bind:value={item.name} known={ws.knownVars} values={ws.varTitles} dense {placeholder} />
       </div>
       <div class="flex-1">
-        <VarField bind:value={item.value} known={ws.knownVars} dense placeholder="value" />
+        <VarField bind:value={item.value} known={ws.knownVars} values={ws.varTitles} dense placeholder="value" />
       </div>
       <button
         onclick={() => removeAt(i)}

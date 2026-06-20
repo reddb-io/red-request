@@ -59,6 +59,18 @@
     }
   });
 
+  // Path params with a value count as "resolved" (green); detected-but-empty stay red.
+  const pathOk = $derived(
+    (ws.activeReq?.pathParams ?? [])
+      .filter((p) => p.enabled && p.value.trim() !== "")
+      .map((p) => p.name)
+  );
+  const pathValues = $derived(
+    Object.fromEntries(
+      (ws.activeReq?.pathParams ?? []).map((p) => [p.name, p.value])
+    )
+  );
+
   const field =
     "mono rounded bg-[var(--color-bg-2)] px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-[var(--color-accent)]";
   const area =
@@ -131,6 +143,9 @@
             <VarField
               bind:value={ws.activeReq.url}
               known={ws.knownVars}
+              values={ws.varTitles}
+              pathNames={pathOk}
+              pathValues={pathValues}
               flush
               ariaLabel="URL"
               placeholder={"https://{{host}}/users/:id"}
@@ -232,6 +247,7 @@
             <VarField
               bind:value={ws.activeReq.body.content}
               known={ws.knownVars}
+              values={ws.varTitles}
               multiline
               rows={12}
               ariaLabel="Request body"
