@@ -6,6 +6,7 @@
   } from "@red-request/core";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
+  import Select from "./ui/Select.svelte";
 
   let { auth = $bindable() }: { auth: AuthConfig } = $props();
 
@@ -32,8 +33,7 @@
     },
   };
 
-  function onType(e: Event) {
-    const t = (e.target as HTMLSelectElement).value as AuthType;
+  function setType(t: AuthType) {
     auth = structuredClone(defaults[t]);
   }
 </script>
@@ -41,11 +41,13 @@
 <div class="flex flex-col gap-3">
   <label class="flex items-center gap-2 text-sm">
     <span class="w-24 text-fg-muted">Type</span>
-    <select value={auth.type} onchange={onType} class="select">
-      {#each SELECTABLE_AUTH_TYPES as t (t)}
-        <option value={t}>{t}</option>
-      {/each}
-    </select>
+    <Select
+      value={auth.type}
+      items={SELECTABLE_AUTH_TYPES}
+      onChange={setType}
+      ariaLabel="auth type"
+      class="flex-1"
+    />
   </label>
 
   {#if auth.type === "basic" || auth.type === "digest"}
@@ -56,16 +58,17 @@
   {:else if auth.type === "apiKey"}
     <VarField bind:value={auth.key} known={ws.knownVars} values={ws.varTitles} dense placeholder="header / param name" />
     <VarField bind:value={auth.value} known={ws.knownVars} values={ws.varTitles} dense placeholder={"value (secrets via {{NAME}})"} />
-    <select bind:value={auth.in} class="select">
-      <option value="header">header</option>
-      <option value="query">query</option>
-    </select>
+    <Select
+      bind:value={auth.in}
+      items={["header", "query"] as const}
+      ariaLabel="api key location"
+    />
   {:else if auth.type === "oauth2"}
-    <select bind:value={auth.grantType} class="select">
-      <option value="client_credentials">client_credentials</option>
-      <option value="password">password</option>
-      <option value="authorization_code">authorization_code</option>
-    </select>
+    <Select
+      bind:value={auth.grantType}
+      items={["client_credentials", "password", "authorization_code"] as const}
+      ariaLabel="grant type"
+    />
     <VarField bind:value={auth.tokenUrl} known={ws.knownVars} values={ws.varTitles} dense placeholder="token URL" />
     <VarField bind:value={auth.clientId} known={ws.knownVars} values={ws.varTitles} dense placeholder="client id" />
     <VarField bind:value={auth.clientSecret} known={ws.knownVars} values={ws.varTitles} dense placeholder="client secret" />

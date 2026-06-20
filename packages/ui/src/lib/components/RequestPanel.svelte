@@ -7,6 +7,7 @@
   import RunnerPanel from "./RunnerPanel.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import VarField from "./VarField.svelte";
+  import Select from "./ui/Select.svelte";
 
   let showRunner = $state(false);
 
@@ -80,31 +81,29 @@
         bind:value={ws.activeReq.name}
         class="flex-1 bg-transparent text-sm font-medium text-fg outline-none"
       />
-      <select
+      <Select
         value={ws.activeReq.folder}
-        onchange={(e) => ws.moveRequest(ws.activeReq!.id, e.currentTarget.value)}
-        title="Folder"
-        class="select w-auto text-xs text-fg-muted"
-      >
-        <option value="">(root)</option>
-        {#each ws.activeCollection?.collection.folders ?? [] as f (f)}
-          <option value={f}>{f}</option>
-        {/each}
-      </select>
+        items={[
+          { value: "", label: "(root)" },
+          ...(ws.activeCollection?.collection.folders ?? []).map((f) => ({
+            value: f,
+          })),
+        ]}
+        onChange={(v) => ws.moveRequest(ws.activeReq!.id, v)}
+        ariaLabel="Folder"
+        class="w-auto text-xs text-fg-muted"
+      />
       <EnvBar />
     </div>
 
     <div class="flex items-center gap-2 px-3 py-2">
       <!-- request kind: compact pill -->
-      <select
+      <Select
         bind:value={ws.activeReq.kind}
-        aria-label="Request type"
-        class="select w-auto shrink-0 text-xs font-semibold tracking-wide uppercase"
-      >
-        {#each kinds as k (k)}
-          <option value={k} class="bg-[var(--color-bg-1)] text-fg">{k}</option>
-        {/each}
-      </select>
+        items={kinds}
+        ariaLabel="Request type"
+        class="w-auto shrink-0 text-xs font-semibold tracking-wide uppercase"
+      />
 
       {#if ws.activeReq.kind === "http"}
         <!-- method + url joined as one bar, like Insomnia/Postman -->
@@ -112,17 +111,13 @@
           class="flex h-8 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
         >
           <!-- method stays borderless/transparent to preserve the joined-bar look -->
-          <select
+          <Select
             bind:value={ws.activeReq.method}
-            aria-label="HTTP method"
-            class="h-8 cursor-pointer appearance-none bg-transparent pr-3 pl-3 text-sm font-bold outline-none {methodColor[
-              ws.activeReq.method
-            ] ?? 'text-fg'}"
-          >
-            {#each methods as m (m)}
-              <option value={m} class="bg-[var(--color-bg-1)] text-fg">{m}</option>
-            {/each}
-          </select>
+            items={methods.map((m) => ({ value: m, label: m, class: methodColor[m] }))}
+            bare
+            ariaLabel="HTTP method"
+            class="h-8 px-3 text-sm font-bold"
+          />
           <span class="h-4 w-px shrink-0 bg-[var(--color-bg-3)]"></span>
           <div class="min-w-0 flex-1">
             <VarField
@@ -220,11 +215,12 @@
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
       {:else}
         <div class="flex flex-col gap-2">
-          <select bind:value={ws.activeReq.body.type} class="select">
-            {#each bodyTypes as t (t)}
-              <option value={t}>{t}</option>
-            {/each}
-          </select>
+          <Select
+            bind:value={ws.activeReq.body.type}
+            items={bodyTypes}
+            ariaLabel="body type"
+            class="w-auto"
+          />
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
           {:else if ws.activeReq.body.type !== "none"}

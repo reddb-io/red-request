@@ -16,6 +16,7 @@
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-http": "^2.5.9",
+    "bits-ui": "^2.18.1",
     "yaml": "^2.6.1"
   },
   "devDependencies": {

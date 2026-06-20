@@ -6,6 +6,7 @@
   } from "@red-request/core";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
+  import Select from "./ui/Select.svelte";
 
   let {
     kind,
@@ -75,11 +76,7 @@
   {#if kind === "dns"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">record</span>
-      <select bind:value={net.recordType} class="select">
-        {#each recordTypes as t (t)}
-          <option value={t}>{t}</option>
-        {/each}
-      </select>
+      <Select bind:value={net.recordType} items={recordTypes} class="w-28" ariaLabel="record type" />
     </label>
   {/if}
 
