@@ -1,7 +1,7 @@
 <script lang="ts">
-  // Mega-Man-stage backdrop on a single <canvas> — vertical light pillars scrolling at
-  // varied speeds/directions, bobbing + pulsing. One rAF loop, no CSS blur/compositing, so
-  // it's cheap. Pauses when the tab is hidden; honors prefers-reduced-motion.
+  // Mega-Man-stage backdrop on one canvas: vertical light pillars scrolling at varied
+  // speeds and directions, bobbing and pulsing. One rAF loop, no CSS blur, so it is cheap.
+  // Pauses when the tab is hidden and honors prefers-reduced-motion.
   import { onMount } from "svelte";
 
   let canvas: HTMLCanvasElement;
