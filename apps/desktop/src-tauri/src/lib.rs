@@ -81,7 +81,10 @@ fn ensure_under_root(app: &tauri::AppHandle, path: &str) -> Result<std::path::Pa
     };
     // Normalize by rejecting any `..` component rather than canonicalizing (which
     // fails for not-yet-created files on write).
-    if candidate.components().any(|c| c == std::path::Component::ParentDir) {
+    if candidate
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("path traversal is not allowed".to_string());
     }
     if !candidate.starts_with(&root) {
@@ -216,7 +219,10 @@ fn handle_engine_line(app: &tauri::AppHandle, line: &str) {
                     .unwrap_or("engine error")
                     .to_string())
             } else {
-                Ok(value.get("result").cloned().unwrap_or(serde_json::Value::Null))
+                Ok(value
+                    .get("result")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null))
             };
             let _ = tx.send(payload);
         }
@@ -296,7 +302,9 @@ fn master_key() -> Result<[u8; 32], String> {
             use rand::RngCore;
             let mut key = [0u8; 32];
             rand::rngs::OsRng.fill_bytes(&mut key);
-            entry.set_password(&B64.encode(key)).map_err(|e| e.to_string())?;
+            entry
+                .set_password(&B64.encode(key))
+                .map_err(|e| e.to_string())?;
             Ok(key)
         }
         Err(e) => Err(e.to_string()),
@@ -399,9 +407,12 @@ fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
     let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
     let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
     let arg_launched = *s.arg_launched.lock().map_err(|e| e.to_string())?;
-    let name = project_dir
-        .as_ref()
-        .and_then(|d| recent_list().into_iter().find(|r| &r.dir == d).map(|r| r.name));
+    let name = project_dir.as_ref().and_then(|d| {
+        recent_list()
+            .into_iter()
+            .find(|r| &r.dir == d)
+            .map(|r| r.name)
+    });
     Ok(ProjectInfo {
         is_project: project_dir.is_some(),
         db_path,
@@ -548,10 +559,7 @@ fn delete_project_data(dir: String) -> Result<(), String> {
 /// Switch the embedded reddb to another project (or the global store with `dir = None`)
 /// at runtime: stop the current sidecar, repoint the path, respawn, return the new info.
 #[tauri::command]
-async fn open_project(
-    app: tauri::AppHandle,
-    dir: Option<String>,
-) -> Result<ProjectInfo, String> {
+async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<ProjectInfo, String> {
     let (db_path, project_dir) = match dir.as_deref() {
         Some(d) => {
             let abs = std::fs::canonicalize(d).unwrap_or_else(|_| std::path::PathBuf::from(d));
@@ -836,8 +844,7 @@ pub fn run() {
             // Deep links (rr:// branded scheme).
             let dl_handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                let urls: Vec<String> =
-                    event.urls().into_iter().map(|u| u.to_string()).collect();
+                let urls: Vec<String> = event.urls().into_iter().map(|u| u.to_string()).collect();
                 let _ = dl_handle.emit("deep-link", urls);
             });
 

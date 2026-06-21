@@ -14,6 +14,10 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     # Skip the version-bump commit itself (authored by the bot) to avoid a loop.
     if: github.actor != 'github-actions[bot]'
+    # Disable lefthook: the action's version-bump git commit would otherwise fire the
+    # pre-commit hook (pnpm check), which fails here because core isn't built in this job.
+    env:
+      LEFTHOOK: "0"
     permissions:
       contents: write
       pull-requests: write
