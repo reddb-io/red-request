@@ -92,7 +92,7 @@
             class:is-active={selected?.name === env.name}
           >
             <span class="truncate text-fg">{env.name}</span>
-            <span class="text-[10px] text-fg-subtle"
+            <span class="text-xs text-fg-subtle"
               >{Object.keys(env.secrets).length}🔑</span
             >
           </button>
@@ -155,7 +155,7 @@
                 <div class="panel-2 flex items-center justify-between px-2 py-1 text-sm">
                   <span class="mono text-fg">{name}</span>
                   <span class="flex items-center gap-3">
-                    <span class="text-[11px] text-emerald-500">•••• set</span>
+                    <span class="text-xs text-emerald-500">•••• set</span>
                     <button
                       onclick={() => ws.removeSecret(selected!, name)}
                       class="btn-icon hover:text-red-400">✕</button

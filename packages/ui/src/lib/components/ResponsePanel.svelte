@@ -149,7 +149,7 @@
     <div class="flex-1 overflow-auto p-3">
       {#if tab === "body"}
         {#if r.meta}
-          <div class="mb-2 flex flex-wrap gap-2 text-[11px] text-fg-muted">
+          <div class="mb-2 flex flex-wrap gap-2 text-xs text-fg-muted">
             {#each Object.entries(r.meta) as [k, v] (k)}
               {#if typeof v === "number" || typeof v === "string"}
                 <span class="rounded bg-[var(--color-bg-2)] px-2 py-0.5"
@@ -186,7 +186,7 @@
               <span class="text-fg-subtle">this run {totalMs(r).toFixed(0)}ms</span>
             </div>
             {@render bar(r.timings, 18)}
-            <div class="mt-2 flex flex-wrap gap-3 text-[10px] text-fg-muted">
+            <div class="mt-2 flex flex-wrap gap-3 text-xs text-fg-muted">
               {#each segments(r.timings) as s (s.label)}
                 <span class="flex items-center gap-1">
                   <span class="inline-block h-2 w-2 rounded-sm" style="background:{s.color}"></span>
@@ -198,12 +198,12 @@
 
           {#if ws.reqHistory.length > 1}
             <div>
-              <div class="label mb-1.5 text-[10px]">
+              <div class="label mb-1.5">
                 Recent runs
               </div>
               <div class="flex flex-col gap-1">
                 {#each ws.reqHistory.slice(0, 15) as h (h.id)}
-                  <div class="flex items-center gap-2 text-[11px]">
+                  <div class="flex items-center gap-2 text-xs">
                     <span class="mono w-14 shrink-0 text-fg-subtle"
                       >{totalMs(h).toFixed(0)}ms</span
                     >
@@ -241,7 +241,7 @@
           {/if}
           {#if ws.logs.length}
             <div>
-              <div class="label mb-1 text-[10px]">console</div>
+              <div class="label mb-1">console</div>
               <pre class="mono whitespace-pre-wrap text-fg-muted">{ws.logs.join("\n")}</pre>
             </div>
           {/if}

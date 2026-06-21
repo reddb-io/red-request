@@ -62,7 +62,7 @@
                   class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-fg-muted select-none data-[selected]:bg-[var(--color-bg-2)] data-[selected]:text-fg"
                 >
                   <span
-                    class="mono w-11 shrink-0 text-[11px] font-bold {r.req.kind === 'http'
+                    class="mono w-11 shrink-0 text-xs font-bold {r.req.kind === 'http'
                       ? (methodColor[r.req.method] ?? 'text-fg-muted')
                       : 'text-fg-muted'}"
                     >{r.req.kind === "http" ? r.req.method : r.req.kind.toUpperCase()}</span

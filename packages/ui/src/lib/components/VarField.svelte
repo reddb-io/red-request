@@ -266,7 +266,7 @@
               ? 'bg-[var(--color-bg-2)] text-fg-strong'
               : 'text-fg-muted'} hover:bg-[var(--color-bg-2)]"
           >
-            <span class="text-[10px] text-emerald-400">⬩</span>
+            <span class="text-xs text-emerald-400">⬩</span>
             <span class="truncate">{item}</span>
           </button>
         </li>

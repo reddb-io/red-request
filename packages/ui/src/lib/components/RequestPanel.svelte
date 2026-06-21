@@ -165,7 +165,7 @@
           class="tab"
           class:is-active={tab === t}
         >
-          {t}{#if t === "path" && detected.length}<span class="ml-1 text-[10px] text-fg-subtle">{detected.length}</span>{/if}
+          {t}{#if t === "path" && detected.length}<span class="ml-1 text-xs text-fg-subtle">{detected.length}</span>{/if}
         </button>
       {/each}
     </div>
@@ -198,7 +198,7 @@
           <div>
             <div class="mb-1 flex items-center justify-between">
               <h4 class="label">Pre-request</h4>
-              <span class="mono text-[10px] text-fg-faint">rr.setHeader · rr.setVar · rr.req.url</span>
+              <span class="mono text-xs text-fg-faint">rr.setHeader · rr.setVar · rr.req.url</span>
             </div>
             <textarea bind:value={ws.activeReq.scripts.preRequest} rows="6" class="textarea mono text-xs"
               placeholder={"rr.setVar('ts', Date.now())\nrr.setHeader('X-Trace', rr.getVar('ts'))"}></textarea>
@@ -206,7 +206,7 @@
           <div>
             <div class="mb-1 flex items-center justify-between">
               <h4 class="label">Post-response</h4>
-              <span class="mono text-[10px] text-fg-faint">rr.res · rr.test · rr.expect · rr.setVar</span>
+              <span class="mono text-xs text-fg-faint">rr.res · rr.test · rr.expect · rr.setVar</span>
             </div>
             <textarea bind:value={ws.activeReq.scripts.postResponse} rows="8" class="textarea mono text-xs"
               placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"}></textarea>

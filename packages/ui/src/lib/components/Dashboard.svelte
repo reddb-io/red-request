@@ -103,7 +103,7 @@
     <div class="panel p-3">
       <div class="text-2xl font-bold text-fg-strong">{catalog.total}</div>
       <div class="text-xs text-fg-subtle">requests</div>
-      <div class="mono mt-2 flex flex-wrap gap-1 text-[10px] text-fg-muted">
+      <div class="mono mt-2 flex flex-wrap gap-1 text-xs text-fg-muted">
         {#each Object.entries(catalog.byMethod) as [m, n] (m)}
           <span class="rounded bg-[var(--color-bg-2)] px-1">{m} {n}</span>
         {/each}
@@ -135,7 +135,7 @@
     History &amp; latency
   </h2>
   <table class="w-full text-sm">
-    <thead class="text-left text-[11px] text-fg-subtle">
+    <thead class="text-left text-xs text-fg-subtle">
       <tr class="border-b border-border">
         <th class="py-1 pr-3 font-medium">Request</th>
         <th class="py-1 pr-3 font-medium">Runs</th>
@@ -149,7 +149,7 @@
       {#each perReq as p (p.req.id)}
         <tr class="border-b border-[var(--color-bg-2)]">
           <td class="py-1.5 pr-3">
-            <span class="mono text-[11px] text-fg-subtle">{p.req.method}</span>
+            <span class="mono text-xs text-fg-subtle">{p.req.method}</span>
             <span class="text-fg">{p.req.name}</span>
           </td>
           <td class="py-1.5 pr-3 text-fg">{p.runs}</td>
@@ -171,7 +171,7 @@
                 />
               </svg>
             {:else}
-              <span class="text-[10px] text-fg-faint">—</span>
+              <span class="text-xs text-fg-faint">—</span>
             {/if}
           </td>
         </tr>

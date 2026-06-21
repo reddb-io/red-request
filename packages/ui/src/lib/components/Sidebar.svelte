@@ -137,7 +137,7 @@
             <button
               {...p}
               onclick={() => ws.backToSelector()}
-              class="mono flex items-center gap-1 truncate text-[10px] text-fg-subtle hover:text-fg"
+              class="mono flex items-center gap-1 truncate text-xs text-fg-subtle hover:text-fg"
             >
               {projectLabel(ws.project)}
               <span class="text-fg-faint">⇄</span>
@@ -341,7 +341,7 @@
             >
               <span class="text-fg-subtle">{collapsed.has(key) ? "▸" : "▾"}</span>
               <span class="truncate">{f.name}</span>
-              <span class="text-[10px] text-fg-faint">{f.requests.length}</span>
+              <span class="text-xs text-fg-faint">{f.requests.length}</span>
             </button>
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
               <Tooltip text="New request here">
@@ -361,7 +361,7 @@
               {@render reqRow(col, req, true)}
             {/each}
             {#if f.requests.length === 0}
-              <div class="hint py-1 pl-6 text-[10px]">empty</div>
+              <div class="hint py-1 pl-6">empty</div>
             {/if}
           {/if}
         {/each}
@@ -383,7 +383,7 @@
       >
     </div>
     {#if status}
-      <div class="hint mt-1 truncate text-[10px] text-fg-subtle" title={status}>{status}</div>
+      <div class="hint mt-1 truncate text-fg-subtle" title={status}>{status}</div>
     {/if}
   </div>
 </aside>
