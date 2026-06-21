@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
+    "lefthook": "^2.1.9",
     "prettier": "^3.8.3",
     "typescript": "^5.7.2"
   }
