@@ -10,12 +10,14 @@ import {
   requestDefinitionSchema,
   storedEnvironmentSchema,
   historyEntrySchema,
+  networkSettingsSchema,
   newRequest,
   type CollectionFile,
   type RequestDefinition,
   type StoredEnvironment,
   type LoadedCollection,
   type HistoryEntry,
+  type NetworkSettings,
 } from "@red-request/core";
 import * as db from "./reddb";
 
@@ -23,6 +25,7 @@ export const COL = "rr_collections";
 export const REQ = "rr_requests";
 export const ENV = "rr_environments";
 export const HIST = "rr_history";
+export const SETTINGS = "rr_settings";
 
 const MAX_HISTORY_PER_REQ = 50;
 
@@ -45,7 +48,17 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(REQ);
   await db.ensureKvCollection(ENV);
   await db.ensureKvCollection(HIST);
+  await db.ensureKvCollection(SETTINGS);
 }
+
+const NETWORK_KEY = "network";
+/** Project-level network settings (proxy + profile pool), shared by all collections. */
+export async function loadNetwork(): Promise<NetworkSettings> {
+  const raw = await db.kvGet<unknown>(SETTINGS, NETWORK_KEY).catch(() => null);
+  return networkSettingsSchema.parse(raw ?? {});
+}
+export const saveNetwork = (settings: NetworkSettings) =>
+  db.kvPut(SETTINGS, NETWORK_KEY, settings);
 
 /** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */
 export async function saveHistory(entry: HistoryEntry): Promise<void> {

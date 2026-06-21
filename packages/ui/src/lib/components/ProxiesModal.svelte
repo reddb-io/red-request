@@ -8,9 +8,15 @@
   import { Button } from "./ui/button/index.js";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import { ws } from "../store.svelte";
+  import { USER_AGENTS } from "@red-request/core";
 
   let { onClose }: { onClose: () => void } = $props();
   let tab = $state<"proxies" | "profiles">("proxies");
+
+  const uaPresets = [
+    { value: "", label: "UA preset…" },
+    ...USER_AGENTS.map((u) => ({ value: u.value, label: u.name })),
+  ];
 
   const save = () => ws.saveProxiesProfiles();
   const close = () => {
@@ -85,7 +91,23 @@
     {:else}
       <p class="hint mb-2">
         A profile applies a User-Agent + headers + a proxy to any request that selects it.
+        Shared across every collection in this project.
       </p>
+      {#if ws.activeCollection}
+        <div class="mb-3 flex items-center gap-2 rounded-lg border border-border bg-[var(--color-bg-1)] p-2">
+          <span class="hint">Default for “{ws.activeCollection.collection.name}”</span>
+          <Select
+            value={ws.activeCollection.collection.defaultProfileId}
+            onChange={(v) => ws.setCollectionDefaultProfile(v)}
+            items={[
+              { value: "", label: "no default" },
+              ...ws.profiles.map((p) => ({ value: p.id, label: p.name || "profile" })),
+            ]}
+            ariaLabel="collection default profile"
+            class="w-auto"
+          />
+        </div>
+      {/if}
       {#each ws.profiles as profile (profile.id)}
         <div class="mb-2 rounded-lg border border-border p-2">
           <div class="flex items-center gap-2">
@@ -102,12 +124,26 @@
               aria-label="delete profile" class="ml-auto hover:text-red-400">✕</Button
             >
           </div>
-          <Input
-            bind:value={profile.userAgent}
-            onblur={save}
-            placeholder="User-Agent (blank = leave default)"
-            class="mono mt-2 h-7 w-full"
-          />
+          <div class="mt-2 flex items-center gap-2">
+            <Input
+              bind:value={profile.userAgent}
+              onblur={save}
+              placeholder="User-Agent (blank = leave default)"
+              class="mono h-7 flex-1"
+            />
+            <Select
+              value=""
+              onChange={(v) => {
+                if (v) {
+                  profile.userAgent = v;
+                  void save();
+                }
+              }}
+              items={uaPresets}
+              ariaLabel="user-agent preset"
+              class="w-auto shrink-0"
+            />
+          </div>
           <div class="mt-2">
             <span class="hint">extra headers</span>
             <KeyValueEditor bind:items={profile.headers} placeholder="header" />

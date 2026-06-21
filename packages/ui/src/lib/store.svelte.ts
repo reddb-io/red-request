@@ -18,6 +18,7 @@ import {
   type GrpcService,
   type Proxy,
   type Profile,
+  type NetworkSettings,
   type StoredEnvironment,
   type ScriptTest,
   type HistoryEntry,
@@ -97,6 +98,9 @@ class Workspace {
   // --- grpc (kind === "grpc") ---
   grpcServices = $state<GrpcService[]>([]);
   grpcLoading = $state(false);
+
+  // --- project-level network pool (proxies + profiles) ---
+  network = $state<NetworkSettings>({ proxies: [], profiles: [] });
 
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
@@ -217,6 +221,7 @@ class Workspace {
     try {
       await repo.ensureStore();
       await repo.ensureSample();
+      this.network = await repo.loadNetwork();
       await this.reload();
       // Persist this project's request count for the selector cards.
       if (this.project?.is_project && this.project.project_dir) {
@@ -476,20 +481,23 @@ class Workspace {
     }
   }
 
-  // --- proxies & profiles ---------------------------------------------------
+  // --- proxies & profiles (project-level pool, shared by all collections) ----
   get proxies(): Proxy[] {
-    return this.activeCollection?.collection.proxies ?? [];
+    return this.network.proxies;
   }
   get profiles(): Profile[] {
-    return this.activeCollection?.collection.profiles ?? [];
+    return this.network.profiles;
   }
 
-  /** Merge the request's bound profile (User-Agent + headers + proxy) into a snapshot.
-   *  Explicit request headers/proxy win; profile values fill the gaps. */
+  /** Merge the bound profile (request's, else the collection default) into a snapshot:
+   *  User-Agent + headers + proxy. Explicit request headers/proxy win. */
   private applyProfile(snap: RequestDefinition): RequestDefinition {
-    const col = this.activeCollection;
-    const profile = snap.profileId
-      ? col?.collection.profiles.find((p) => p.id === snap.profileId)
+    const pid =
+      snap.profileId ||
+      this.activeCollection?.collection.defaultProfileId ||
+      "";
+    const profile = pid
+      ? this.network.profiles.find((p) => p.id === pid)
       : undefined;
     if (!profile) return snap;
     const has = (n: string) =>
@@ -506,7 +514,7 @@ class Workspace {
           { name: h.name, value: h.value, enabled: true },
         ];
     const proxy = profile.proxyId
-      ? col?.collection.proxies.find((p) => p.id === profile.proxyId)
+      ? this.network.proxies.find((p) => p.id === profile.proxyId)
       : undefined;
     if (proxy?.host.trim() && !snap.proxy?.trim())
       snap.proxy = proxyToUrl(proxy);
@@ -516,14 +524,15 @@ class Workspace {
   private rid(prefix: string): string {
     return `${prefix}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1296).toString(36)}`;
   }
-  /** Persist the active collection's proxies + profiles. */
-  private async saveColMeta(): Promise<void> {
+  /** Set the collection's default profile (applied to requests that don't pick one). */
+  async setCollectionDefaultProfile(id: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    col.collection.defaultProfileId = id;
     await this.persistCollection();
   }
   async addProxy(): Promise<void> {
-    const col = this.activeCollection;
-    if (!col) return;
-    col.collection.proxies.push({
+    this.network.proxies.push({
       id: this.rid("px"),
       name: "New proxy",
       type: "http",
@@ -532,39 +541,31 @@ class Workspace {
       username: "",
       password: "",
     });
-    await this.saveColMeta();
+    await this.saveProxiesProfiles();
   }
   async removeProxy(id: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col) return;
-    col.collection.proxies = col.collection.proxies.filter((p) => p.id !== id);
-    for (const pr of col.collection.profiles)
+    this.network.proxies = this.network.proxies.filter((p) => p.id !== id);
+    for (const pr of this.network.profiles)
       if (pr.proxyId === id) pr.proxyId = "";
-    await this.saveColMeta();
+    await this.saveProxiesProfiles();
   }
   async addProfile(): Promise<void> {
-    const col = this.activeCollection;
-    if (!col) return;
-    col.collection.profiles.push({
+    this.network.profiles.push({
       id: this.rid("pf"),
       name: "New profile",
       userAgent: "",
       headers: [],
       proxyId: "",
     });
-    await this.saveColMeta();
+    await this.saveProxiesProfiles();
   }
   async removeProfile(id: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col) return;
-    col.collection.profiles = col.collection.profiles.filter(
-      (p) => p.id !== id
-    );
-    await this.saveColMeta();
+    this.network.profiles = this.network.profiles.filter((p) => p.id !== id);
+    await this.saveProxiesProfiles();
   }
-  /** Persist proxy/profile edits (called on blur from the manager UI). */
+  /** Persist the project-level proxy/profile pool (called on blur from the manager UI). */
   async saveProxiesProfiles(): Promise<void> {
-    await this.saveColMeta();
+    await repo.saveNetwork($state.snapshot(this.network) as NetworkSettings);
   }
 
   // --- grpc -----------------------------------------------------------------

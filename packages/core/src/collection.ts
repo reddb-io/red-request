@@ -2,7 +2,6 @@ import { z } from "zod";
 import { authConfigSchema } from "./auth.js";
 import { requestDefinitionSchema } from "./request.js";
 import { timingsSchema } from "./response.js";
-import { proxySchema, profileSchema } from "./proxy.js";
 
 /**
  * `collection.yaml` at the root of a collection folder. Variables and auth defined here
@@ -20,10 +19,8 @@ export const collectionFileSchema = z.object({
   folders: z.array(z.string()).default([]),
   /** Persist Set-Cookie across this collection's requests (browser-like session). */
   cookieJar: z.boolean().default(false),
-  /** Reusable named proxies (http/https/socks5/socks5h). */
-  proxies: z.array(proxySchema).default([]),
-  /** User profiles/identities (User-Agent + headers + a bound proxy). */
-  profiles: z.array(profileSchema).default([]),
+  /** Default project profile applied to requests that don't pick one (empty = none). */
+  defaultProfileId: z.string().default(""),
 });
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
 

@@ -209,6 +209,18 @@
         {/snippet}
       </Menu>
     {/if}
+    <Tooltip text="Proxies & profiles" side="bottom">
+      {#snippet children(p)}
+        <Button
+          {...p}
+          onclick={() => (showProxies = true)}
+          variant="ghost"
+          size="icon-xs"
+          aria-label="proxies and profiles"
+          class="shrink-0">🌐</Button
+        >
+      {/snippet}
+    </Tooltip>
   </div>
 
   <div class="flex gap-1 px-2 pb-2">
@@ -357,7 +369,6 @@
                   label: col.collection.cookieJar ? "Cookie jar: on" : "Cookie jar: off",
                   onSelect: () => ws.toggleCookieJar(col.id),
                 },
-                { label: "Proxies & profiles…", onSelect: () => (showProxies = true) },
                 ...(col.collection.cookieJar
                   ? [{ label: "Clear cookies", onSelect: () => ws.clearCookies(col.id) }]
                   : []),
