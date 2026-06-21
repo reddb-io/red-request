@@ -150,7 +150,7 @@
   <div class="flex items-center gap-2 px-4 py-3">
     <span
       class="grid h-6 w-6 place-items-center rounded bg-[var(--color-brand)] text-sm font-bold text-black"
-      >R</span
+      >{brand.monogram}</span
     >
     <div class="flex min-w-0 flex-1 flex-col leading-tight">
       <span class="text-sm font-semibold">{brand.productName}</span>

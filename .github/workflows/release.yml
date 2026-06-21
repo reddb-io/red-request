@@ -94,6 +94,9 @@ jobs:
       - name: Brand sync
         run: pnpm brand:sync
 
+      - name: Brand icons (regenerate from brand.iconPath, if set)
+        run: pnpm brand:icons
+
       - name: Build core (UI/engine contract)
         run: pnpm --filter @red-request/core build
 

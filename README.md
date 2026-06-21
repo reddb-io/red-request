@@ -84,6 +84,55 @@ single `brand.config.json`. Ship it as _your_ product without forking a line of 
 
 ---
 
+## Make it yours — white-label
+
+Everything that says "Red Request" comes from one file. Say you're at **Stone** and want a
+green build named **Stone API** to hand to your team:
+
+```jsonc
+// brand/brand.config.json
+{
+  "productName": "Stone API",
+  "binaryName": "stone-api",
+  "identifier": "br.com.stone.api",
+  "accentColor": "#00A868", // everything actionable turns green
+  "monogram": "S", // the badge in the sidebar/launcher
+  "iconPath": "brand/assets/stone-1024.png", // square PNG → app/installer icon
+  "deepLinkScheme": "stoneapi",
+  "bgTokens": {
+    "bg-0": "#0b0b0d",
+    "bg-1": "#141417",
+    "bg-2": "#1c1c21",
+    "bg-3": "#26262d",
+  },
+}
+```
+
+```bash
+pnpm install
+pnpm brand:sync     # stamps name, identifier, green theme, deep-link, monogram
+pnpm brand:icons    # regenerates icon.ico/.icns/PNGs from iconPath (tauri icon)
+pnpm desktop:build  # → a branded installer for YOUR OS
+```
+
+`brand:sync` rewrites the Tauri config, the UI theme tokens (`--color-brand` = your accent,
+so buttons, focus rings and highlights all go green) and the runtime brand constants.
+Nothing in `src/` is touched — pure config.
+
+**One binary for every platform.** Tauri can't cross-compile macOS/Windows/Linux from a
+single machine — each OS builds its own. The clean way to ship to everyone:
+
+1. **Fork** this repo and commit your `brand.config.json` + logo/icon.
+2. Push a tag (`pnpm changeset` → merge the Version PR, or just `git tag v1.0.0 && git push --tags`).
+3. The bundled [`release.yml`](.github/workflows/release.yml) runs `brand:sync` + `brand:icons`
+   and builds **branded `.dmg` / `.msi` / `.deb`** for all platforms on its runners — they
+   land on **your fork's** GitHub Release, ready to hand out.
+
+No fork? Run `pnpm desktop:build` on a macOS, a Windows and a Linux box and collect the three
+installers from `apps/desktop/src-tauri/target/release/bundle/`.
+
+---
+
 ## Architecture
 
 ```
@@ -130,14 +179,6 @@ rr .                  # open the project rooted here
 rr ~/work/my-api      # …or another folder
 rr                    # global store
 ```
-
-</details>
-
-<details>
-<summary><b>Rebrand it (white-label)</b></summary>
-
-Edit `brand/brand.config.json`, drop your logo at the referenced path, then `pnpm brand:sync`
-to stamp the Tauri config, UI theme tokens and runtime brand constants.
 
 </details>
 

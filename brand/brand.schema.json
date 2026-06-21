@@ -36,7 +36,19 @@
         "pattern": "^#([0-9a-fA-F]{6})$"
       }
     },
-    "logoPath": { "type": "string" },
+    "monogram": {
+      "type": "string",
+      "maxLength": 3,
+      "description": "1–3 char mark shown in the accent badge (sidebar/launcher). Defaults to the productName initial."
+    },
+    "logoPath": {
+      "type": "string",
+      "description": "Brand logo (SVG), referenced by docs/UI."
+    },
+    "iconPath": {
+      "type": "string",
+      "description": "Square PNG (≥512px, 1024 ideal) for the OS app icons. When set, `pnpm brand:icons` regenerates icon.ico/.icns/PNGs from it via `tauri icon`."
+    },
     "deepLinkScheme": { "type": "string", "pattern": "^[a-z][a-z0-9+.-]*$" },
     "repoUrl": { "type": "string" },
     "supportUrl": { "type": "string" }

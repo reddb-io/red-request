@@ -66,7 +66,7 @@
     <div class="mb-5 flex items-center gap-2.5">
       <span
         class="grid h-7 w-7 place-items-center rounded-md bg-[var(--color-brand)] text-sm font-bold text-black"
-        >R</span
+        >{brand.monogram}</span
       >
       <div class="leading-tight">
         <h1 class="text-base font-semibold text-fg-strong">{brand.productName}</h1>

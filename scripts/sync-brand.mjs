@@ -51,6 +51,8 @@ function syncBrandTs() {
     `export const brand = ${JSON.stringify(
       {
         productName: brand.productName,
+        // Accent badge mark: explicit `monogram`, else the productName's initial.
+        monogram: (brand.monogram || brand.productName[0] || "").toUpperCase(),
         identifier: brand.identifier,
         tagline: brand.tagline ?? "",
         accentColor: brand.accentColor,
