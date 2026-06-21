@@ -37,7 +37,9 @@ function syncThemeCss() {
   const tokens = Object.entries(brand.bgTokens)
     .map(([k, v]) => `  --color-${k}: ${v};`)
     .join("\n");
-  const css = `${GEN}\n@theme {\n  --color-accent: ${brand.accentColor};\n${tokens}\n}\n`;
+  // Emitted as --color-brand (NOT --color-accent): shadcn-svelte owns the `accent`
+  // token namespace (subtle hover bg); our brand red flows through shadcn's `primary`.
+  const css = `${GEN}\n@theme {\n  --color-brand: ${brand.accentColor};\n${tokens}\n}\n`;
   writeFileSync(resolve(root, p), css);
   done(p);
 }

@@ -166,7 +166,7 @@
                 <polyline
                   points={sparkline(p.durations)}
                   fill="none"
-                  stroke="var(--color-accent)"
+                  stroke="var(--color-brand)"
                   stroke-width="1.5"
                 />
               </svg>

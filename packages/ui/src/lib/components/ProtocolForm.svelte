@@ -61,7 +61,7 @@
   {#if kind === "udp"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">wait reply</span>
-      <input type="checkbox" bind:checked={net.waitResponse} class="accent-[var(--color-accent)]" />
+      <input type="checkbox" bind:checked={net.waitResponse} class="accent-[var(--color-brand)]" />
     </label>
   {/if}
 

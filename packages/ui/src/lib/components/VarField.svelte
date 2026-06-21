@@ -177,7 +177,7 @@
   const frame = $derived(
     flush
       ? "bg-transparent"
-      : "rounded-md border border-border bg-[var(--color-bg-2)] transition focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+      : "rounded-md border border-border bg-[var(--color-bg-2)] transition focus-within:border-[var(--color-brand)] focus-within:ring-1 focus-within:ring-[var(--color-brand)]"
   );
 </script>
 
@@ -214,7 +214,7 @@
       {rows}
       aria-label={ariaLabel}
       spellcheck="false"
-      class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-fg-faint"
+      class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={refreshMenu}
       onclick={refreshMenu}
@@ -234,7 +234,7 @@
       {placeholder}
       aria-label={ariaLabel}
       spellcheck="false"
-      class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-accent)] outline-none placeholder:text-fg-faint"
+      class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={refreshMenu}
       onclick={refreshMenu}

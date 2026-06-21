@@ -22,7 +22,7 @@
       <input
         type="checkbox"
         bind:checked={item.enabled}
-        class="accent-[var(--color-accent)]"
+        class="accent-[var(--color-brand)]"
         aria-label="enabled"
       />
       <div class="flex-1">

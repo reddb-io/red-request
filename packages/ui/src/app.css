@@ -74,7 +74,7 @@
   --card-foreground: var(--color-fg);
   --popover: var(--color-bg-1);
   --popover-foreground: var(--color-fg);
-  --primary: var(--color-accent);
+  --primary: var(--color-brand);
   --primary-foreground: #0b0b0d;
   --secondary: var(--color-bg-2);
   --secondary-foreground: var(--color-fg);
@@ -85,8 +85,8 @@
   --destructive: oklch(0.62 0.22 18);
   --border: var(--color-border);
   --input: var(--color-border);
-  --ring: var(--color-accent);
-  --chart-1: var(--color-accent);
+  --ring: var(--color-brand);
+  --chart-1: var(--color-brand);
   --chart-2: oklch(0.7 0.16 40);
   --chart-3: oklch(0.62 0.13 60);
   --chart-4: oklch(0.52 0.1 20);
@@ -94,12 +94,12 @@
   --radius: 0.5rem;
   --sidebar: var(--color-bg-1);
   --sidebar-foreground: var(--color-fg);
-  --sidebar-primary: var(--color-accent);
+  --sidebar-primary: var(--color-brand);
   --sidebar-primary-foreground: #0b0b0d;
   --sidebar-accent: var(--color-bg-2);
   --sidebar-accent-foreground: var(--color-fg-strong);
   --sidebar-border: var(--color-border);
-  --sidebar-ring: var(--color-accent);
+  --sidebar-ring: var(--color-brand);
 }
 
 html,
@@ -178,7 +178,7 @@ body {
       select-none disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
-    @apply bg-[var(--color-accent)] text-black hover:brightness-110;
+    @apply bg-[var(--color-brand)] text-black hover:brightness-110;
   }
   .btn-ghost {
     @apply border border-border text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
@@ -209,24 +209,24 @@ body {
       transition-colors hover:text-fg;
   }
   .seg.is-active {
-    @apply bg-[var(--color-bg-2)] text-[var(--color-accent)];
+    @apply bg-[var(--color-bg-2)] text-[var(--color-brand)];
   }
 
   /* ---- form controls ---- */
   .input {
     @apply h-6 w-full rounded-md border border-border bg-[var(--color-bg-2)] px-2
       text-sm text-fg outline-none transition-colors placeholder:text-fg-faint
-      focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
+      focus:border-[var(--color-brand)] focus:ring-1 focus:ring-[var(--color-brand)];
   }
   .textarea {
     @apply w-full rounded-md border border-border bg-[var(--color-bg-2)] p-1.5 text-sm
-      text-fg outline-none placeholder:text-fg-faint focus:border-[var(--color-accent)]
-      focus:ring-1 focus:ring-[var(--color-accent)];
+      text-fg outline-none placeholder:text-fg-faint focus:border-[var(--color-brand)]
+      focus:ring-1 focus:ring-[var(--color-brand)];
   }
   .select {
     @apply h-6 w-full cursor-pointer appearance-none rounded-md border border-border
       bg-[var(--color-bg-2)] py-0 pr-6 pl-2 text-sm text-fg outline-none transition-colors
-      focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)];
+      focus:border-[var(--color-brand)] focus:ring-1 focus:ring-[var(--color-brand)];
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2371717a' stroke-width='1.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 0.5rem center;
@@ -238,7 +238,7 @@ body {
     @apply cursor-pointer px-2 py-1.5 text-sm capitalize text-fg-muted transition-colors hover:text-fg;
   }
   .tab.is-active {
-    @apply text-[var(--color-accent)];
+    @apply text-[var(--color-brand)];
   }
 
   /* ---- typography + badges ---- */

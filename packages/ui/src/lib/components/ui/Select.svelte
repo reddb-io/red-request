@@ -66,7 +66,7 @@
           >
             {#snippet children({ selected })}
               <span class="truncate">{item.label}</span>
-              {#if selected}<span class="text-[var(--color-accent)]">✓</span>{/if}
+              {#if selected}<span class="text-[var(--color-brand)]">✓</span>{/if}
             {/snippet}
           </Select.Item>
         {/each}

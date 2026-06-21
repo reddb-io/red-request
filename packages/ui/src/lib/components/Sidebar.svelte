@@ -126,7 +126,7 @@
 >
   <div class="flex items-center gap-2 px-4 py-3">
     <span
-      class="grid h-6 w-6 place-items-center rounded bg-[var(--color-accent)] text-sm font-bold text-black"
+      class="grid h-6 w-6 place-items-center rounded bg-[var(--color-brand)] text-sm font-bold text-black"
       >R</span
     >
     <div class="flex min-w-0 flex-col leading-tight">
@@ -234,7 +234,7 @@
         <div
           class="group/col flex items-center justify-between rounded px-2 py-1"
           class:ring-1={dropKey === `${col.id}::root`}
-          class:ring-[var(--color-accent)]={dropKey === `${col.id}::root`}
+          class:ring-[var(--color-brand)]={dropKey === `${col.id}::root`}
           ondragover={(e) => {
             if (!draggingId) return;
             e.preventDefault();
@@ -323,7 +323,7 @@
           <div
             class="group/folder relative mt-0.5 flex items-center rounded"
             class:ring-1={dropKey === key}
-            class:ring-[var(--color-accent)]={dropKey === key}
+            class:ring-[var(--color-brand)]={dropKey === key}
             ondragover={(e) => {
               if (!draggingId) return;
               e.preventDefault();

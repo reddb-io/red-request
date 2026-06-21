@@ -108,7 +108,7 @@
       {#if ws.activeReq.kind === "http"}
         <!-- method + url joined as one bar, like Insomnia/Postman -->
         <div
-          class="flex h-7 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]"
+          class="flex h-7 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-brand)] focus-within:ring-1 focus-within:ring-[var(--color-brand)]"
         >
           <!-- method stays borderless/transparent to preserve the joined-bar look -->
           <Select
@@ -176,14 +176,14 @@
       {:else if tab === "path"}
         {#if detected.length === 0}
           <p class="text-sm text-fg-faint">
-            No path params. Add <code class="mono text-[var(--color-accent)]">:name</code> to the URL
+            No path params. Add <code class="mono text-[var(--color-brand)]">:name</code> to the URL
             (e.g. <code class="mono">/users/:id</code>).
           </p>
         {:else}
           <div class="flex flex-col gap-2">
             {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
               <label class="flex items-center gap-2 text-sm">
-                <span class="mono w-32 shrink-0 text-[var(--color-accent)]">:{p.name}</span>
+                <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
                 <input bind:value={p.value} placeholder="value" class="input flex-1" />
               </label>
             {/each}

@@ -63,7 +63,7 @@
     <div class="w-[640px]">
     <div class="mb-5 flex items-center gap-2.5">
       <span
-        class="grid h-7 w-7 place-items-center rounded-md bg-[var(--color-accent)] text-sm font-bold text-black"
+        class="grid h-7 w-7 place-items-center rounded-md bg-[var(--color-brand)] text-sm font-bold text-black"
         >R</span
       >
       <div class="leading-tight">
@@ -121,10 +121,10 @@
             <button
               onclick={() => choose(r.dir)}
               disabled={busy}
-              class="panel flex w-full flex-col items-start gap-1 p-3 pr-8 text-left transition hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
+              class="panel flex w-full flex-col items-start gap-1 p-3 pr-8 text-left transition hover:border-[var(--color-brand)] hover:bg-[var(--color-bg-2)] disabled:opacity-50"
             >
               <span class="flex w-full items-center gap-2">
-                <span class="text-fg-subtle group-hover:text-[var(--color-accent)]">▸</span>
+                <span class="text-fg-subtle group-hover:text-[var(--color-brand)]">▸</span>
                 <span class="truncate text-sm font-medium text-fg-strong">{r.name}</span>
               </span>
               <span class="mono w-full truncate text-xs text-fg-faint">{r.dir}</span>
@@ -140,7 +140,7 @@
                   {...p}
                   onclick={() => togglePin(r)}
                   class="btn-icon absolute top-2 right-2 {r.pinned
-                    ? 'text-[var(--color-accent)]'
+                    ? 'text-[var(--color-brand)]'
                     : ''}"
                 >
                   {r.pinned ? "★" : "☆"}

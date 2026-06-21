@@ -42,7 +42,7 @@
         <h1 class="mb-2 text-lg font-semibold text-fg-strong">{brand.productName}</h1>
         <p class="max-w-md text-sm text-fg-muted">
           This UI talks to a native bridge (engine + RedDB + keychain) that only exists inside
-          the desktop shell. Run <code class="mono text-[var(--color-accent)]"
+          the desktop shell. Run <code class="mono text-[var(--color-brand)]"
             >pnpm desktop:dev</code
           > to launch the app.
         </p>

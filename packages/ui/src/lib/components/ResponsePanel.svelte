@@ -43,7 +43,7 @@
     { key: "dns", label: "DNS", color: "#60a5fa" },
     { key: "tcp", label: "TCP", color: "#a78bfa" },
     { key: "tls", label: "TLS", color: "#fbbf24" },
-    { key: "firstByte", label: "Wait", color: "var(--color-accent)" },
+    { key: "firstByte", label: "Wait", color: "var(--color-brand)" },
     { key: "total", label: "Download", color: "#34d399" },
   ] as const;
 
