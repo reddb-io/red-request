@@ -159,6 +159,8 @@
   // --- timing waterfall ---
   type Timings = NonNullable<ResponseResult["timings"]>;
   const PHASES = [
+    { key: "proxyConnect", label: "Proxy", color: "#fb923c" },
+    { key: "proxyTls", label: "Proxy TLS", color: "#f97316" },
     { key: "dns", label: "DNS", color: "#60a5fa" },
     { key: "tcp", label: "TCP", color: "#a78bfa" },
     { key: "tls", label: "TLS", color: "#fbbf24" },

@@ -19,6 +19,7 @@ import type {
   ResponseResult,
   Kv,
   AuthConfig,
+  Timings,
 } from "@red-request/core";
 import { cookieHeader, storeSetCookies } from "./cookies.js";
 
@@ -178,6 +179,14 @@ function doRequest(
       );
     }
     const mod = u.protocol === "https:" ? https : http;
+    // Captures in ms-since-request-started. Undefined = not yet measured.
+    const t: Partial<Timings> = {};
+    // mark a one-shot listener for the FIRST secureConnect we observe on this run
+    // (the agent keeps the proxy socket warm — we only want to charge the TLS handshake
+    // when it actually happens, not on every keep-alive reuse).
+    let seenSecureConnect = false;
+    const startedAt = started;
+    const stamp = () => Date.now() - startedAt;
     const req = mod.request(
       u,
       {
@@ -188,6 +197,14 @@ function doRequest(
         timeout: def.timeout || 30_000,
       },
       (res) => {
+        // firstByte is when the origin's response headers arrived (TTFB).
+        // For an HTTPS-via-proxy: the proxy+origin TLS handshakes happen on the
+        // same socket before this fires, so secureConnect already updated t.proxyTls.
+        t.firstByte = stamp();
+        // If the agent tunneled before handing us the socket (HttpsProxyAgent), we
+        // never saw a `secureConnect` event — surface that TLS time as the `tls` phase
+        // so the timings bar still shows it.
+        if (t.tls == null && t.proxyTls != null) t.tls = t.proxyTls;
         const status = res.statusCode ?? 0;
         const loc = res.headers.location;
         if (
@@ -231,6 +248,9 @@ function doRequest(
           const respHeaders: Record<string, string> = {};
           for (const [k, v] of Object.entries(res.headers))
             respHeaders[k] = Array.isArray(v) ? v.join(", ") : String(v ?? "");
+          const total = Date.now() - started;
+          t.content = total;
+          t.total = total;
           const result: ResponseResult = {
             status,
             statusText: res.statusMessage ?? "",
@@ -240,7 +260,8 @@ function doRequest(
             bodyText: isText ? buf.toString("utf8") : "",
             contentType: ct || undefined,
             size: buf.length,
-            durationMs: Date.now() - started,
+            durationMs: total,
+            timings: t as Timings,
           };
           if (!isText && buf.length > 0)
             result.bodyBase64 = buf.toString("base64");
@@ -254,6 +275,34 @@ function doRequest(
     req.on("timeout", () => {
       req.destroy();
       resolve(errResult(u.toString(), started, "request timed out"));
+    });
+    // node fires `socket` when the agent hands us a socket. We grab a `proxyConnect`
+    // reading here — for a fresh dial the socket may already be `readyState: open`
+    // (https-proxy-agent CONNECT-tunnels before handing the socket off), so the
+    // lookup/connect/secureConnect events often DON'T fire on the node:http side.
+    // For other paths (socks, plain http over proxy) the events still fire normally.
+    req.on("socket", (sock) => {
+      const s = sock as net.Socket & { isTLSSocket?: boolean };
+      const handed = stamp();
+      // For HTTPS-via-proxy the tunnel is already done by the time we get here.
+      // We charge `proxyConnect` once the socket is ready (open or tunneled) — that
+      // captures the TCP + CONNECT portion whether we observed it as events or not.
+      if (t.proxyConnect == null) t.proxyConnect = handed;
+      s.on("lookup", () => {
+        if (t.dns == null) t.dns = stamp();
+      });
+      s.on("connect", () => {
+        // If we didn't see socket.readyState===open yet, this is a fresh TCP dial.
+        if (t.tcp == null) t.tcp = stamp();
+      });
+      s.on("secureConnect", () => {
+        // First TLS handshake on the tunneled socket (only meaningful if the agent
+        // hadn't already tunneled before handing the socket to us).
+        if (!seenSecureConnect) {
+          seenSecureConnect = true;
+          t.proxyTls = stamp();
+        }
+      });
     });
     if (body != null) req.write(body);
     req.end();
@@ -303,6 +352,9 @@ async function socksDispatch(
   if (body != null) headers["Content-Length"] = String(Buffer.byteLength(body));
 
   let raw: Buffer;
+  // timings collected along the way; we attach them to the parsed response below.
+  const t: Partial<Timings> = {};
+  const stamp = () => Date.now() - started;
   try {
     const { socket } = await SocksClient.createConnection({
       proxy: {
@@ -316,19 +368,29 @@ async function socksDispatch(
       destination: { host: u.hostname, port },
       timeout,
     });
+    // Socks handshake (greeting + auth + CONNECT) is complete — that's `proxyConnect`.
+    t.proxyConnect = stamp();
+    t.tcp = stamp();
 
     const sock: net.Socket | tls.TLSSocket = isHttps
       ? await new Promise<tls.TLSSocket>((res, rej) => {
-          const t = tls.connect(
+          const startTls = Date.now() - started;
+          const t2 = tls.connect(
             {
               socket,
               servername: u.hostname,
               ALPNProtocols: ["http/1.1"],
               rejectUnauthorized: !def.insecure,
             },
-            () => res(t)
+            () => {
+              // For socks the agent doesn't do this TLS for us — we measure it here.
+              const now = Date.now() - started;
+              t.proxyTls = now;
+              t.tls = now;
+              res(t2);
+            }
           );
-          t.on("error", rej);
+          t2.on("error", rej);
         })
       : socket;
 
@@ -362,6 +424,7 @@ async function socksDispatch(
     started,
     def,
     proxyUrl,
+    t,
     redirects,
     jarKey
   );
@@ -388,6 +451,7 @@ function parseSocksResponse(
   started: number,
   def: RequestDefinition,
   proxyUrl: string,
+  t: Partial<Timings>,
   redirects: number,
   jarKey?: string
 ): Promise<ResponseResult> | ResponseResult {
@@ -429,6 +493,13 @@ function parseSocksResponse(
     );
   }
 
+  // TTFB = when the response headers came off the wire (we read them as a whole here,
+  // so use the first-byte time recorded at the head of the buffer as a proxy for it).
+  const total = Date.now() - started;
+  t.firstByte = t.firstByte ?? (sep >= 0 ? Date.now() - started : undefined);
+  t.content = total;
+  t.total = total;
+
   const ct = headers["content-type"] ?? "";
   const isText = ct === "" || TEXTY.test(ct);
   const result: ResponseResult = {
@@ -440,7 +511,8 @@ function parseSocksResponse(
     bodyText: isText ? body.toString("utf8") : "",
     contentType: ct || undefined,
     size: body.length,
-    durationMs: Date.now() - started,
+    durationMs: total,
+    timings: t as Timings,
   };
   if (!isText && body.length > 0) result.bodyBase64 = body.toString("base64");
   return result;
