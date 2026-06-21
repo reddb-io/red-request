@@ -16,6 +16,7 @@ import type {
   AuthConfig,
   Kv,
 } from "@red-request/core";
+import { cookieHeader, storeSetCookies } from "./cookies.js";
 
 type Plugin = unknown;
 type ReckerCall = (
@@ -168,9 +169,12 @@ async function mapResponse(
   return result;
 }
 
-/** Dispatch an already variable-resolved request through recker. Never throws. */
+/** Dispatch an already variable-resolved request through recker. Never throws.
+ *  `jarKey` (a collection id) enables the cookie jar: stored cookies are sent and the
+ *  response's Set-Cookie is absorbed. */
 export async function dispatch(
-  def: RequestDefinition
+  def: RequestDefinition,
+  jarKey?: string
 ): Promise<ResponseResult> {
   const startedAt = Date.now();
   const headers = headerRecord(def.headers);
@@ -180,6 +184,18 @@ export async function dispatch(
   if (authPlugin) plugins.push(authPlugin);
 
   const url = appendQuery(def.url, def.query);
+  if (jarKey) {
+    const jarCookies = cookieHeader(jarKey, url);
+    if (jarCookies) {
+      const has = lowerKeys(headers).has("cookie");
+      const existing = has
+        ? (headers[
+            Object.keys(headers).find((k) => k.toLowerCase() === "cookie")!
+          ] ?? "")
+        : "";
+      headers["Cookie"] = existing ? `${existing}; ${jarCookies}` : jarCookies;
+    }
+  }
   const options: Record<string, unknown> = {
     headers,
     throwHttpErrors: false,
@@ -203,6 +219,12 @@ export async function dispatch(
       throw new Error(`unsupported method: ${def.method}`);
     }
     const res = await call.call(client, url, options);
+    if (jarKey) {
+      const sc =
+        (res.headers as { getSetCookie?: () => string[] }).getSetCookie?.() ??
+        [];
+      storeSetCookies(jarKey, url, sc);
+    }
     return await mapResponse(res, startedAt);
   } catch (err: unknown) {
     const e = err as {

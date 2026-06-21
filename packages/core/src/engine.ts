@@ -11,8 +11,13 @@ export const httpSendParamsSchema = z.object({
    * secret). The engine resolves `{{var}}` placeholders with this before dispatching.
    */
   variables: z.record(z.string(), z.string()).default({}),
+  /** When set, persist/apply cookies under this jar key (collection id). */
+  cookieJarKey: z.string().optional(),
 });
 export type HttpSendParams = z.infer<typeof httpSendParamsSchema>;
+
+export const cookiesClearParamsSchema = z.object({ key: z.string() });
+export type CookiesClearParams = z.infer<typeof cookiesClearParamsSchema>;
 
 export const scriptTestSchema = z.object({
   name: z.string(),

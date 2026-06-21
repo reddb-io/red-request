@@ -351,6 +351,13 @@
                 { label: "Rename", onSelect: () => startRenameCol(col) },
                 { label: "Import…", onSelect: () => (showImport = true) },
                 {
+                  label: col.collection.cookieJar ? "Cookie jar: on" : "Cookie jar: off",
+                  onSelect: () => ws.toggleCookieJar(col.id),
+                },
+                ...(col.collection.cookieJar
+                  ? [{ label: "Clear cookies", onSelect: () => ws.clearCookies(col.id) }]
+                  : []),
+                {
                   label: "Delete collection",
                   onSelect: () => ws.deleteCollection(col.id),
                   destructive: true,

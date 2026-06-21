@@ -8,6 +8,7 @@ import {
   wsOpenParamsSchema,
   wsSendParamsSchema,
   wsCloseParamsSchema,
+  cookiesClearParamsSchema,
   resolveRequest,
   type HttpSendResult,
   type Oauth2TokenResult,
@@ -18,13 +19,15 @@ import { dispatch, oauth2Token } from "./recker.js";
 import { runPipeline } from "./pipeline.js";
 import { runLoop } from "./runner.js";
 import { wsOpen, wsSend, wsClose, sseOpen, sseClose } from "./stream.js";
+import { clearJar } from "./cookies.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
 export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.httpSend]: async (raw): Promise<HttpSendResult> => {
-    const { request, variables } = httpSendParamsSchema.parse(raw);
-    const out = await runPipeline(request, variables);
+    const { request, variables, cookieJarKey } =
+      httpSendParamsSchema.parse(raw);
+    const out = await runPipeline(request, variables, cookieJarKey);
     return {
       response: out.response,
       unresolved: out.unresolved,
@@ -85,6 +88,12 @@ export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.sseClose]: async (raw): Promise<{ ok: boolean }> => {
     const { id } = wsCloseParamsSchema.parse(raw);
     return sseClose(id);
+  },
+
+  [ENGINE_METHODS.cookiesClear]: async (raw): Promise<{ ok: boolean }> => {
+    const { key } = cookiesClearParamsSchema.parse(raw);
+    clearJar(key);
+    return { ok: true };
   },
 
   [ENGINE_METHODS.oauth2Token]: async (raw): Promise<Oauth2TokenResult> => {

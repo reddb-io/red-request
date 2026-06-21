@@ -33,6 +33,7 @@ import {
   wsClose,
   sseOpen,
   sseClose,
+  cookiesClear,
 } from "./rpc";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
@@ -290,6 +291,10 @@ class Workspace {
       const result = await httpSend({
         request: $state.snapshot(this.activeReq) as RequestDefinition,
         variables,
+        cookieJarKey:
+          this.activeCollection?.collection.cookieJar && this.activeColId
+            ? this.activeColId
+            : undefined,
       });
       this.response = result.response;
       this.unresolved = result.unresolved;
@@ -696,6 +701,24 @@ class Workspace {
       colId,
       $state.snapshot(col.collection) as typeof col.collection
     );
+  }
+
+  /** Toggle the per-collection cookie jar (persist Set-Cookie across its requests). */
+  async toggleCookieJar(colId: string): Promise<void> {
+    const col = this.collections.find((c) => c.id === colId);
+    if (!col) return;
+    col.collection.cookieJar = !col.collection.cookieJar;
+    await repo.saveCollectionMeta(
+      colId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+    if (!col.collection.cookieJar)
+      await cookiesClear({ key: colId }).catch(() => {});
+  }
+
+  /** Clear the cookies stored for a collection's jar. */
+  async clearCookies(colId: string): Promise<void> {
+    await cookiesClear({ key: colId }).catch(() => {});
   }
 
   /** Delete a collection (and everything it owns); select another if it was active. */

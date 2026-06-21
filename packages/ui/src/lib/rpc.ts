@@ -10,6 +10,7 @@ import {
   type WsOpenParams,
   type WsSendParams,
   type WsCloseParams,
+  type CookiesClearParams,
 } from "@red-request/core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
@@ -45,6 +46,11 @@ export function sseOpen(params: WsOpenParams): Promise<{ ok: boolean }> {
 }
 export function sseClose(params: WsCloseParams): Promise<{ ok: boolean }> {
   return engineCall(ENGINE_METHODS.sseClose, params);
+}
+export function cookiesClear(
+  params: CookiesClearParams
+): Promise<{ ok: boolean }> {
+  return engineCall(ENGINE_METHODS.cookiesClear, params);
 }
 
 /** Subscribe to engine stream notifications (SSE/WS/progress) re-emitted by Rust. */
