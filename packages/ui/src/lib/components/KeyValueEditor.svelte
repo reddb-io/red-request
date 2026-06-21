@@ -15,11 +15,52 @@
   function removeAt(i: number) {
     items.splice(i, 1);
   }
+
+  // drag-to-reorder rows (grab the ⠿ handle)
+  let dragIndex = $state<number | null>(null);
+  let overIndex = $state<number | null>(null);
+  function drop() {
+    if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
+      const [moved] = items.splice(dragIndex, 1);
+      items.splice(overIndex, 0, moved!);
+    }
+    dragIndex = null;
+    overIndex = null;
+  }
 </script>
 
 <div class="flex flex-col gap-1">
   {#each items as item, i (i)}
-    <div class="flex items-center gap-2">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="flex items-center gap-2 rounded {dragIndex === i ? 'opacity-40' : ''} {overIndex ===
+        i && dragIndex !== i
+        ? 'ring-1 ring-[var(--color-brand)]'
+        : ''}"
+      ondragover={(e) => {
+        if (dragIndex === null) return;
+        e.preventDefault();
+        overIndex = i;
+      }}
+      ondrop={(e) => {
+        e.preventDefault();
+        drop();
+      }}
+    >
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <span
+        role="button"
+        tabindex="-1"
+        aria-label="drag to reorder"
+        draggable="true"
+        ondragstart={() => (dragIndex = i)}
+        ondragend={() => {
+          dragIndex = null;
+          overIndex = null;
+        }}
+        class="mono cursor-grab px-0.5 text-fg-faint select-none hover:text-fg-muted active:cursor-grabbing"
+        >⠿</span
+      >
       <input
         type="checkbox"
         bind:checked={item.enabled}

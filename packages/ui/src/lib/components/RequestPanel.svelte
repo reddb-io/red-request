@@ -42,6 +42,20 @@
   });
   const bodyTypes = ["none", "json", "raw", "form", "xml", "graphql"] as const;
 
+  // Pretty-print the body (JSON / GraphQL payloads); leaves content as-is if it doesn't parse.
+  const canPrettify = $derived(
+    ws.activeReq?.body.type === "json" || ws.activeReq?.body.type === "graphql"
+  );
+  function prettify() {
+    const req = ws.activeReq;
+    if (!req) return;
+    try {
+      req.body.content = JSON.stringify(JSON.parse(req.body.content), null, 2);
+    } catch {
+      /* not valid JSON — leave the content untouched */
+    }
+  }
+
   // Path params auto-detected from `:name` segments in the URL.
   const detected = $derived(
     ws.activeReq
@@ -224,12 +238,20 @@
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
       {:else}
         <div class="flex flex-col gap-2">
-          <Select
-            bind:value={ws.activeReq.body.type}
-            items={bodyTypes}
-            ariaLabel="body type"
-            class="w-auto"
-          />
+          <div class="flex items-center gap-2">
+            <Select
+              value={ws.activeReq.body.type}
+              items={bodyTypes}
+              onChange={(v) => ws.setBodyType(v)}
+              ariaLabel="body type"
+              class="w-auto"
+            />
+            {#if canPrettify}
+              <Button variant="outline" size="xs" onclick={prettify} title="Format JSON"
+                >Prettify</Button
+              >
+            {/if}
+          </div>
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
           {:else if ws.activeReq.body.type !== "none"}
@@ -238,6 +260,7 @@
               known={ws.knownVars}
               values={ws.varTitles}
               multiline
+              lineNumbers
               rows={12}
               ariaLabel="Request body"
               placeholder={"request body (vars via {{NAME}})"}

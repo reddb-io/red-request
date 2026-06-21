@@ -3,6 +3,7 @@ import {
   storedEnvironmentSchema,
   newRequest,
   curlToRequest,
+  type BodyType,
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
@@ -406,6 +407,51 @@ class Workspace {
       if (idx >= 0) col.requests[idx] = snap;
       else col.requests.push(snap);
     }
+  }
+
+  /** Media type sent for each body kind (Content-Type). */
+  private static readonly CONTENT_TYPES: Partial<Record<BodyType, string>> = {
+    json: "application/json",
+    xml: "application/xml",
+    graphql: "application/json",
+    raw: "text/plain",
+    form: "application/x-www-form-urlencoded",
+    multipart: "multipart/form-data",
+  };
+
+  /** Upsert a header by case-insensitive name (re-enables it if it was disabled). */
+  private upsertHeader(
+    req: RequestDefinition,
+    name: string,
+    value: string
+  ): void {
+    const h = req.headers.find(
+      (x) => x.name.toLowerCase() === name.toLowerCase()
+    );
+    if (h) {
+      h.value = value;
+      h.enabled = true;
+    } else {
+      req.headers.push({ name, value, enabled: true });
+    }
+  }
+
+  /**
+   * Set the request body type and keep the headers in sync: Content-Type for what we send,
+   * plus a matching Accept for what we expect back (json↔json, xml↔xml).
+   */
+  setBodyType(type: BodyType): void {
+    const req = this.activeReq;
+    if (!req) return;
+    req.body.type = type;
+    if (type === "none") return;
+    const ct = Workspace.CONTENT_TYPES[type];
+    if (ct) this.upsertHeader(req, "Content-Type", ct);
+    this.upsertHeader(
+      req,
+      "Accept",
+      type === "xml" ? "application/xml" : "application/json"
+    );
   }
 
   // --- collection structure (requests + folders) --------------------------

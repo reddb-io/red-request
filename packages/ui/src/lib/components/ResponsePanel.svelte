@@ -1,8 +1,22 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
   import type { ResponseResult } from "@red-request/core";
+  import { Button } from "./ui/button/index.js";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
+
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
+  async function copyBody() {
+    try {
+      await navigator.clipboard.writeText(prettyBody);
+      copied = true;
+      clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => (copied = false), 1200);
+    } catch {
+      /* clipboard unavailable */
+    }
+  }
 
   const r = $derived(ws.response);
   const failed = $derived(ws.tests.filter((t) => !t.passed).length);
@@ -30,6 +44,7 @@
     }
     return r.bodyText;
   });
+  const bodyLines = $derived(prettyBody.split("\n"));
 
   function fmtSize(n: number): string {
     if (n < 1024) return `${n} B`;
@@ -124,6 +139,13 @@
           ⚠ {ws.unresolved.join(", ")}
         </span>
       {/if}
+      <Button
+        onclick={copyBody}
+        variant="outline"
+        size="xs"
+        class="ml-auto"
+        title="Copy response body">{copied ? "Copied ✓" : "Copy"}</Button
+      >
     </div>
 
     <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
@@ -161,7 +183,15 @@
             {/each}
           </div>
         {/if}
-        <pre class="mono text-xs whitespace-pre-wrap text-fg">{prettyBody}</pre>
+        <div class="flex text-xs">
+          <div
+            class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+            aria-hidden="true"
+          >
+            {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+          </div>
+          <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
+        </div>
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
           <tbody>

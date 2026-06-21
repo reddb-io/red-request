@@ -19,6 +19,8 @@
     dense?: boolean;
     flush?: boolean;
     ariaLabel?: string;
+    /** Code-editor mode (multiline only): line-number gutter + current-line highlight, no wrap. */
+    lineNumbers?: boolean;
   };
   let {
     value = $bindable(""),
@@ -32,10 +34,35 @@
     dense = false,
     flush = false,
     ariaLabel = "",
+    lineNumbers = false,
   }: Props = $props();
 
   let el = $state<HTMLInputElement | HTMLTextAreaElement | undefined>();
   let backdrop = $state<HTMLDivElement | undefined>();
+  let gutter = $state<HTMLDivElement | undefined>();
+
+  // Code-editor gutter (multiline + lineNumbers): line metrics measured from the textarea
+  // so the numbers + current-line band line up exactly, whatever the density.
+  const gutterMode = $derived(multiline && lineNumbers);
+  let caretLine = $state(0);
+  let scrollTop = $state(0);
+  let lineH = $state(17.5);
+  let padTop = $state(6);
+  const lineCount = $derived((value ?? "").split("\n").length);
+  const lines = $derived(Array.from({ length: lineCount }, (_, i) => i));
+  function updateCaret() {
+    if (!el) return;
+    const pos = el.selectionStart ?? 0;
+    caretLine = (value ?? "").slice(0, pos).split("\n").length - 1;
+  }
+  $effect(() => {
+    if (!gutterMode || !el) return;
+    const cs = getComputedStyle(el);
+    const lh = parseFloat(cs.lineHeight);
+    const pt = parseFloat(cs.paddingTop);
+    if (!Number.isNaN(lh)) lineH = lh;
+    if (!Number.isNaN(pt)) padTop = pt;
+  });
 
   let showMenu = $state(false);
   let menuItems = $state<string[]>([]);
@@ -89,9 +116,13 @@
   });
 
   function syncScroll() {
-    if (!backdrop || !el) return;
-    backdrop.scrollLeft = el.scrollLeft;
-    backdrop.scrollTop = el.scrollTop;
+    if (!el) return;
+    scrollTop = el.scrollTop;
+    if (backdrop) {
+      backdrop.scrollLeft = el.scrollLeft;
+      backdrop.scrollTop = el.scrollTop;
+    }
+    if (gutter) gutter.scrollTop = el.scrollTop;
   }
 
   // Hover tooltip: hit-test the token rects under the pointer (backdrop stays behind, so
@@ -119,6 +150,7 @@
 
   function refreshMenu() {
     if (!el) return;
+    updateCaret();
     const caret = el.selectionStart ?? (value ?? "").length;
     const before = (value ?? "").slice(0, caret);
     const open = before.lastIndexOf("{{");
@@ -171,7 +203,11 @@
     multiline ? "py-1.5 leading-5" : dense ? "h-6 leading-6" : "h-7 leading-7"
   );
   const wrap = $derived(
-    multiline ? "whitespace-pre-wrap break-words" : "whitespace-pre"
+    gutterMode
+      ? "whitespace-pre"
+      : multiline
+        ? "whitespace-pre-wrap break-words"
+        : "whitespace-pre"
   );
   const shared = $derived(`mono ${pad} ${metrics} ${wrap} text-sm`);
   const frame = $derived(
@@ -181,7 +217,7 @@
   );
 </script>
 
-<div class="relative {frame}">
+{#snippet backdropLayer()}
   <div
     bind:this={backdrop}
     aria-hidden="true"
@@ -196,16 +232,9 @@
               ? 'bg-sky-500/15 text-sky-300'
               : 'bg-emerald-500/15 text-emerald-300'}">{s.text}</span
         >{/if}{/each}</div>
+{/snippet}
 
-  {#if tip}
-    <div
-      class="pointer-events-none fixed z-[60] max-w-xs truncate rounded border border-border bg-[var(--color-bg-0)] px-2 py-1 text-xs text-fg shadow-xl"
-      style="left: {tip.x}px; top: {tip.y}px"
-    >
-      {tip.text}
-    </div>
-  {/if}
-
+{#snippet field()}
   {#if multiline}
     <textarea
       bind:this={el}
@@ -248,7 +277,9 @@
       }}
     />
   {/if}
+{/snippet}
 
+{#snippet menu()}
   {#if showMenu}
     <ul
       class="panel absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto py-1 shadow-xl"
@@ -272,5 +303,47 @@
         </li>
       {/each}
     </ul>
+  {/if}
+{/snippet}
+
+<div class="relative {frame} {gutterMode ? 'flex' : ''}">
+  {#if gutterMode}
+    <div
+      bind:this={gutter}
+      aria-hidden="true"
+      class="mono shrink-0 overflow-hidden border-r border-border px-2 text-right text-xs text-fg-faint select-none"
+      style="padding-top:{padTop}px; padding-bottom:{padTop}px"
+    >
+      {#each lines as i (i)}
+        <div
+          style="height:{lineH}px; line-height:{lineH}px"
+          class={i === caretLine ? "text-fg-muted" : ""}
+        >
+          {i + 1}
+        </div>
+      {/each}
+    </div>
+    <div class="relative min-w-0 flex-1 overflow-hidden">
+      <div
+        class="pointer-events-none absolute inset-x-0 bg-white/[0.04]"
+        style="top:{padTop + caretLine * lineH - scrollTop}px; height:{lineH}px"
+      ></div>
+      {@render backdropLayer()}
+      {@render field()}
+    </div>
+    {@render menu()}
+  {:else}
+    {@render backdropLayer()}
+    {@render field()}
+    {@render menu()}
+  {/if}
+
+  {#if tip}
+    <div
+      class="pointer-events-none fixed z-[60] max-w-xs truncate rounded border border-border bg-[var(--color-bg-0)] px-2 py-1 text-xs text-fg shadow-xl"
+      style="left: {tip.x}px; top: {tip.y}px"
+    >
+      {tip.text}
+    </div>
   {/if}
 </div>
