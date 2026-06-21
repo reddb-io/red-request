@@ -190,6 +190,7 @@ export async function dispatch(
   else if (typeof def.maxRedirects === "number")
     options.maxRedirects = def.maxRedirects;
   if (def.insecure) options.insecure = true;
+  if (def.proxy?.trim()) options.proxy = def.proxy.trim();
 
   try {
     const client = createClient({

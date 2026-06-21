@@ -335,6 +335,19 @@
               class="accent-[var(--color-brand)]"
             />
           </label>
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Proxy <span class="hint">http/https/socks URL</span></span>
+            <input
+              type="text"
+              value={ws.activeReq.proxy ?? ""}
+              placeholder="http://127.0.0.1:8080"
+              class="mono h-7 w-56 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
+              oninput={(e) => {
+                const v = e.currentTarget.value.trim();
+                ws.activeReq!.proxy = v || undefined;
+              }}
+            />
+          </label>
         </div>
       {:else if tab === "config"}
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />

@@ -128,6 +128,8 @@ export const requestDefinitionSchema = z.object({
   maxRedirects: z.number().int().min(0).max(50).default(5),
   /** Skip TLS certificate verification (self-signed / dev endpoints). */
   insecure: z.boolean().default(false),
+  /** Route through an HTTP/HTTPS/SOCKS proxy (e.g. http://127.0.0.1:8080). */
+  proxy: z.string().optional(),
   retry: retrySchema.optional(),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
   presetName: z.string().optional(),
