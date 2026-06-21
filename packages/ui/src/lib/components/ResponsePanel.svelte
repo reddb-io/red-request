@@ -3,9 +3,33 @@
   import type { ResponseResult } from "@red-request/core";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
+  import { save } from "@tauri-apps/plugin-dialog";
+  import * as fs from "../fs";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
   let bodyQuery = $state("");
+  let saved = $state(false);
+
+  function extFor(ct: string): string {
+    if (ct.includes("json")) return "json";
+    if (ct.includes("html")) return "html";
+    if (ct.includes("xml")) return "xml";
+    if (ct.includes("csv")) return "csv";
+    if (ct.includes("javascript")) return "js";
+    return "txt";
+  }
+  async function saveToFile() {
+    if (!r) return;
+    try {
+      const path = await save({ defaultPath: `response.${extFor(r.contentType ?? "")}` });
+      if (!path) return;
+      await fs.writeText(path, prettyBody);
+      saved = true;
+      setTimeout(() => (saved = false), 1200);
+    } catch {
+      /* user cancelled or fs error */
+    }
+  }
 
   // Body search: matching lines (with their real line number), and a per-line split for
   // highlighting. Empty query → the fast full <pre> render below.
@@ -219,6 +243,11 @@
         class="ml-auto"
         title="Copy response body">{copied ? "Copied ✓" : "Copy"}</Button
       >
+      {#if prettyBody}
+        <Button onclick={saveToFile} variant="outline" size="xs" title="Save response body to a file"
+          >{saved ? "Saved ✓" : "Save"}</Button
+        >
+      {/if}
     </div>
 
     <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
