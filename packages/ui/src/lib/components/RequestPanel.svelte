@@ -153,7 +153,7 @@
             />
           </div>
         </div>
-      {:else if ws.activeReq.kind === "ws"}
+      {:else if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
         <div class="flex-1"></div>
       {:else}
         <span
@@ -162,7 +162,7 @@
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
-      {#if ws.activeReq.kind !== "ws"}
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse"}
         <Button
           onclick={() => ws.send()}
           disabled={ws.sending}
@@ -179,7 +179,7 @@
         class="shrink-0"
         >Save</Button
       >
-      {#if ws.activeReq.kind !== "ws"}
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse"}
         <Button
           onclick={() => (showRunner = true)}
           variant="outline"
@@ -199,7 +199,7 @@
       {/if}
     </div>
 
-    {#if ws.activeReq.kind === "ws"}
+    {#if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
       <div class="min-h-0 flex-1 p-3">
         <WebSocketPanel />
       </div>

@@ -57,3 +57,72 @@ export function wsClose(id: string): { ok: boolean } {
   conns.delete(id);
   return { ok: true };
 }
+
+// --- server-sent events (kind === "sse") ----------------------------------
+const sseAborts = new Map<string, AbortController>();
+
+function parseSseEvent(id: string, chunk: string): void {
+  let event = "message";
+  const data: string[] = [];
+  for (const line of chunk.split("\n")) {
+    if (line.startsWith(":")) continue; // comment / heartbeat
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:"))
+      data.push(line.slice(5).replace(/^ /, ""));
+  }
+  if (data.length)
+    emit(id, "message", { dir: "in", data: data.join("\n"), event });
+}
+
+export function sseOpen(
+  id: string,
+  request: RequestDefinition,
+  variables: VariableScope
+): { ok: boolean } {
+  sseAborts.get(id)?.abort();
+  const { request: resolved } = resolveRequest(request, variables);
+  const ac = new AbortController();
+  sseAborts.set(id, ac);
+  const headers: Record<string, string> = { Accept: "text/event-stream" };
+  for (const h of resolved.headers)
+    if (h.enabled && h.name.trim()) headers[h.name] = h.value;
+
+  void (async () => {
+    try {
+      const res = await fetch(resolved.url, { headers, signal: ac.signal });
+      emit(id, "open", { url: resolved.url, status: res.status });
+      if (!res.ok || !res.body) {
+        emit(id, "error", {
+          message: `HTTP ${res.status} (expected an event stream)`,
+        });
+        return;
+      }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let idx: number;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          parseSseEvent(id, buf.slice(0, idx));
+          buf = buf.slice(idx + 2);
+        }
+      }
+      emit(id, "close", {});
+    } catch (e: any) {
+      if (ac.signal.aborted) emit(id, "close", {});
+      else emit(id, "error", { message: e?.message ?? String(e) });
+    } finally {
+      sseAborts.delete(id);
+    }
+  })();
+  return { ok: true };
+}
+
+export function sseClose(id: string): { ok: boolean } {
+  sseAborts.get(id)?.abort();
+  sseAborts.delete(id);
+  return { ok: true };
+}

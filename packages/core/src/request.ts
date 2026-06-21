@@ -59,6 +59,7 @@ export type Scripts = z.infer<typeof scriptsSchema>;
 export const requestKindSchema = z.enum([
   "http",
   "ws",
+  "sse",
   "tcp",
   "udp",
   "ping",

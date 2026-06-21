@@ -30,6 +30,8 @@ import {
   wsOpen,
   wsSend as rpcWsSend,
   wsClose,
+  sseOpen,
+  sseClose,
 } from "./rpc";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
@@ -241,9 +243,12 @@ class Workspace {
     this.response = null;
     this.errorMsg = null;
     this.unresolved = [];
-    // reset the WS panel; close any connection belonging to the previously selected request
-    if (this.wsConnId && this.wsConnId !== reqId)
-      void wsClose({ id: this.wsConnId }).catch(() => {});
+    // reset the stream panel; close any connection from the previously selected request
+    if (this.wsConnId && this.wsConnId !== reqId) {
+      const id = this.wsConnId;
+      void wsClose({ id }).catch(() => {});
+      void sseClose({ id }).catch(() => {});
+    }
     this.wsConnId = null;
     this.wsStatus = "idle";
     this.wsMessages = [];
@@ -489,35 +494,41 @@ class Workspace {
     }
   }
 
-  /** Open a WebSocket for the active request and stream frames into wsMessages. */
-  async wsConnect(): Promise<void> {
+  /** Open a stream (WebSocket or SSE) for the active request; frames land in wsMessages. */
+  async streamConnect(): Promise<void> {
     const req = this.activeReq;
-    if (!req) return;
+    if (!req || (req.kind !== "ws" && req.kind !== "sse")) return;
     await this.ensureWsListener();
     this.wsMessages = [];
     this.wsStatus = "connecting";
     this.wsConnId = req.id;
     const variables = await this.buildVariables();
+    const params = {
+      id: req.id,
+      request: $state.snapshot(req) as RequestDefinition,
+      variables,
+    };
     try {
-      await wsOpen({
-        id: req.id,
-        request: $state.snapshot(req) as RequestDefinition,
-        variables,
-      });
+      await (req.kind === "sse" ? sseOpen(params) : wsOpen(params));
     } catch (e) {
       this.wsStatus = "error";
       this.pushWs("sys", `● ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
+  /** Send a frame (WebSocket only — SSE is server→client). */
   async wsSendMessage(data: string): Promise<void> {
     if (!data || !this.wsConnId || this.wsStatus !== "open") return;
     const r = await rpcWsSend({ id: this.wsConnId, data });
     if (!r.ok && r.error) this.pushWs("sys", `● ${r.error}`);
   }
 
-  async wsDisconnect(): Promise<void> {
-    if (this.wsConnId) await wsClose({ id: this.wsConnId }).catch(() => {});
+  async streamDisconnect(): Promise<void> {
+    const id = this.wsConnId;
+    if (id)
+      await (
+        this.activeReq?.kind === "sse" ? sseClose({ id }) : wsClose({ id })
+      ).catch(() => {});
     this.wsStatus = "closed";
   }
 

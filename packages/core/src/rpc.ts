@@ -47,6 +47,8 @@ export const ENGINE_METHODS = {
   wsOpen: "ws.open",
   wsSend: "ws.send",
   wsClose: "ws.close",
+  sseOpen: "sse.open",
+  sseClose: "sse.close",
   graphqlSend: "graphql.send",
   sseStream: "sse.stream",
   importParse: "import.parse",

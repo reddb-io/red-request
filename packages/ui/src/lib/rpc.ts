@@ -40,6 +40,12 @@ export function wsSend(
 export function wsClose(params: WsCloseParams): Promise<{ ok: boolean }> {
   return engineCall(ENGINE_METHODS.wsClose, params);
 }
+export function sseOpen(params: WsOpenParams): Promise<{ ok: boolean }> {
+  return engineCall(ENGINE_METHODS.sseOpen, params);
+}
+export function sseClose(params: WsCloseParams): Promise<{ ok: boolean }> {
+  return engineCall(ENGINE_METHODS.sseClose, params);
+}
 
 /** Subscribe to engine stream notifications (SSE/WS/progress) re-emitted by Rust. */
 export function onEngineStream(

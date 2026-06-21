@@ -8,10 +8,11 @@
   let draft = $state("");
   const connected = $derived(ws.wsStatus === "open");
   const pending = $derived(ws.wsStatus === "connecting");
+  const isSse = $derived(ws.activeReq?.kind === "sse");
 
   function toggle() {
-    if (connected || pending) void ws.wsDisconnect();
-    else void ws.wsConnect();
+    if (connected || pending) void ws.streamDisconnect();
+    else void ws.streamConnect();
   }
   async function send() {
     if (!draft.trim()) return;
@@ -40,8 +41,8 @@
         bind:value={ws.activeReq!.url}
         known={ws.knownVars}
         values={ws.varTitles}
-        ariaLabel="WebSocket URL"
-        placeholder={"wss://{{host}}/socket"}
+        ariaLabel={isSse ? "SSE URL" : "WebSocket URL"}
+        placeholder={isSse ? "https://{{host}}/events" : "wss://{{host}}/socket"}
       />
     </div>
     <Button
@@ -80,19 +81,21 @@
     {/if}
   </div>
 
-  <div class="flex items-center gap-2">
-    <input
-      bind:value={draft}
-      disabled={!connected}
-      onkeydown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          void send();
-        }
-      }}
-      placeholder={connected ? "message… (Enter to send)" : "connect to send"}
-      class="mono h-8 flex-1 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)] disabled:opacity-50"
-    />
-    <Button onclick={send} size="xs" disabled={!connected || !draft.trim()}>Send</Button>
-  </div>
+  {#if !isSse}
+    <div class="flex items-center gap-2">
+      <input
+        bind:value={draft}
+        disabled={!connected}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void send();
+          }
+        }}
+        placeholder={connected ? "message… (Enter to send)" : "connect to send"}
+        class="mono h-8 flex-1 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)] disabled:opacity-50"
+      />
+      <Button onclick={send} size="xs" disabled={!connected || !draft.trim()}>Send</Button>
+    </div>
+  {/if}
 </div>
