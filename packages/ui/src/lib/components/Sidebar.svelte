@@ -347,7 +347,7 @@
             <Menu
               items={[
                 { label: "Rename", onSelect: () => startRenameCol(col) },
-                { label: "Import cURL…", onSelect: () => (showImport = true) },
+                { label: "Import…", onSelect: () => (showImport = true) },
                 {
                   label: "Delete collection",
                   onSelect: () => ws.deleteCollection(col.id),

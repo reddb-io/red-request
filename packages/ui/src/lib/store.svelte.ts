@@ -3,6 +3,8 @@ import {
   storedEnvironmentSchema,
   newRequest,
   curlToRequest,
+  openapiToCollection,
+  collectionFileSchema,
   DYNAMIC_VARS,
   type BodyType,
   type LoadedCollection,
@@ -14,6 +16,7 @@ import {
   type RunnerParams,
   type RunnerResult,
 } from "@red-request/core";
+import { parse as parseYaml } from "yaml";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend, runnerRun } from "./rpc";
@@ -525,6 +528,56 @@ class Workspace {
     col.requests.push(req);
     col.collection.order.push(id);
     this.selectRequest(this.activeColId, id);
+  }
+
+  /**
+   * Smart paste import: an OpenAPI/Swagger doc (JSON or YAML) becomes a whole new collection;
+   * anything else is treated as a cURL command added to the active collection. Returns what
+   * it did (or throws on a malformed spec).
+   */
+  async importText(text: string): Promise<"collection" | "request"> {
+    const trimmed = text.trim();
+    let spec: unknown = null;
+    try {
+      spec = JSON.parse(trimmed);
+    } catch {
+      try {
+        spec = parseYaml(trimmed);
+      } catch {
+        /* not structured — fall through to cURL */
+      }
+    }
+    if (
+      spec &&
+      typeof spec === "object" &&
+      (spec as Record<string, unknown>).paths
+    ) {
+      await this.importOpenAPI(spec);
+      return "collection";
+    }
+    await this.importCurl(trimmed);
+    return "request";
+  }
+
+  /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
+  async importOpenAPI(spec: unknown): Promise<void> {
+    const imported = openapiToCollection(spec);
+    const colId = `oa-${Date.now().toString(36)}`;
+    await repo.saveCollectionMeta(
+      colId,
+      collectionFileSchema.parse({
+        name: imported.name,
+        baseUrl: imported.baseUrl || undefined,
+        vars: imported.vars,
+        folders: imported.folders,
+        order: imported.requests.map((r) => r.id),
+      })
+    );
+    for (const r of imported.requests) await repo.saveRequest(colId, r);
+    await this.reload();
+    this.activeColId = colId;
+    const first = imported.requests[0];
+    if (first) this.selectRequest(colId, first.id);
   }
 
   /** Duplicate a request (same folder) and select the copy. */
