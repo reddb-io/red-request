@@ -76,7 +76,7 @@
       <input
         bind:value={query}
         placeholder="Search projects…"
-        class="input mono flex-1"
+        class="input flex-1"
       />
       <button
         onclick={openFolder}
