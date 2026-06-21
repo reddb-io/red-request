@@ -1,0 +1,58 @@
+name: Changesets
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: changesets-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  changesets:
+    name: Version Packages
+    runs-on: ubuntu-latest
+    # Skip the version-bump commit itself (authored by the bot) to avoid a loop.
+    if: github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Create release PR or tag the release
+        uses: changesets/action@v1
+        with:
+          # `release:version` runs `changeset version` then propagates the new version
+          # into tauri.conf.json via scripts/sync-desktop-version.mjs.
+          version: pnpm release:version
+          # Runs only once every pending changeset is consumed (Version PR merged):
+          # tags v<version>, whose push triggers release.yml (which builds + releases).
+          publish: bash scripts/changesets-tag-release.sh
+          commit: "chore(release): version packages"
+          title: "chore(release): version packages"
+          # release.yml owns the GitHub Release (built bundles); don't let the action make one.
+          createGithubReleases: false
+        env:
+          # A PAT lets the tag pushed here re-trigger release.yml (a GITHUB_TOKEN push won't).
+          # Falls back to GITHUB_TOKEN if RELEASE_PAT isn't set (then tag release.yml manually).
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
