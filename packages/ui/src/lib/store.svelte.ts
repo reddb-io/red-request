@@ -404,6 +404,23 @@ class Workspace {
     await this.persistEnv(env);
   }
 
+  /** Set a variable (active env if any, else the collection) and persist it. Powers the
+   *  response → variable extraction (chain requests without writing a script). */
+  async setVariable(name: string, value: string): Promise<void> {
+    if (!name.trim()) return;
+    const env = this.activeEnv;
+    if (env) {
+      env.vars[name] = value;
+      await this.persistEnv(env);
+      return;
+    }
+    const col = this.activeCollection;
+    if (col) {
+      col.collection.vars[name] = value;
+      await this.persistCollection();
+    }
+  }
+
   async save(): Promise<void> {
     if (!this.activeReq || !this.activeColId) return;
     const snap = structuredClone(

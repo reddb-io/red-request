@@ -79,6 +79,39 @@
   });
   const bodyLines = $derived(prettyBody.split("\n"));
 
+  // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
+  // next request can use {{name}} — chaining without writing a post-response script.
+  const json = $derived.by<unknown>(() => {
+    if (!r) return null;
+    try {
+      return JSON.parse(r.bodyText);
+    } catch {
+      return null;
+    }
+  });
+  function getPath(obj: unknown, path: string): unknown {
+    const keys = path
+      .replace(/\[(\d+)\]/g, ".$1")
+      .split(".")
+      .filter(Boolean);
+    let cur: unknown = obj;
+    for (const k of keys) cur = (cur as Record<string, unknown>)?.[k];
+    return cur;
+  }
+  let xPath = $state("");
+  let xVar = $state("");
+  let xSaved = $state(false);
+  const xValue = $derived(xPath.trim() ? getPath(json, xPath.trim()) : undefined);
+  async function extract() {
+    if (!xVar.trim() || xValue === undefined) return;
+    await ws.setVariable(
+      xVar.trim(),
+      typeof xValue === "object" ? JSON.stringify(xValue) : String(xValue)
+    );
+    xSaved = true;
+    setTimeout(() => (xSaved = false), 1200);
+  }
+
   function fmtSize(n: number): string {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -221,6 +254,26 @@
             <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
             {#if bodyQuery.trim()}
               <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
+            {/if}
+          </div>
+        {/if}
+        {#if json}
+          <div class="mb-2 flex items-center gap-2">
+            <Input bind:value={xPath} placeholder="path e.g. data.token" class="mono h-6 flex-1" />
+            <span class="text-fg-faint">→</span>
+            <Input bind:value={xVar} placeholder="var name" class="mono h-6 w-32" />
+            <Button
+              onclick={extract}
+              variant="outline"
+              size="xs"
+              disabled={!xVar.trim() || xValue === undefined}
+              title="Save the value at that path as a variable for chaining"
+              >{xSaved ? "Saved ✓" : "Save var"}</Button
+            >
+            {#if xPath.trim()}
+              <span class="hint max-w-[28%] shrink-0 truncate" title={String(xValue)}>
+                {xValue === undefined ? "no match" : `= ${String(xValue)}`}
+              </span>
             {/if}
           </div>
         {/if}
