@@ -2,8 +2,41 @@
   import { ws } from "../store.svelte";
   import type { ResponseResult } from "@red-request/core";
   import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
+  let bodyQuery = $state("");
+
+  // Body search: matching lines (with their real line number), and a per-line split for
+  // highlighting. Empty query → the fast full <pre> render below.
+  const matches = $derived.by(() => {
+    const q = bodyQuery.trim().toLowerCase();
+    if (!q) return null;
+    return bodyLines
+      .map((line, i) => ({ n: i + 1, line }))
+      .filter((x) => x.line.toLowerCase().includes(q));
+  });
+  const matchCount = $derived.by(() => {
+    const q = bodyQuery.trim();
+    if (!q || !matches) return 0;
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    return matches.reduce((c, m) => c + (m.line.match(re)?.length ?? 0), 0);
+  });
+  function splitLine(line: string): { text: string; hit: boolean }[] {
+    const q = bodyQuery.trim();
+    if (!q) return [{ text: line, hit: false }];
+    const out: { text: string; hit: boolean }[] = [];
+    const lc = line.toLowerCase();
+    const ql = q.toLowerCase();
+    let i = 0;
+    for (let j = lc.indexOf(ql); j !== -1; j = lc.indexOf(ql, i)) {
+      if (j > i) out.push({ text: line.slice(i, j), hit: false });
+      out.push({ text: line.slice(j, j + q.length), hit: true });
+      i = j + q.length;
+    }
+    if (i < line.length) out.push({ text: line.slice(i), hit: false });
+    return out;
+  }
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -183,15 +216,39 @@
             {/each}
           </div>
         {/if}
-        <div class="flex text-xs">
-          <div
-            class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
-            aria-hidden="true"
-          >
-            {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+        {#if prettyBody}
+          <div class="mb-2 flex items-center gap-2">
+            <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
+            {#if bodyQuery.trim()}
+              <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
+            {/if}
           </div>
-          <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
-        </div>
+        {/if}
+        {#if matches}
+          {#if matches.length === 0}
+            <div class="hint p-4 text-center">No matches.</div>
+          {:else}
+            <div class="flex text-xs">
+              <div
+                class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+                aria-hidden="true"
+              >
+                {#each matches as m (m.n)}<div class="leading-5">{m.n}</div>{/each}
+              </div>
+              <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
+            </div>
+          {/if}
+        {:else}
+          <div class="flex text-xs">
+            <div
+              class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+              aria-hidden="true"
+            >
+              {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+            </div>
+            <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
+          </div>
+        {/if}
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
           <tbody>
