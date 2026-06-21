@@ -17,6 +17,7 @@ import {
   type RunnerResult,
 } from "@red-request/core";
 import { parse as parseYaml } from "yaml";
+import { INTROSPECTION_QUERY, parseSchema, type GqlSchema } from "./graphql";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import { httpSend, runnerRun } from "./rpc";
@@ -452,6 +453,11 @@ class Workspace {
     const req = this.activeReq;
     if (!req) return;
     req.body.type = type;
+    if (type === "graphql") {
+      // GraphQL is always POSTed; give the variables editor something to bind to.
+      if (req.method === "GET") req.method = "POST";
+      req.body.variables ??= "{}";
+    }
     if (type === "none") return;
     const ct = Workspace.CONTENT_TYPES[type];
     if (ct) this.upsertHeader(req, "Content-Type", ct);
@@ -460,6 +466,37 @@ class Workspace {
       "Accept",
       type === "xml" ? "application/xml" : "application/json"
     );
+  }
+
+  /** Run GraphQL introspection against the active request's endpoint and parse the schema. */
+  async introspectGraphQL(): Promise<GqlSchema> {
+    const req = this.activeReq;
+    if (!req) throw new Error("no active request");
+    const variables = await this.buildVariables();
+    const probe = structuredClone($state.snapshot(req)) as RequestDefinition;
+    probe.kind = "http";
+    probe.method = "POST";
+    probe.body = {
+      type: "graphql",
+      content: INTROSPECTION_QUERY,
+      variables: "{}",
+      fields: [],
+    };
+    probe.scripts = { preRequest: "", postResponse: "" };
+    const res = await httpSend({ request: probe, variables });
+    if (res.response.error) throw new Error(res.response.error.message);
+    let json: { data?: { __schema?: unknown }; errors?: { message: string }[] };
+    try {
+      json = JSON.parse(res.response.bodyText || "{}");
+    } catch {
+      throw new Error(
+        `endpoint did not return JSON (status ${res.response.status})`
+      );
+    }
+    if (json.errors?.length) throw new Error(json.errors[0]!.message);
+    if (!json.data?.__schema)
+      throw new Error("no __schema in the response (introspection disabled?)");
+    return parseSchema(json.data.__schema);
   }
 
   // --- collection structure (requests + folders) --------------------------

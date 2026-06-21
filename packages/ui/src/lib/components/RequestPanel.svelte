@@ -6,6 +6,7 @@
   import EnvBar from "./EnvBar.svelte";
   import RunnerPanel from "./RunnerPanel.svelte";
   import CodeModal from "./CodeModal.svelte";
+  import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
@@ -14,6 +15,7 @@
 
   let showRunner = $state(false);
   let showCode = $state(false);
+  let showSchema = $state(false);
 
   const methods = httpMethodSchema.options;
   const kinds = requestKindSchema.options;
@@ -282,6 +284,34 @@
           </div>
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
+          {:else if ws.activeReq.body.type === "graphql"}
+            <div class="flex items-center justify-between">
+              <h4 class="label">Query</h4>
+              <Button variant="outline" size="xs" onclick={() => (showSchema = true)}
+                title="Fetch the GraphQL schema (introspection)">Schema</Button
+              >
+            </div>
+            <VarField
+              bind:value={ws.activeReq.body.content}
+              known={ws.knownVars}
+              values={ws.varTitles}
+              multiline
+              lineNumbers
+              rows={9}
+              ariaLabel="GraphQL query"
+              placeholder={"query {\n  viewer { id name }\n}"}
+            />
+            <h4 class="label mt-1">Variables (JSON)</h4>
+            <VarField
+              bind:value={ws.activeReq.body.variables}
+              known={ws.knownVars}
+              values={ws.varTitles}
+              multiline
+              lineNumbers
+              rows={4}
+              ariaLabel="GraphQL variables"
+              placeholder={'{ "id": 1 }'}
+            />
           {:else if ws.activeReq.body.type !== "none"}
             <VarField
               bind:value={ws.activeReq.body.content}
@@ -301,6 +331,9 @@
 
   {#if showCode}
     <CodeModal onClose={() => (showCode = false)} />
+  {/if}
+  {#if showSchema}
+    <GraphQlSchema onClose={() => (showSchema = false)} />
   {/if}
   {#if showRunner}
     <RunnerPanel onClose={() => (showRunner = false)} />
