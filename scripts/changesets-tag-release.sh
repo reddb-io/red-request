@@ -17,10 +17,12 @@
 # Idempotent: if the tag already exists locally or on origin we exit 0.
 set -euo pipefail
 
-VERSION="$(node -e 'process.stdout.write(require("./package.json").version)')"
+# Canonical version = the fixed core/engine/ui group that changesets bumps (the root
+# package.json is private and NOT bumped). sync-desktop-version.mjs uses the same source.
+VERSION="$(node -e 'process.stdout.write(require("./packages/core/package.json").version)')"
 
 if [[ -z "$VERSION" ]]; then
-  echo "changesets-tag-release: package.json has no version" >&2
+  echo "changesets-tag-release: packages/core/package.json has no version" >&2
   exit 1
 fi
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]]; then
