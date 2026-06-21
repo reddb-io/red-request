@@ -41,6 +41,25 @@ export const httpSendResultSchema = z.object({
 });
 export type HttpSendResult = z.infer<typeof httpSendResultSchema>;
 
+// --- websocket (streaming over engine://stream notifications) --------------
+
+export const wsOpenParamsSchema = z.object({
+  /** Client-chosen connection id; stream events carry it back so the UI can correlate. */
+  id: z.string(),
+  request: requestDefinitionSchema,
+  variables: z.record(z.string(), z.string()).default({}),
+});
+export type WsOpenParams = z.infer<typeof wsOpenParamsSchema>;
+
+export const wsSendParamsSchema = z.object({
+  id: z.string(),
+  data: z.string(),
+});
+export type WsSendParams = z.infer<typeof wsSendParamsSchema>;
+
+export const wsCloseParamsSchema = z.object({ id: z.string() });
+export type WsCloseParams = z.infer<typeof wsCloseParamsSchema>;
+
 export const oauth2TokenParamsSchema = z.object({
   grantType: z
     .enum(["client_credentials", "password"])

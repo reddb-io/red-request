@@ -7,6 +7,9 @@ import {
   type RpcNotification,
   type RunnerParams,
   type RunnerResult,
+  type WsOpenParams,
+  type WsSendParams,
+  type WsCloseParams,
 } from "@red-request/core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
@@ -24,6 +27,18 @@ export function runnerRun(params: RunnerParams): Promise<RunnerResult> {
 
 export function reckerVersion(): Promise<{ version: string }> {
   return engineCall<{ version: string }>(ENGINE_METHODS.metaReckerVersion, {});
+}
+
+export function wsOpen(params: WsOpenParams): Promise<{ ok: boolean }> {
+  return engineCall(ENGINE_METHODS.wsOpen, params);
+}
+export function wsSend(
+  params: WsSendParams
+): Promise<{ ok: boolean; error?: string }> {
+  return engineCall(ENGINE_METHODS.wsSend, params);
+}
+export function wsClose(params: WsCloseParams): Promise<{ ok: boolean }> {
+  return engineCall(ENGINE_METHODS.wsClose, params);
 }
 
 /** Subscribe to engine stream notifications (SSE/WS/progress) re-emitted by Rust. */

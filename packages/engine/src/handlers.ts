@@ -5,6 +5,9 @@ import {
   httpSendParamsSchema,
   oauth2TokenParamsSchema,
   runnerParamsSchema,
+  wsOpenParamsSchema,
+  wsSendParamsSchema,
+  wsCloseParamsSchema,
   resolveRequest,
   type HttpSendResult,
   type Oauth2TokenResult,
@@ -14,6 +17,7 @@ import reckerPkg from "recker/package.json" with { type: "json" };
 import { dispatch, oauth2Token } from "./recker.js";
 import { runPipeline } from "./pipeline.js";
 import { runLoop } from "./runner.js";
+import { wsOpen, wsSend, wsClose } from "./stream.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
@@ -54,6 +58,23 @@ export const handlers: Record<string, Handler> = {
       unresolved,
       effectiveUrl: resolved.url,
     };
+  },
+
+  [ENGINE_METHODS.wsOpen]: async (raw): Promise<{ ok: boolean }> => {
+    const { id, request, variables } = wsOpenParamsSchema.parse(raw);
+    return wsOpen(id, request, variables);
+  },
+
+  [ENGINE_METHODS.wsSend]: async (
+    raw
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const { id, data } = wsSendParamsSchema.parse(raw);
+    return wsSend(id, data);
+  },
+
+  [ENGINE_METHODS.wsClose]: async (raw): Promise<{ ok: boolean }> => {
+    const { id } = wsCloseParamsSchema.parse(raw);
+    return wsClose(id);
   },
 
   [ENGINE_METHODS.oauth2Token]: async (raw): Promise<Oauth2TokenResult> => {

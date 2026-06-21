@@ -23,7 +23,15 @@ import { parse as parseYaml } from "yaml";
 import { INTROSPECTION_QUERY, parseSchema, type GqlSchema } from "./graphql";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
-import { httpSend, runnerRun } from "./rpc";
+import {
+  httpSend,
+  runnerRun,
+  onEngineStream,
+  wsOpen,
+  wsSend as rpcWsSend,
+  wsClose,
+} from "./rpc";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
 import {
   projectInfo,
@@ -63,6 +71,16 @@ class Workspace {
 
   /** History for the active request (newest first) — powers the Timings panel. */
   reqHistory = $state<HistoryEntry[]>([]);
+
+  // --- websocket (kind === "ws") — live connection state for the active request ---
+  wsStatus = $state<"idle" | "connecting" | "open" | "closed" | "error">(
+    "idle"
+  );
+  wsMessages = $state<
+    { dir: "in" | "out" | "sys"; data: string; ts: number }[]
+  >([]);
+  private wsConnId: string | null = null;
+  private wsUnlisten: UnlistenFn | null = null;
 
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
@@ -223,6 +241,12 @@ class Workspace {
     this.response = null;
     this.errorMsg = null;
     this.unresolved = [];
+    // reset the WS panel; close any connection belonging to the previously selected request
+    if (this.wsConnId && this.wsConnId !== reqId)
+      void wsClose({ id: this.wsConnId }).catch(() => {});
+    this.wsConnId = null;
+    this.wsStatus = "idle";
+    this.wsMessages = [];
     void this.refreshReqHistory();
   }
 
@@ -422,6 +446,79 @@ class Workspace {
       col.collection.vars[name] = value;
       await this.persistCollection();
     }
+  }
+
+  // --- websocket ------------------------------------------------------------
+  private async ensureWsListener(): Promise<void> {
+    if (this.wsUnlisten) return;
+    this.wsUnlisten = await onEngineStream((n) =>
+      this.onWsEvent(n as { stream: string; event: string; data?: unknown })
+    );
+  }
+
+  private pushWs(dir: "in" | "out" | "sys", data: string): void {
+    this.wsMessages = [
+      ...this.wsMessages.slice(-499),
+      { dir, data, ts: Date.now() },
+    ];
+  }
+
+  private onWsEvent(n: {
+    stream: string;
+    event: string;
+    data?: unknown;
+  }): void {
+    if (n.stream !== this.wsConnId) return;
+    const d = (n.data ?? {}) as Record<string, any>;
+    switch (n.event) {
+      case "open":
+        this.wsStatus = "open";
+        this.pushWs("sys", `● connected ${d.url ?? ""}`.trim());
+        break;
+      case "message":
+        this.pushWs(d.dir === "out" ? "out" : "in", String(d.data ?? ""));
+        break;
+      case "close":
+        this.wsStatus = "closed";
+        this.pushWs("sys", `● closed ${d.code ?? ""} ${d.reason ?? ""}`.trim());
+        break;
+      case "error":
+        this.wsStatus = "error";
+        this.pushWs("sys", `● ${d.message ?? "error"}`);
+        break;
+    }
+  }
+
+  /** Open a WebSocket for the active request and stream frames into wsMessages. */
+  async wsConnect(): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    await this.ensureWsListener();
+    this.wsMessages = [];
+    this.wsStatus = "connecting";
+    this.wsConnId = req.id;
+    const variables = await this.buildVariables();
+    try {
+      await wsOpen({
+        id: req.id,
+        request: $state.snapshot(req) as RequestDefinition,
+        variables,
+      });
+    } catch (e) {
+      this.wsStatus = "error";
+      this.pushWs("sys", `● ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  async wsSendMessage(data: string): Promise<void> {
+    if (!data || !this.wsConnId || this.wsStatus !== "open") return;
+    const r = await rpcWsSend({ id: this.wsConnId, data });
+    if (!r.ok && r.error) this.pushWs("sys", `● ${r.error}`);
+  }
+
+  async wsDisconnect(): Promise<void> {
+    if (this.wsConnId) await wsClose({ id: this.wsConnId }).catch(() => {});
+    this.wsStatus = "closed";
   }
 
   async save(): Promise<void> {

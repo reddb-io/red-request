@@ -270,7 +270,8 @@ export function resolveRequest(
   const payload = resolveTemplate(def.net.payload, lookup);
   payload.unresolved.forEach((u) => unresolved.add(u));
   const net = { ...def.net, host: host.value, payload: payload.value };
-  if (def.kind !== "http") {
+  // ws (like http) carries its target in `url`; the socket kinds derive it from net.*.
+  if (def.kind !== "http" && def.kind !== "ws") {
     resolvedUrl =
       def.kind === "whois" || def.kind === "dns"
         ? net.host

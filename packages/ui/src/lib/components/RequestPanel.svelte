@@ -8,6 +8,7 @@
   import CodeModal from "./CodeModal.svelte";
   import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
+  import WebSocketPanel from "./WebSocketPanel.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import { Button } from "./ui/button/index.js";
@@ -152,6 +153,8 @@
             />
           </div>
         </div>
+      {:else if ws.activeReq.kind === "ws"}
+        <div class="flex-1"></div>
       {:else}
         <span
           class="mono flex h-7 flex-1 items-center truncate rounded-md border border-border bg-[var(--color-bg-2)] px-2.5 text-sm text-fg-muted"
@@ -159,14 +162,16 @@
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
-      <Button
-        onclick={() => ws.send()}
-        disabled={ws.sending}
-        title="Send (⌘↵ / Ctrl+↵)"
-        size="xs"
-        class="shrink-0"
-        >{ws.sending ? "…" : "Send"}</Button
-      >
+      {#if ws.activeReq.kind !== "ws"}
+        <Button
+          onclick={() => ws.send()}
+          disabled={ws.sending}
+          title="Send (⌘↵ / Ctrl+↵)"
+          size="xs"
+          class="shrink-0"
+          >{ws.sending ? "…" : "Send"}</Button
+        >
+      {/if}
       <Button
         onclick={() => ws.save()}
         variant="outline"
@@ -174,13 +179,15 @@
         class="shrink-0"
         >Save</Button
       >
-      <Button
-        onclick={() => (showRunner = true)}
-        variant="outline"
-        size="xs"
-        class="shrink-0"
-        title="Run loops: repeat, data-driven, or flow">Run…</Button
-      >
+      {#if ws.activeReq.kind !== "ws"}
+        <Button
+          onclick={() => (showRunner = true)}
+          variant="outline"
+          size="xs"
+          class="shrink-0"
+          title="Run loops: repeat, data-driven, or flow">Run…</Button
+        >
+      {/if}
       {#if ws.activeReq.kind === "http"}
         <Button
           onclick={() => (showCode = true)}
@@ -192,6 +199,11 @@
       {/if}
     </div>
 
+    {#if ws.activeReq.kind === "ws"}
+      <div class="min-h-0 flex-1 p-3">
+        <WebSocketPanel />
+      </div>
+    {:else}
     <div class="flex gap-1 border-b border-border px-3 text-sm">
       {#each tabs as t (t)}
         <button
@@ -387,6 +399,7 @@
         </div>
       {/if}
     </div>
+    {/if}
   </section>
 
   {#if showCode}

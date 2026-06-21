@@ -65,6 +65,7 @@
     OPTIONS: "text-fg-muted",
   };
   const kindColor: Record<string, string> = {
+    ws: "text-violet-400",
     tcp: "text-cyan-400",
     udp: "text-teal-400",
     ping: "text-pink-400",

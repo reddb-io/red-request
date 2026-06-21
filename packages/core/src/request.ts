@@ -58,6 +58,7 @@ export type Scripts = z.infer<typeof scriptsSchema>;
 /** Request protocol. `http` is the default; the rest use `net` config below. */
 export const requestKindSchema = z.enum([
   "http",
+  "ws",
   "tcp",
   "udp",
   "ping",
