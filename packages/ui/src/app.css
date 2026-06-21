@@ -171,28 +171,9 @@ body {
     @apply rounded-md border border-border bg-[var(--color-bg-2)];
   }
 
-  /* ---- buttons ---- */
-  .btn {
-    @apply inline-flex h-6 cursor-pointer items-center justify-center gap-1.5
-      rounded-md px-2.5 text-sm font-medium whitespace-nowrap transition-colors
-      select-none disabled:pointer-events-none disabled:opacity-50;
-  }
-  .btn-primary {
-    @apply bg-[var(--color-brand)] text-black hover:brightness-110;
-  }
-  .btn-ghost {
-    @apply border border-border text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
-  }
-  .btn-subtle {
-    @apply text-fg-muted hover:bg-[var(--color-bg-2)] hover:text-fg;
-  }
-  .btn-sm {
-    @apply h-5 gap-1 px-2 text-xs;
-  }
-  .btn-icon {
-    @apply inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded
-      text-fg-subtle transition-colors hover:text-fg disabled:opacity-50;
-  }
+  /* Buttons/inputs/textarea/select/badge now come from shadcn-svelte
+     (lib/components/ui/*). The classes below are app-specific patterns with no
+     direct shadcn equivalent. */
 
   /* ---- selectable list row (sidebar requests, env list, …) ---- */
   .row {
@@ -212,27 +193,6 @@ body {
     @apply bg-[var(--color-bg-2)] text-[var(--color-brand)];
   }
 
-  /* ---- form controls ---- */
-  .input {
-    @apply h-6 w-full rounded-md border border-border bg-[var(--color-bg-2)] px-2
-      text-sm text-fg outline-none transition-colors placeholder:text-fg-faint
-      focus:border-[var(--color-brand)] focus:ring-1 focus:ring-[var(--color-brand)];
-  }
-  .textarea {
-    @apply w-full rounded-md border border-border bg-[var(--color-bg-2)] p-1.5 text-sm
-      text-fg outline-none placeholder:text-fg-faint focus:border-[var(--color-brand)]
-      focus:ring-1 focus:ring-[var(--color-brand)];
-  }
-  .select {
-    @apply h-6 w-full cursor-pointer appearance-none rounded-md border border-border
-      bg-[var(--color-bg-2)] py-0 pr-6 pl-2 text-sm text-fg outline-none transition-colors
-      focus:border-[var(--color-brand)] focus:ring-1 focus:ring-[var(--color-brand)];
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2371717a' stroke-width='1.5'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.5rem center;
-    background-size: 0.6rem;
-  }
-
   /* ---- tabs ---- */
   .tab {
     @apply cursor-pointer px-2 py-1.5 text-sm capitalize text-fg-muted transition-colors hover:text-fg;
@@ -241,15 +201,12 @@ body {
     @apply text-[var(--color-brand)];
   }
 
-  /* ---- typography + badges ---- */
+  /* ---- typography ---- */
   .label {
     @apply text-[11px] font-semibold tracking-wide text-fg-subtle uppercase;
   }
   .hint {
     @apply text-xs text-fg-faint;
-  }
-  .badge {
-    @apply rounded px-1.5 py-0.5 text-[10px] font-semibold;
   }
 }
 

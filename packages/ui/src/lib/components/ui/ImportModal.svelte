@@ -1,6 +1,8 @@
 <script lang="ts">
   import Modal from "./Modal.svelte";
   import { ws } from "../../store.svelte";
+  import { Button } from "./button/index.js";
+  import { Textarea } from "./textarea/index.js";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -22,25 +24,25 @@
 <Modal {onClose} class="flex w-[600px] max-w-[92vw] flex-col rounded-xl">
   <div class="flex items-center justify-between border-b border-border px-4 py-2">
     <h2 class="text-sm font-semibold text-fg">Import from cURL</h2>
-    <button onclick={onClose} class="btn-icon" aria-label="close">✕</button>
+    <Button onclick={onClose} variant="ghost" size="icon-xs" aria-label="close">✕</Button>
   </div>
   <div class="p-3">
     <!-- svelte-ignore a11y_autofocus -->
-    <textarea
+    <Textarea
       bind:value={text}
-      rows="9"
+      rows={9}
       autofocus
       placeholder={"Paste a curl command (browser → Copy as cURL)…"}
-      class="textarea mono text-xs"
-    ></textarea>
+      class="mono text-xs"
+    />
     <div class="mt-3 flex items-center justify-between">
       <span class="hint">Parses method, URL, headers, body and basic auth.</span>
       <div class="flex gap-2">
-        <button onclick={onClose} class="btn btn-ghost">Cancel</button>
-        <button
+        <Button onclick={onClose} variant="outline" size="xs">Cancel</Button>
+        <Button
           onclick={doImport}
           disabled={busy || !text.trim()}
-          class="btn btn-primary">Import</button
+          size="xs">Import</Button
         >
       </div>
     </div>

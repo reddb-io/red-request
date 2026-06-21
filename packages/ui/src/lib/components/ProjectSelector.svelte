@@ -6,6 +6,8 @@
   import { recentList, recentPin, type RecentProject } from "../project";
   import StageBackground from "./StageBackground.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
+  import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
 
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
@@ -73,22 +75,23 @@
     </div>
 
     <div class="mb-3 flex gap-2">
-      <input
+      <Input
         bind:value={query}
         placeholder="Search projects…"
-        class="input flex-1"
+        class="h-7 flex-1"
       />
-      <button
+      <Button
         onclick={openFolder}
         disabled={busy}
-        class="btn btn-primary"
-        >Open folder…</button
+        size="xs"
+        >Open folder…</Button
       >
-      <button
+      <Button
         onclick={() => choose(null)}
         disabled={busy}
-        class="btn btn-ghost"
-        title="Use the global store (~/.red/request/app.rdb)">Global</button
+        variant="outline"
+        size="xs"
+        title="Use the global store (~/.red/request/app.rdb)">Global</Button
       >
     </div>
 
@@ -136,15 +139,17 @@
             </button>
             <Tooltip text={r.pinned ? "Unpin" : "Pin to top"}>
               {#snippet children(p)}
-                <button
+                <Button
                   {...p}
                   onclick={() => togglePin(r)}
-                  class="btn-icon absolute top-2 right-2 {r.pinned
+                  variant="ghost"
+                  size="icon-xs"
+                  class="absolute top-2 right-2 {r.pinned
                     ? 'text-[var(--color-brand)]'
                     : ''}"
                 >
                   {r.pinned ? "★" : "☆"}
-                </button>
+                </Button>
               {/snippet}
             </Tooltip>
           </div>

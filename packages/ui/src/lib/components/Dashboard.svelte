@@ -3,6 +3,7 @@
   import { ws } from "../store.svelte";
   import * as repo from "../repo";
   import type { HistoryEntry } from "@red-request/core";
+  import { Button } from "./ui/button/index.js";
 
   let history = $state<HistoryEntry[]>([]);
   let loading = $state(true);
@@ -91,10 +92,11 @@
     <h1 class="text-base font-semibold text-fg">
       {col?.collection.name ?? "Dashboard"}
     </h1>
-    <button
+    <Button
       onclick={load}
-      class="btn btn-ghost btn-sm"
-      >{loading ? "…" : "Refresh"}</button
+      variant="outline"
+      size="xs"
+      >{loading ? "…" : "Refresh"}</Button
     >
   </div>
 

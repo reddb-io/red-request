@@ -3,6 +3,8 @@
   import { ws } from "../store.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import Modal from "./ui/Modal.svelte";
+  import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -102,13 +104,13 @@
         {/if}
       </div>
       <div class="flex gap-1 border-t border-border p-2">
-        <input
+        <Input
           bind:value={newEnvName}
           placeholder="new env"
-          class="input min-w-0 flex-1"
+          class="h-7 min-w-0 flex-1"
           onkeydown={(e) => e.key === "Enter" && addEnv()}
         />
-        <button onclick={addEnv} class="btn btn-primary">+</button>
+        <Button onclick={addEnv} size="icon-xs" aria-label="add environment">+</Button>
       </div>
     </div>
 
@@ -123,13 +125,13 @@
             class="bg-transparent text-sm font-semibold text-fg-strong outline-none"
           />
           <div class="flex gap-2 text-sm">
-            <button onclick={dupEnv} class="btn btn-ghost btn-sm">Duplicate</button>
-            <button onclick={delEnv} class="btn btn-ghost btn-sm hover:text-red-400">Delete</button>
+            <Button onclick={dupEnv} variant="outline" size="xs">Duplicate</Button>
+            <Button onclick={delEnv} variant="outline" size="xs" class="hover:text-red-400">Delete</Button>
           </div>
         {:else}
           <span class="text-sm text-fg-subtle">Select or create an environment</span>
         {/if}
-        <button onclick={onClose} class="btn-icon ml-3">✕</button>
+        <Button onclick={onClose} variant="ghost" size="icon-xs" class="ml-3">✕</Button>
       </div>
 
       {#if selected}
@@ -137,10 +139,11 @@
           <section>
             <div class="mb-2 flex items-center justify-between">
               <h3 class="label">Variables</h3>
-              <button
+              <Button
                 onclick={saveVars}
-                class="btn btn-ghost btn-sm"
-                >Save vars</button
+                variant="outline"
+                size="xs"
+                >Save vars</Button
               >
             </div>
             <KeyValueEditor bind:items={varRows} placeholder="VAR_NAME" />
@@ -156,9 +159,11 @@
                   <span class="mono text-fg">{name}</span>
                   <span class="flex items-center gap-3">
                     <span class="text-xs text-emerald-500">•••• set</span>
-                    <button
+                    <Button
                       onclick={() => ws.removeSecret(selected!, name)}
-                      class="btn-icon hover:text-red-400">✕</button
+                      variant="ghost"
+                      size="icon-xs"
+                      class="hover:text-red-400">✕</Button
                     >
                   </span>
                 </div>
@@ -168,15 +173,15 @@
               {/if}
             </div>
             <div class="mt-2 flex gap-1">
-              <input bind:value={secretName} placeholder="NAME" class="input w-40" />
-              <input
+              <Input bind:value={secretName} placeholder="NAME" class="h-7 w-40" />
+              <Input
                 bind:value={secretValue}
                 type="password"
                 placeholder="value"
-                class="input flex-1"
+                class="h-7 flex-1"
                 onkeydown={(e) => e.key === "Enter" && addSecret()}
               />
-              <button onclick={addSecret} class="btn btn-primary">Set</button>
+              <Button onclick={addSecret} size="xs">Set</Button>
             </div>
           </section>
         </div>

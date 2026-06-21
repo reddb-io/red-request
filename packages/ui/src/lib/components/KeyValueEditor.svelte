@@ -2,6 +2,7 @@
   import type { Kv } from "@red-request/core";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
+  import { Button } from "./ui/button/index.js";
 
   let { items = $bindable(), placeholder = "name" }: {
     items: Kv[];
@@ -31,16 +32,19 @@
       <div class="flex-1">
         <VarField bind:value={item.value} known={ws.knownVars} values={ws.varTitles} dense placeholder="value" />
       </div>
-      <button
+      <Button
         onclick={() => removeAt(i)}
-        class="btn-icon"
-        aria-label="remove">✕</button
+        variant="ghost"
+        size="icon-xs"
+        aria-label="remove">✕</Button
       >
     </div>
   {/each}
-  <button
+  <Button
     onclick={add}
-    class="btn btn-subtle btn-sm mt-1 self-start"
-    >+ add</button
+    variant="ghost"
+    size="xs"
+    class="mt-1 self-start"
+    >+ add</Button
   >
 </div>

@@ -3,6 +3,9 @@
   import Tooltip from "./ui/Tooltip.svelte";
   import Menu from "./ui/Menu.svelte";
   import ImportModal from "./ui/ImportModal.svelte";
+  import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
+  import { Badge } from "./ui/badge/index.js";
 
   let showImport = $state(false);
   import { brand } from "../brand.generated";
@@ -173,12 +176,14 @@
         class="row pr-6 {indent ? 'pl-6' : 'pl-2'}"
         class:is-active={ws.activeReq?.id === req.id && ws.activeColId === col.id}
       >
-        <span class="badge mono w-11 shrink-0 {badge(req).color}"
-          >{badge(req).label}</span
+        <Badge
+          variant="secondary"
+          class="mono w-11 shrink-0 justify-center px-1 py-0 text-[10px] {badge(req).color}"
+          >{badge(req).label}</Badge
         >
         {#if renamingId === req.id}
           <!-- svelte-ignore a11y_autofocus -->
-          <input
+          <Input
             bind:value={renameValue}
             autofocus
             onclick={(e) => e.stopPropagation()}
@@ -187,7 +192,7 @@
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") renamingId = null;
             }}
-            class="input h-6 flex-1"
+            class="h-6 flex-1"
           />
         {:else}
           <span class="truncate text-fg">{req.name}</span>
@@ -215,11 +220,13 @@
         ]}
       >
         {#snippet trigger(p)}
-          <button
+          <Button
             {...p}
+            variant="ghost"
+            size="icon-xs"
             aria-label="request actions"
-            class="btn-icon absolute top-1.5 right-1 opacity-0 group-hover/req:opacity-100 data-[state=open]:opacity-100"
-            >⋯</button
+            class="absolute top-1.5 right-1 opacity-0 group-hover/req:opacity-100 data-[state=open]:opacity-100"
+            >⋯</Button
           >
         {/snippet}
       </Menu>
@@ -248,7 +255,7 @@
         >
           {#if renamingColId === col.id}
             <!-- svelte-ignore a11y_autofocus -->
-            <input
+            <Input
               bind:value={colRenameValue}
               autofocus
               onblur={commitRenameCol}
@@ -256,7 +263,7 @@
                 if (e.key === "Enter") commitRenameCol();
                 if (e.key === "Escape") renamingColId = null;
               }}
-              class="input h-6"
+              class="h-6"
             />
           {:else}
             <span class="label truncate">
@@ -266,18 +273,19 @@
           <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
               {#snippet children(p)}
-                <button {...p} onclick={() => ws.addRequest("")} class="btn-icon">＋</button>
+                <Button {...p} onclick={() => ws.addRequest("")} variant="ghost" size="icon-xs">＋</Button>
               {/snippet}
             </Tooltip>
             <Tooltip text="New folder">
               {#snippet children(p)}
-                <button
+                <Button
                   {...p}
                   onclick={() => {
                     addingFolderFor = addingFolderFor === col.id ? null : col.id;
                     folderName = "";
                   }}
-                  class="btn-icon">🗀</button
+                  variant="ghost"
+                  size="icon-xs">🗀</Button
                 >
               {/snippet}
             </Tooltip>
@@ -293,8 +301,8 @@
               ]}
             >
               {#snippet trigger(p)}
-                <button {...p} aria-label="collection actions" class="btn-icon"
-                  >⋯</button
+                <Button {...p} aria-label="collection actions" variant="ghost" size="icon-xs"
+                  >⋯</Button
                 >
               {/snippet}
             </Menu>
@@ -302,10 +310,10 @@
         </div>
 
         {#if addingFolderFor === col.id}
-          <input
+          <Input
             bind:value={folderName}
             placeholder="folder name"
-            class="input mono mb-1 ml-2 w-[calc(100%-1rem)]"
+            class="mono mb-1 ml-2 h-7 w-[calc(100%-1rem)]"
             onkeydown={(e) => {
               if (e.key === "Enter") submitFolder(col.id);
               if (e.key === "Escape") addingFolderFor = null;
@@ -346,12 +354,12 @@
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
               <Tooltip text="New request here">
                 {#snippet children(p)}
-                  <button {...p} onclick={() => ws.addRequest(f.name)} class="btn-icon">＋</button>
+                  <Button {...p} onclick={() => ws.addRequest(f.name)} variant="ghost" size="icon-xs">＋</Button>
                 {/snippet}
               </Tooltip>
               <Tooltip text="Delete folder (requests move to root)">
                 {#snippet children(p)}
-                  <button {...p} onclick={() => ws.deleteFolder(f.name)} class="btn-icon hover:text-red-400">✕</button>
+                  <Button {...p} onclick={() => ws.deleteFolder(f.name)} variant="ghost" size="icon-xs" class="hover:text-red-400">✕</Button>
                 {/snippet}
               </Tooltip>
             </span>
@@ -371,15 +379,19 @@
 
   <div class="border-t border-border p-2">
     <div class="flex gap-1">
-      <button
+      <Button
         onclick={doExport}
-        class="btn btn-ghost btn-sm flex-1"
-        title="Write a git-friendly YAML tree (no secret values)">Export YAML</button
+        variant="outline"
+        size="xs"
+        class="flex-1"
+        title="Write a git-friendly YAML tree (no secret values)">Export YAML</Button
       >
-      <button
+      <Button
         onclick={doImport}
-        class="btn btn-ghost btn-sm flex-1"
-        title="Read the YAML tree back into the store">Import</button
+        variant="outline"
+        size="xs"
+        class="flex-1"
+        title="Read the YAML tree back into the store">Import</Button
       >
     </div>
     {#if status}

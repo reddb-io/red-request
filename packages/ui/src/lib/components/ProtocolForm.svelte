@@ -7,6 +7,7 @@
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
+  import { Input } from "./ui/input/index.js";
 
   let {
     kind,
@@ -37,7 +38,7 @@
   {#if kind === "tcp" || kind === "udp" || kind === "ping"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">port</span>
-      <input type="number" min="0" max="65535" bind:value={net.port} class="input w-28" />
+      <Input type="number" min="0" max="65535" bind:value={net.port} class="h-7 w-28" />
     </label>
   {/if}
 
@@ -68,7 +69,7 @@
   {#if kind === "ping"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">count</span>
-      <input type="number" min="1" max="50" bind:value={net.count} class="input w-28" />
+      <Input type="number" min="1" max="50" bind:value={net.count} class="h-7 w-28" />
     </label>
     <p class="hint">TCP-connect ping (no root needed). Defaults to port 80.</p>
   {/if}
@@ -83,7 +84,7 @@
   {#if kind !== "whois"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">timeout</span>
-      <input type="number" min="100" max="60000" bind:value={net.timeoutMs} class="input w-28" />
+      <Input type="number" min="100" max="60000" bind:value={net.timeoutMs} class="h-7 w-28" />
       <span class="hint">ms</span>
     </label>
   {/if}

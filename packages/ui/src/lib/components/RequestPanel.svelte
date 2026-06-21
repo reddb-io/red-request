@@ -8,6 +8,9 @@
   import ProtocolForm from "./ProtocolForm.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
+  import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
+  import { Textarea } from "./ui/textarea/index.js";
 
   let showRunner = $state(false);
 
@@ -139,22 +142,27 @@
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
-      <button
+      <Button
         onclick={() => ws.send()}
         disabled={ws.sending}
         title="Send (⌘↵ / Ctrl+↵)"
-        class="btn btn-primary shrink-0"
-        >{ws.sending ? "…" : "Send"}</button
+        size="xs"
+        class="shrink-0"
+        >{ws.sending ? "…" : "Send"}</Button
       >
-      <button
+      <Button
         onclick={() => ws.save()}
-        class="btn btn-ghost shrink-0"
-        >Save</button
+        variant="outline"
+        size="xs"
+        class="shrink-0"
+        >Save</Button
       >
-      <button
+      <Button
         onclick={() => (showRunner = true)}
-        class="btn btn-ghost shrink-0"
-        title="Run loops: repeat, data-driven, or flow">Run…</button
+        variant="outline"
+        size="xs"
+        class="shrink-0"
+        title="Run loops: repeat, data-driven, or flow">Run…</Button
       >
     </div>
 
@@ -184,7 +192,7 @@
             {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
               <label class="flex items-center gap-2 text-sm">
                 <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
-                <input bind:value={p.value} placeholder="value" class="input flex-1" />
+                <Input bind:value={p.value} placeholder="value" class="h-7 flex-1" />
               </label>
             {/each}
           </div>
@@ -200,16 +208,16 @@
               <h4 class="label">Pre-request</h4>
               <span class="mono text-xs text-fg-faint">rr.setHeader · rr.setVar · rr.req.url</span>
             </div>
-            <textarea bind:value={ws.activeReq.scripts.preRequest} rows="6" class="textarea mono text-xs"
-              placeholder={"rr.setVar('ts', Date.now())\nrr.setHeader('X-Trace', rr.getVar('ts'))"}></textarea>
+            <Textarea bind:value={ws.activeReq.scripts.preRequest} rows={6} class="mono text-xs"
+              placeholder={"rr.setVar('ts', Date.now())\nrr.setHeader('X-Trace', rr.getVar('ts'))"} />
           </div>
           <div>
             <div class="mb-1 flex items-center justify-between">
               <h4 class="label">Post-response</h4>
               <span class="mono text-xs text-fg-faint">rr.res · rr.test · rr.expect · rr.setVar</span>
             </div>
-            <textarea bind:value={ws.activeReq.scripts.postResponse} rows="8" class="textarea mono text-xs"
-              placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"}></textarea>
+            <Textarea bind:value={ws.activeReq.scripts.postResponse} rows={8} class="mono text-xs"
+              placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"} />
           </div>
         </div>
       {:else if tab === "config"}

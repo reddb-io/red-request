@@ -8,6 +8,7 @@
   import Dashboard from "$lib/components/Dashboard.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
   import CommandPalette from "$lib/components/ui/CommandPalette.svelte";
+  import { Button } from "$lib/components/ui/button/index.js";
   import { Tooltip } from "bits-ui";
 
   let cmdOpen = $state(false);
@@ -57,7 +58,7 @@
         <p class="mx-auto mb-4 max-w-md text-sm text-fg-muted">
           The embedded RedDB store didn't come up: <span class="mono">{ws.loadError}</span>
         </p>
-        <button onclick={() => ws.retry()} class="btn btn-primary">Retry</button>
+        <Button onclick={() => ws.retry()} size="xs">Retry</Button>
       </div>
     </div>
   {:else}

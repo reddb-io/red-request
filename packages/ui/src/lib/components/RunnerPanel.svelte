@@ -2,6 +2,8 @@
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import Modal from "./ui/Modal.svelte";
+  import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -42,7 +44,7 @@
 <Modal {onClose} class="flex h-[80vh] w-[760px] flex-col rounded-xl">
   <div class="flex items-center justify-between border-b border-border px-4 py-2">
     <h2 class="text-sm font-semibold text-fg">Run</h2>
-    <button onclick={onClose} class="btn-icon" aria-label="close">✕</button>
+    <Button onclick={onClose} variant="ghost" size="icon-xs" aria-label="close">✕</Button>
   </div>
 
     <div class="flex gap-1 border-b border-border px-3 text-sm">
@@ -59,7 +61,7 @@
       {#if mode === "repeat"}
         <label class="text-sm text-fg-muted">
           Count
-          <input type="number" min="1" max="1000" bind:value={count} class="input ml-2 w-20" />
+          <Input type="number" min="1" max="1000" bind:value={count} class="ml-2 inline-flex h-7 w-20" />
         </label>
         <span class="text-xs text-fg-faint">Runs “{ws.activeReq?.name}” {count}×.</span>
       {:else if mode === "data"}
@@ -83,11 +85,12 @@
             ?.collection.name}” in order; each post-response <code class="mono">setVar</code> threads into the next.
         </span>
       {/if}
-      <button
+      <Button
         onclick={run}
         disabled={ws.running}
-        class="btn btn-primary ml-auto"
-        >{ws.running ? "Running…" : "Run"}</button
+        size="xs"
+        class="ml-auto"
+        >{ws.running ? "Running…" : "Run"}</Button
       >
     </div>
 

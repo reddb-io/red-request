@@ -2,6 +2,7 @@
   import { ws } from "../store.svelte";
   import EnvironmentsEditor from "./EnvironmentsEditor.svelte";
   import Select from "./ui/Select.svelte";
+  import { Button } from "./ui/button/index.js";
 
   let showEditor = $state(false);
 </script>
@@ -15,10 +16,11 @@
     ariaLabel="environment"
     class="w-auto"
   />
-  <button
+  <Button
     onclick={() => (showEditor = true)}
-    class="btn btn-ghost"
-    title="Manage environments, variables & secrets">Environments</button
+    variant="outline"
+    size="xs"
+    title="Manage environments, variables & secrets">Environments</Button
   >
 </div>
 
