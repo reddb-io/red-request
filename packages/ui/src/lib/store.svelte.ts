@@ -14,6 +14,7 @@ import {
   type RequestDefinition,
   type ResponseResult,
   type SavedExample,
+  type GrpcService,
   type StoredEnvironment,
   type ScriptTest,
   type HistoryEntry,
@@ -34,6 +35,8 @@ import {
   sseOpen,
   sseClose,
   cookiesClear,
+  grpcMethods as rpcGrpcMethods,
+  grpcCall as rpcGrpcCall,
 } from "./rpc";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
@@ -87,6 +90,10 @@ class Workspace {
   >([]);
   private wsConnId: string | null = null;
   private wsUnlisten: UnlistenFn | null = null;
+
+  // --- grpc (kind === "grpc") ---
+  grpcServices = $state<GrpcService[]>([]);
+  grpcLoading = $state(false);
 
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
@@ -257,6 +264,7 @@ class Workspace {
     this.wsConnId = null;
     this.wsStatus = "idle";
     this.wsMessages = [];
+    this.grpcServices = [];
     void this.refreshReqHistory();
   }
 
@@ -460,6 +468,61 @@ class Workspace {
     if (col) {
       col.collection.vars[name] = value;
       await this.persistCollection();
+    }
+  }
+
+  // --- grpc -----------------------------------------------------------------
+  /** Parse the active request's .proto and list its services/methods. */
+  async grpcLoadMethods(): Promise<void> {
+    const req = this.activeReq;
+    if (!req || !req.grpc.proto.trim()) return;
+    this.grpcLoading = true;
+    this.errorMsg = null;
+    try {
+      const r = await rpcGrpcMethods({ proto: req.grpc.proto });
+      this.grpcServices = r.services;
+      if (r.error) this.errorMsg = r.error;
+      // default the selection to the first service/method
+      if (!req.grpc.service && r.services[0]) {
+        req.grpc.service = r.services[0].name;
+        req.grpc.method = r.services[0].methods[0]?.name ?? "";
+      }
+    } catch (e) {
+      this.errorMsg = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.grpcLoading = false;
+    }
+  }
+
+  /** Invoke the active gRPC request (unary) and show the result in the response panel. */
+  async grpcInvoke(): Promise<void> {
+    const req = this.activeReq;
+    if (!req || this.sending) return;
+    this.sending = true;
+    this.exampleView = null;
+    this.errorMsg = null;
+    this.response = null;
+    try {
+      const variables = await this.buildVariables();
+      const result = await rpcGrpcCall({
+        request: $state.snapshot(req) as RequestDefinition,
+        variables,
+      });
+      this.response = result.response;
+      this.effectiveUrl = result.effectiveUrl;
+      await this.recordEntry(
+        req.id,
+        req.name,
+        "GRPC",
+        result.effectiveUrl,
+        result.response,
+        []
+      );
+    } catch (e) {
+      this.errorMsg = e instanceof Error ? e.message : String(e);
+    } finally {
+      this.sending = false;
+      void this.refreshReqHistory();
     }
   }
 

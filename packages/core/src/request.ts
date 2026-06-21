@@ -60,6 +60,7 @@ export const requestKindSchema = z.enum([
   "http",
   "ws",
   "sse",
+  "grpc",
   "tcp",
   "udp",
   "ping",
@@ -105,6 +106,17 @@ export const savedExampleSchema = z.object({
 });
 export type SavedExample = z.infer<typeof savedExampleSchema>;
 
+/** gRPC config (kind === "grpc"). The server address lives in `url` (host:port). */
+export const grpcConfigSchema = z.object({
+  proto: z.string().default(""),
+  service: z.string().default(""),
+  method: z.string().default(""),
+  message: z.string().default("{}"),
+  plaintext: z.boolean().default(true),
+  metadata: z.array(kvSchema).default([]),
+});
+export type GrpcConfig = z.infer<typeof grpcConfigSchema>;
+
 /**
  * A single request — serialized one-per-file under `requests/<slug>.yaml`.
  * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
@@ -143,6 +155,15 @@ export const requestDefinitionSchema = z.object({
   /** Route through an HTTP/HTTPS/SOCKS proxy (e.g. http://127.0.0.1:8080). */
   proxy: z.string().optional(),
   retry: retrySchema.optional(),
+  /** gRPC config — only when kind is `grpc`. */
+  grpc: grpcConfigSchema.default({
+    proto: "",
+    service: "",
+    method: "",
+    message: "{}",
+    plaintext: true,
+    metadata: [],
+  }),
   /** Saved response snapshots (docs / mocking) — versioned with the request. */
   examples: z.array(savedExampleSchema).default([]),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */

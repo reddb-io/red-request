@@ -19,6 +19,35 @@ export type HttpSendParams = z.infer<typeof httpSendParamsSchema>;
 export const cookiesClearParamsSchema = z.object({ key: z.string() });
 export type CookiesClearParams = z.infer<typeof cookiesClearParamsSchema>;
 
+// --- gRPC -------------------------------------------------------------------
+export const grpcMethodsParamsSchema = z.object({ proto: z.string() });
+export type GrpcMethodsParams = z.infer<typeof grpcMethodsParamsSchema>;
+
+export const grpcMethodSchema = z.object({
+  name: z.string(),
+  requestStream: z.boolean(),
+  responseStream: z.boolean(),
+  requestType: z.string().optional(),
+  skeleton: z.string().default("{}"),
+});
+export const grpcServiceSchema = z.object({
+  name: z.string(),
+  methods: z.array(grpcMethodSchema),
+});
+export type GrpcMethod = z.infer<typeof grpcMethodSchema>;
+export type GrpcService = z.infer<typeof grpcServiceSchema>;
+export const grpcMethodsResultSchema = z.object({
+  services: z.array(grpcServiceSchema).default([]),
+  error: z.string().optional(),
+});
+export type GrpcMethodsResult = z.infer<typeof grpcMethodsResultSchema>;
+
+export const grpcCallParamsSchema = z.object({
+  request: requestDefinitionSchema,
+  variables: z.record(z.string(), z.string()).default({}),
+});
+export type GrpcCallParams = z.infer<typeof grpcCallParamsSchema>;
+
 export const scriptTestSchema = z.object({
   name: z.string(),
   passed: z.boolean(),

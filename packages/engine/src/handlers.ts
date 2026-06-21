@@ -9,8 +9,12 @@ import {
   wsSendParamsSchema,
   wsCloseParamsSchema,
   cookiesClearParamsSchema,
+  grpcMethodsParamsSchema,
+  grpcCallParamsSchema,
   resolveRequest,
+  resolveTemplate,
   type HttpSendResult,
+  type GrpcMethodsResult,
   type Oauth2TokenResult,
   type RunnerResult,
 } from "@red-request/core";
@@ -20,6 +24,7 @@ import { runPipeline } from "./pipeline.js";
 import { runLoop } from "./runner.js";
 import { wsOpen, wsSend, wsClose, sseOpen, sseClose } from "./stream.js";
 import { clearJar } from "./cookies.js";
+import { grpcListMethods, grpcCall } from "./grpc.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
@@ -94,6 +99,30 @@ export const handlers: Record<string, Handler> = {
     const { key } = cookiesClearParamsSchema.parse(raw);
     clearJar(key);
     return { ok: true };
+  },
+
+  [ENGINE_METHODS.grpcMethods]: async (raw): Promise<GrpcMethodsResult> => {
+    const { proto } = grpcMethodsParamsSchema.parse(raw);
+    return grpcListMethods(proto);
+  },
+
+  [ENGINE_METHODS.grpcCall]: async (raw): Promise<HttpSendResult> => {
+    const { request, variables } = grpcCallParamsSchema.parse(raw);
+    const t = (s: string) => resolveTemplate(s, variables).value;
+    const g = request.grpc;
+    const address = t(request.url);
+    const response = await grpcCall({
+      address,
+      proto: g.proto,
+      service: g.service,
+      method: g.method,
+      message: t(g.message),
+      plaintext: g.plaintext,
+      metadata: g.metadata
+        .filter((m) => m.enabled && m.name.trim())
+        .map((m) => ({ name: t(m.name), value: t(m.value) })),
+    });
+    return { response, unresolved: [], effectiveUrl: address };
   },
 
   [ENGINE_METHODS.oauth2Token]: async (raw): Promise<Oauth2TokenResult> => {

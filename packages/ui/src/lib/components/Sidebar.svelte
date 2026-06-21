@@ -67,6 +67,7 @@
   const kindColor: Record<string, string> = {
     ws: "text-violet-400",
     sse: "text-fuchsia-400",
+    grpc: "text-lime-400",
     tcp: "text-cyan-400",
     udp: "text-teal-400",
     ping: "text-pink-400",

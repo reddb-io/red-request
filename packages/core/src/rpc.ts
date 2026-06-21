@@ -50,6 +50,8 @@ export const ENGINE_METHODS = {
   sseOpen: "sse.open",
   sseClose: "sse.close",
   cookiesClear: "cookies.clear",
+  grpcMethods: "grpc.methods",
+  grpcCall: "grpc.call",
   graphqlSend: "graphql.send",
   sseStream: "sse.stream",
   importParse: "import.parse",

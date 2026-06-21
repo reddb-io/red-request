@@ -9,6 +9,7 @@
   import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import WebSocketPanel from "./WebSocketPanel.svelte";
+  import GrpcPanel from "./GrpcPanel.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import { Button } from "./ui/button/index.js";
@@ -153,7 +154,7 @@
             />
           </div>
         </div>
-      {:else if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
+      {:else if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse" || ws.activeReq.kind === "grpc"}
         <div class="flex-1"></div>
       {:else}
         <span
@@ -162,7 +163,7 @@
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
-      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse"}
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
         <Button
           onclick={() => ws.send()}
           disabled={ws.sending}
@@ -179,7 +180,7 @@
         class="shrink-0"
         >Save</Button
       >
-      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse"}
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
         <Button
           onclick={() => (showRunner = true)}
           variant="outline"
@@ -202,6 +203,10 @@
     {#if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
       <div class="min-h-0 flex-1 p-3">
         <WebSocketPanel />
+      </div>
+    {:else if ws.activeReq.kind === "grpc"}
+      <div class="min-h-0 flex-1 p-3">
+        <GrpcPanel />
       </div>
     {:else}
     <div class="flex gap-1 border-b border-border px-3 text-sm">

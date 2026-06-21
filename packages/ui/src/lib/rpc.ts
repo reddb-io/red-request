@@ -11,6 +11,9 @@ import {
   type WsSendParams,
   type WsCloseParams,
   type CookiesClearParams,
+  type GrpcMethodsParams,
+  type GrpcMethodsResult,
+  type GrpcCallParams,
 } from "@red-request/core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
@@ -51,6 +54,14 @@ export function cookiesClear(
   params: CookiesClearParams
 ): Promise<{ ok: boolean }> {
   return engineCall(ENGINE_METHODS.cookiesClear, params);
+}
+export function grpcMethods(
+  params: GrpcMethodsParams
+): Promise<GrpcMethodsResult> {
+  return engineCall(ENGINE_METHODS.grpcMethods, params);
+}
+export function grpcCall(params: GrpcCallParams): Promise<HttpSendResult> {
+  return engineCall(ENGINE_METHODS.grpcCall, params);
 }
 
 /** Subscribe to engine stream notifications (SSE/WS/progress) re-emitted by Rust. */
