@@ -30,8 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux on GitHub-hosted ubuntu-22.04: Blacksmith only offers 24.04, where Tauri's
+          # AppImage tooling (linuxdeploy) is broken by AppArmor unprivileged-userns limits.
           - {
-              os: blacksmith-8vcpu-ubuntu-2404,
+              os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
             }
