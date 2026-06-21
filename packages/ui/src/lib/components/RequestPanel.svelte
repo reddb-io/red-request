@@ -24,16 +24,9 @@
     HEAD: "text-fg-muted",
     OPTIONS: "text-fg-muted",
   };
-  type Tab =
-    | "query"
-    | "path"
-    | "headers"
-    | "body"
-    | "auth"
-    | "scripts"
-    | "config";
-  let tab = $state<Tab>("query");
-  const httpTabs: Tab[] = ["query", "path", "headers", "body", "auth", "scripts"];
+  type Tab = "params" | "headers" | "body" | "auth" | "scripts" | "config";
+  let tab = $state<Tab>("params");
+  const httpTabs: Tab[] = ["params", "headers", "body", "auth", "scripts"];
   const netTabs: Tab[] = ["config", "scripts"];
   const tabs = $derived(ws.activeReq?.kind === "http" ? httpTabs : netTabs);
   $effect(() => {
@@ -186,47 +179,55 @@
           class="tab"
           class:is-active={tab === t}
         >
-          {t}{#if t === "path" && detected.length}<span class="ml-1 text-xs text-fg-subtle">{detected.length}</span>{/if}
+          {t}{#if t === "params" && detected.length}<span class="ml-1 text-xs text-fg-subtle" title="path params">:{detected.length}</span>{/if}
         </button>
       {/each}
     </div>
 
     <div class="flex-1 overflow-auto p-3">
-      {#if tab === "query"}
-        <p class="hint mb-2">
-          Query string appended to the URL as <code class="mono">?key=value</code>. Values may
-          use <code class="mono">{"{{vars}}"}</code>.
-        </p>
-        <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
-      {:else if tab === "path"}
-        {#if detected.length === 0}
-          <p class="text-sm text-fg-faint">
-            No path params. Add <code class="mono text-[var(--color-brand)]">:name</code> to the URL
-            (e.g. <code class="mono">/users/:id</code>) and set its value here.
-          </p>
-        {:else}
-          <p class="hint mb-2">
-            Values for the <code class="mono">:name</code> segments in the URL — use a literal or a
-            <code class="mono">{"{{var}}"}</code> (e.g. an id saved in your environment).
-          </p>
-          <div class="flex flex-col gap-2">
-            {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
-              <label class="flex items-center gap-2 text-sm">
-                <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
-                <div class="flex-1">
-                  <VarField
-                    bind:value={p.value}
-                    known={ws.knownVars}
-                    values={ws.varTitles}
-                    dense
-                    ariaLabel={`value for :${p.name}`}
-                    placeholder={"value or {{var}}"}
-                  />
-                </div>
-              </label>
-            {/each}
-          </div>
-        {/if}
+      {#if tab === "params"}
+        <div class="flex flex-col gap-5">
+          <section>
+            <h4 class="label mb-1.5">Query</h4>
+            <p class="hint mb-2">
+              Appended to the URL as <code class="mono">?key=value</code>. Values may use
+              <code class="mono">{"{{vars}}"}</code>.
+            </p>
+            <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
+          </section>
+
+          <section>
+            <h4 class="label mb-1.5">Path</h4>
+            {#if detected.length === 0}
+              <p class="hint">
+                Add <code class="mono text-[var(--color-brand)]">:name</code> to the URL (e.g.
+                <code class="mono">/users/:id</code>) to set path params here.
+              </p>
+            {:else}
+              <p class="hint mb-2">
+                Values for the <code class="mono">:name</code> segments — a literal or a
+                <code class="mono">{"{{var}}"}</code> (e.g. an id saved in your environment).
+              </p>
+              <div class="flex flex-col gap-2">
+                {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
+                  <label class="flex items-center gap-2 text-sm">
+                    <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
+                    <div class="flex-1">
+                      <VarField
+                        bind:value={p.value}
+                        known={ws.knownVars}
+                        values={ws.varTitles}
+                        dense
+                        ariaLabel={`value for :${p.name}`}
+                        placeholder={"value or {{var}}"}
+                      />
+                    </div>
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        </div>
       {:else if tab === "headers"}
         <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
       {:else if tab === "auth"}
