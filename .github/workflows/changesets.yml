@@ -11,7 +11,7 @@ concurrency:
 jobs:
   changesets:
     name: Version Packages
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Skip the version-bump commit itself (authored by the bot) to avoid a loop.
     if: github.actor != 'github-actions[bot]'
     permissions:

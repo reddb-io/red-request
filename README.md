@@ -9,60 +9,76 @@
   <img src="https://img.shields.io/badge/linux%20·%20macOS%20·%20windows-555?style=for-the-badge&labelColor=0b0b0d&label=runs%20on" alt="Platforms">
 </p>
 
-<strong>A Bruno/Insomnia alternative that's native, offline-first, git-friendly and truly yours.</strong><br>
-Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</code></a> multi-protocol SDK · shipped as a <a href="https://tauri.app">Tauri&nbsp;2</a> app · <strong>no Electron, no account, no telemetry.</strong>
+<strong>The API client that respects you</strong> — native, offline-first, git-friendly, and entirely yours to rebrand.<br>
+Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</code></a> multi-protocol SDK and shipped as a <a href="https://tauri.app">Tauri&nbsp;2</a> desktop app. No Electron. No account. No telemetry.
 
 </div>
 
 ---
 
-## ⚡ Install
+## Install
 
 ```bash
-# Linux — one line, that's it.
+# Linux — one line.
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 ```
 
-<div align="center"><sub>or grab your platform from the <a href="https://github.com/reddb-io/red-request/releases/latest"><b>latest release</b></a> ↓</sub></div>
+Prefer a click? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
 
-| 🐧 Linux             | 🍎 macOS                       | 🪟 Windows                 |
-| -------------------- | ------------------------------ | -------------------------- |
-| `.AppImage` · `.deb` | `.dmg` — Apple Silicon & Intel | `.msi` · NSIS `-setup.exe` |
+| Linux                | macOS                  | Windows                    |
+| -------------------- | ---------------------- | -------------------------- |
+| `.AppImage` · `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
 
-> Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.
-
----
-
-## ✨ Why you'll like it
-
-|                           |                                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ⚡ **Native & instant**   | A Rust (Tauri) shell around a Svelte 5 UI. Cold-starts in a blink, sips RAM — none of the Electron tax.                                                      |
-| 🔌 **Multi-protocol**     | Every request runs through **recker**. **HTTP, TCP, UDP, ping, WHOIS and DNS** ship today as first-class request _kinds_. WS / GraphQL / SSE / gRPC next.    |
-| 💾 **Offline-first**      | Your work lives in a local **RedDB** `.rdb` — no cloud, no sign-in, no "sync conflict".                                                                      |
-| 🌿 **Git-friendly**       | Export collections to a clean **YAML** tree (one request per file) you can diff and review in PRs. Secrets never leave.                                      |
-| 🔐 **Secrets done right** | Sealed with **AES-256-GCM**, master key in your **OS keychain**. Never exported, never plaintext.                                                            |
-| 🎨 **White-label**        | Name, icon, accent, deep-link scheme — all from one `brand.config.json`. Ship it as _your_ product without forking logic.                                    |
-| 🧠 **Power tools**        | `⌘K` command palette, a runner (repeat / data-driven / flow), drag-to-reorder params, a code editor with line numbers + Prettify, and native SQL migrations. |
-| 🆓 **100% MIT**           | Free forever. Yours to fork, rebrand and ship.                                                                                                               |
+<sub>Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.</sub>
 
 ---
 
-## 🆚 How it compares
+## What makes it nice
 
-|                            | **Red Request** | Bruno |  Insomnia  | Postman |
-| -------------------------- | :-------------: | :---: | :--------: | :-----: |
-| Open source                |     ✅ MIT      |  ✅   | ⚠️ partial |   ❌    |
-| Works fully offline        |       ✅        |  ✅   |     ⚠️     |   ❌    |
-| No account required        |       ✅        |  ✅   |     ❌     |   ❌    |
-| Git-friendly files         |     ✅ YAML     |  ✅   |     ⚠️     |   ❌    |
-| Native (no Electron)       |    ✅ Tauri     |  ❌   |     ❌     |   ❌    |
-| Beyond HTTP (TCP/UDP/DNS…) |       ✅        |  ⚠️   |     ⚠️     |   ⚠️    |
-| White-label / rebrandable  |       ✅        |  ❌   |     ❌     |   ❌    |
+**Variables that light up.** Type `{{token}}` anywhere — URL, path params, query, headers,
+body — and it renders highlighted: **green** when the variable resolves in scope, **red** when
+it doesn't. Open a `{{` and an autocomplete of every known variable drops in. Path segments
+like `/users/:id` are detected automatically and take a literal _or_ a `{{var}}` from your
+environment.
+
+**A real editor, not a textarea.** The request body and the response come with a line-number
+gutter, a current-line highlight, one-click **Prettify** for JSON, and **Copy** on the
+response. Pick a body type and the matching `Content-Type` and `Accept` headers are written
+for you.
+
+**Beyond HTTP.** Every request is dispatched through **recker**, so alongside HTTP you get
+**TCP, UDP, ping, WHOIS and DNS** as first-class request kinds — with the same variables,
+history and latency dashboard. WebSocket / GraphQL / SSE / gRPC are next.
+
+**Move at the speed of thought.** A `⌘K` command palette jumps to any request or action. A
+runner replays a request as a **repeat**, a **data-driven** sweep, or a **flow** that threads
+`setVar` between steps. Query, header and form rows **drag to reorder**.
+
+**Your data, your disk.** Everything lives in a local **RedDB** store — no cloud, no sign-in.
+Export to a clean **YAML** tree (one request per file) to diff and review in PRs; secrets never
+leave. Those secrets are sealed with **AES-256-GCM**, the master key kept in your **OS
+keychain**.
+
+**Truly white-label.** Product name, icon, accent colour and deep-link scheme all come from a
+single `brand.config.json`. Ship it as _your_ product without forking a line of logic.
 
 ---
 
-## 🏗 Architecture
+## How it compares
+
+|                            | **Red Request** | Bruno | Insomnia | Postman |
+| -------------------------- | :-------------: | :---: | :------: | :-----: |
+| Open source                |      MIT ✓      |   ✓   | partial  |    —    |
+| Fully offline              |        ✓        |   ✓   | partial  |    —    |
+| No account required        |        ✓        |   ✓   |    —     |    —    |
+| Git-friendly files         |     YAML ✓      |   ✓   | partial  |    —    |
+| Native (no Electron)       |     Tauri ✓     |   —   |    —     |    —    |
+| Beyond HTTP (TCP/UDP/DNS…) |        ✓        |   ~   |    ~     |    ~    |
+| White-label / rebrandable  |        ✓        |   —   |    —     |    —    |
+
+---
+
+## Architecture
 
 ```
  Webview  ── SvelteKit (static) · Svelte 5 · shadcn-svelte
@@ -86,7 +102,7 @@ the local store. Decisions live in [`.red/adr/`](.red/adr); the glossary in
 
 ---
 
-## 🚀 Develop
+## Develop
 
 ```bash
 pnpm install
@@ -114,36 +130,33 @@ rr                    # global store
 <details>
 <summary><b>Rebrand it (white-label)</b></summary>
 
-Edit `brand/brand.config.json`, drop your logo at the referenced path, then:
-
-```bash
-pnpm brand:sync   # stamps the Tauri config, UI theme tokens and runtime brand constants
-```
+Edit `brand/brand.config.json`, drop your logo at the referenced path, then `pnpm brand:sync`
+to stamp the Tauri config, UI theme tokens and runtime brand constants.
 
 </details>
 
 <details>
 <summary><b>Releasing (Changesets → tag → bundles)</b></summary>
 
-1. `pnpm changeset` — describe your change.
-2. Merge the auto-opened **“Version Packages”** PR → `v*` is tagged and
-   [`release.yml`](.github/workflows/release.yml) is dispatched (no PAT needed).
-3. It builds Linux/macOS/Windows bundles and attaches them to the GitHub Release. The RedDB
-sidecar is pulled from [reddb's releases](https://github.com/reddb-io/reddb/releases) at
-build time (macOS builds it from source until reddb ships darwin binaries).
+`pnpm changeset` to describe a change. Merging the auto-opened **“Version Packages”** PR tags
+`v*` and dispatches [`release.yml`](.github/workflows/release.yml) (no PAT needed), which builds
+Linux/macOS/Windows bundles on Blacksmith runners and attaches them to the GitHub Release. The
+RedDB sidecar is pulled from [reddb's releases](https://github.com/reddb-io/reddb/releases) at
+build time (built from source on macOS until reddb ships darwin binaries).
+
 </details>
 
 ---
 
-## 🗺 Roadmap
+## Roadmap
 
-✅ HTTP · environments · variables · scripts & tests · 6 auth methods · keychain secrets ·
-TCP/UDP/ping/WHOIS/DNS kinds · `⌘K` palette · runner · drag-reorder · code editor.
-**Next:** WebSocket / GraphQL / SSE / gRPC · importers (Postman / Insomnia / OpenAPI / `.bru`
-/ curl / HAR) · code generation · richer CI runner — see [`.red/CONTEXT.md`](.red/CONTEXT.md).
+Shipped: HTTP · environments · variables · scripts & tests · six auth methods · keychain
+secrets · TCP/UDP/ping/WHOIS/DNS · `⌘K` palette · runner · drag-reorder · code editor.
+Next: WebSocket / GraphQL / SSE / gRPC · importers (Postman / Insomnia / OpenAPI / `.bru` /
+curl / HAR) · code generation · a richer CI runner — see [`.red/CONTEXT.md`](.red/CONTEXT.md).
 
 ---
 
 <div align="center">
-<sub>Built by <a href="https://reddb.io">RedDB.io</a> · MIT · powered by <a href="https://github.com/forattini-dev/recker">recker</a> & <a href="https://github.com/reddb-io/reddb">RedDB</a></sub>
+<sub>Built by <a href="https://reddb.io">RedDB.io</a> · MIT · powered by <a href="https://github.com/forattini-dev/recker">recker</a> &amp; <a href="https://github.com/reddb-io/reddb">RedDB</a></sub>
 </div>

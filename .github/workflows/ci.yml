@@ -13,7 +13,7 @@ concurrency:
 jobs:
   js:
     name: typecheck · test · build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
@@ -36,18 +36,19 @@ jobs:
       - name: Brand sync
         run: pnpm brand:sync
 
-      - name: Typecheck (core + engine + ui)
+      # Build first: engine/ui typecheck against @red-request/core's built .d.ts.
+      - name: Build (core + engine + ui)
+        run: pnpm build
+
+      - name: Typecheck
         run: pnpm check
 
       - name: Test
         run: pnpm test
 
-      - name: Build (core + engine + ui)
-        run: pnpm build
-
   rust-fmt:
     name: rust fmt
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
