@@ -6,3 +6,4 @@ export * from "./rpc.js";
 export * from "./engine.js";
 export * from "./resolver.js";
 export * from "./import-curl.js";
+export * from "./codegen.js";

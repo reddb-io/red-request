@@ -5,6 +5,7 @@
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
   import RunnerPanel from "./RunnerPanel.svelte";
+  import CodeModal from "./CodeModal.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
@@ -12,6 +13,7 @@
   import { Textarea } from "./ui/textarea/index.js";
 
   let showRunner = $state(false);
+  let showCode = $state(false);
 
   const methods = httpMethodSchema.options;
   const kinds = requestKindSchema.options;
@@ -170,6 +172,15 @@
         class="shrink-0"
         title="Run loops: repeat, data-driven, or flow">Run…</Button
       >
+      {#if ws.activeReq.kind === "http"}
+        <Button
+          onclick={() => (showCode = true)}
+          variant="outline"
+          size="xs"
+          class="shrink-0"
+          title="Generate code (curl, fetch, python…)">Code</Button
+        >
+      {/if}
     </div>
 
     <div class="flex gap-1 border-b border-border px-3 text-sm">
@@ -288,6 +299,9 @@
     </div>
   </section>
 
+  {#if showCode}
+    <CodeModal onClose={() => (showCode = false)} />
+  {/if}
   {#if showRunner}
     <RunnerPanel onClose={() => (showRunner = false)} />
   {/if}
