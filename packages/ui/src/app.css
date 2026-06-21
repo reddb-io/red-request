@@ -48,12 +48,18 @@ body {
   font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
 }
 
-input,
-select,
-textarea,
-button {
-  font: inherit;
-  color: inherit;
+/* In @layer base so Tailwind utilities (a later layer) still win — e.g. VarField's
+   transparent <input> over its highlight backdrop relies on `text-transparent`
+   beating this `color: inherit` (unlayered, it would override the utility → the
+   input's real text shows through and ghosts the backdrop). */
+@layer base {
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
 }
 
 ::-webkit-scrollbar {
