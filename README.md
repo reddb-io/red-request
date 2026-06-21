@@ -183,6 +183,26 @@ rr                    # global store
 </details>
 
 <details>
+<summary><b>Run collections in CI (<code>rr-run</code>)</b></summary>
+
+Export your collections to YAML (sidebar → **Export YAML**), commit them, and run them
+headlessly — the same engine and `rr.test` assertions as the app, exit-coded for CI:
+
+```bash
+pnpm rr:run .red/request/_exports --env staging      # exits non-zero if any test fails
+# flags: --env <name>  --grep <substr>  --bail
+```
+
+```yaml
+# .github/workflows/api-tests.yml
+- run: pnpm rr:run .red/request/_exports --env ci
+```
+
+Collections live in git; this runs them — diff/PR-review your API changes, gate merges on them.
+
+</details>
+
+<details>
 <summary><b>Releasing (Changesets → tag → bundles)</b></summary>
 
 `pnpm changeset` to describe a change. Merging the auto-opened **“Version Packages”** PR tags
