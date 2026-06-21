@@ -154,6 +154,8 @@ export const requestDefinitionSchema = z.object({
   insecure: z.boolean().default(false),
   /** Route through an HTTP/HTTPS/SOCKS proxy (e.g. http://127.0.0.1:8080). */
   proxy: z.string().optional(),
+  /** id of a collection profile (User-Agent + headers + proxy) to apply at send-time. */
+  profileId: z.string().default(""),
   retry: retrySchema.optional(),
   /** gRPC config — only when kind is `grpc`. */
   grpc: grpcConfigSchema.default({

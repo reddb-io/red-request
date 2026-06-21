@@ -293,6 +293,7 @@ export function resolveRequest(
       body,
       net,
       auth: resolveAuth(def.auth, lookup, unresolved),
+      proxy: def.proxy ? resolveTemplate(def.proxy, lookup).value : def.proxy,
     },
     unresolved: [...unresolved],
   };

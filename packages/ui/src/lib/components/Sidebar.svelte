@@ -3,11 +3,13 @@
   import Tooltip from "./ui/Tooltip.svelte";
   import Menu from "./ui/Menu.svelte";
   import ImportModal from "./ui/ImportModal.svelte";
+  import ProxiesModal from "./ProxiesModal.svelte";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import { Badge } from "./ui/badge/index.js";
 
   let showImport = $state(false);
+  let showProxies = $state(false);
   import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
@@ -355,6 +357,7 @@
                   label: col.collection.cookieJar ? "Cookie jar: on" : "Cookie jar: off",
                   onSelect: () => ws.toggleCookieJar(col.id),
                 },
+                { label: "Proxies & profiles…", onSelect: () => (showProxies = true) },
                 ...(col.collection.cookieJar
                   ? [{ label: "Clear cookies", onSelect: () => ws.clearCookies(col.id) }]
                   : []),
@@ -467,4 +470,7 @@
 
 {#if showImport}
   <ImportModal onClose={() => (showImport = false)} />
+{/if}
+{#if showProxies}
+  <ProxiesModal onClose={() => (showProxies = false)} />
 {/if}

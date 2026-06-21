@@ -7,6 +7,7 @@ import {
   harToCollection,
   postmanToCollection,
   collectionFileSchema,
+  proxyToUrl,
   DYNAMIC_VARS,
   type BodyType,
   type ImportedCollection,
@@ -15,6 +16,8 @@ import {
   type ResponseResult,
   type SavedExample,
   type GrpcService,
+  type Proxy,
+  type Profile,
   type StoredEnvironment,
   type ScriptTest,
   type HistoryEntry,
@@ -297,7 +300,9 @@ class Workspace {
     try {
       const variables = await this.buildVariables();
       const result = await httpSend({
-        request: $state.snapshot(this.activeReq) as RequestDefinition,
+        request: this.applyProfile(
+          structuredClone($state.snapshot(this.activeReq)) as RequestDefinition
+        ),
         variables,
         cookieJarKey:
           this.activeCollection?.collection.cookieJar && this.activeColId
@@ -469,6 +474,97 @@ class Workspace {
       col.collection.vars[name] = value;
       await this.persistCollection();
     }
+  }
+
+  // --- proxies & profiles ---------------------------------------------------
+  get proxies(): Proxy[] {
+    return this.activeCollection?.collection.proxies ?? [];
+  }
+  get profiles(): Profile[] {
+    return this.activeCollection?.collection.profiles ?? [];
+  }
+
+  /** Merge the request's bound profile (User-Agent + headers + proxy) into a snapshot.
+   *  Explicit request headers/proxy win; profile values fill the gaps. */
+  private applyProfile(snap: RequestDefinition): RequestDefinition {
+    const col = this.activeCollection;
+    const profile = snap.profileId
+      ? col?.collection.profiles.find((p) => p.id === snap.profileId)
+      : undefined;
+    if (!profile) return snap;
+    const has = (n: string) =>
+      snap.headers.some((h) => h.name.toLowerCase() === n.toLowerCase());
+    if (profile.userAgent && !has("user-agent"))
+      snap.headers = [
+        ...snap.headers,
+        { name: "User-Agent", value: profile.userAgent, enabled: true },
+      ];
+    for (const h of profile.headers)
+      if (h.enabled && h.name.trim() && !has(h.name))
+        snap.headers = [
+          ...snap.headers,
+          { name: h.name, value: h.value, enabled: true },
+        ];
+    const proxy = profile.proxyId
+      ? col?.collection.proxies.find((p) => p.id === profile.proxyId)
+      : undefined;
+    if (proxy?.host.trim() && !snap.proxy?.trim())
+      snap.proxy = proxyToUrl(proxy);
+    return snap;
+  }
+
+  private rid(prefix: string): string {
+    return `${prefix}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1296).toString(36)}`;
+  }
+  /** Persist the active collection's proxies + profiles. */
+  private async saveColMeta(): Promise<void> {
+    await this.persistCollection();
+  }
+  async addProxy(): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    col.collection.proxies.push({
+      id: this.rid("px"),
+      name: "New proxy",
+      type: "http",
+      host: "",
+      port: "8080",
+      username: "",
+      password: "",
+    });
+    await this.saveColMeta();
+  }
+  async removeProxy(id: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    col.collection.proxies = col.collection.proxies.filter((p) => p.id !== id);
+    for (const pr of col.collection.profiles)
+      if (pr.proxyId === id) pr.proxyId = "";
+    await this.saveColMeta();
+  }
+  async addProfile(): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    col.collection.profiles.push({
+      id: this.rid("pf"),
+      name: "New profile",
+      userAgent: "",
+      headers: [],
+      proxyId: "",
+    });
+    await this.saveColMeta();
+  }
+  async removeProfile(id: string): Promise<void> {
+    const col = this.activeCollection;
+    if (!col) return;
+    col.collection.profiles = col.collection.profiles.filter(
+      (p) => p.id !== id
+    );
+    await this.saveColMeta();
+  }
+  /** Persist proxy/profile edits (called on blur from the manager UI). */
+  async saveProxiesProfiles(): Promise<void> {
+    await this.saveColMeta();
   }
 
   // --- grpc -----------------------------------------------------------------

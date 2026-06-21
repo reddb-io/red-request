@@ -115,6 +115,17 @@
         ariaLabel="Folder"
         class="w-auto text-xs text-fg-muted"
       />
+      {#if ws.profiles.length && (ws.activeReq.kind === "http" || ws.activeReq.kind === "grpc")}
+        <Select
+          bind:value={ws.activeReq.profileId}
+          items={[
+            { value: "", label: "no profile" },
+            ...ws.profiles.map((p) => ({ value: p.id, label: `👤 ${p.name || "profile"}` })),
+          ]}
+          ariaLabel="User profile"
+          class="w-auto text-xs text-fg-muted"
+        />
+      {/if}
       <EnvBar />
     </div>
 

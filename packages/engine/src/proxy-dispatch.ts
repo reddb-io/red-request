@@ -1,0 +1,447 @@
+// Proxied HTTP dispatch. recker's core (HTTP/2) doesn't honour a per-request proxy, so when a
+// request has one we send it ourselves:
+//   • http/https proxy → node:http(s) + https-proxy-agent (CONNECT-tunnels https origins).
+//   • socks5/socks5h   → hand-rolled: the `socks` package opens the tunnel, then we speak
+//     HTTP/1.1 over the socket (TLS-wrapped for https). This is required because Bun's compiled
+//     runtime ignores socks-proxy-agent / custom socket agents and its fetch has no socks — so
+//     a naive approach would silently connect direct. Verified on both node and the Bun binary.
+// Covers method, headers, query, body, basic/bearer/apiKey auth, redirects, timeout, TLS-skip
+// and the cookie jar. (digest/oauth2/awsSigV4 auth fall back to recker — no proxy there.)
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
+import tls from "node:tls";
+import { Buffer } from "node:buffer";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { SocksClient } from "socks";
+import type {
+  RequestDefinition,
+  ResponseResult,
+  Kv,
+  AuthConfig,
+} from "@red-request/core";
+import { cookieHeader, storeSetCookies } from "./cookies.js";
+
+const TEXTY =
+  /^(text\/|application\/(json|xml|x-www-form-urlencoded|javascript|graphql|.*\+json|.*\+xml)|image\/svg)/i;
+const enabled = (l: Kv[]) => l.filter((k) => k.enabled && k.name.trim() !== "");
+const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+
+function appendQuery(url: string, query: Kv[]): string {
+  const ps = enabled(query);
+  if (!ps.length) return url;
+  const qs = ps
+    .map((p) => `${encodeURIComponent(p.name)}=${encodeURIComponent(p.value)}`)
+    .join("&");
+  return url + (url.includes("?") ? "&" : "?") + qs;
+}
+function headerRecord(list: Kv[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const kv of enabled(list)) out[kv.name] = kv.value;
+  return out;
+}
+function applyAuth(
+  auth: AuthConfig,
+  headers: Record<string, string>,
+  url: URL
+): void {
+  switch (auth.type) {
+    case "basic":
+      headers["Authorization"] =
+        `Basic ${b64(`${auth.username}:${auth.password}`)}`;
+      break;
+    case "bearer":
+      headers["Authorization"] = `Bearer ${auth.token}`;
+      break;
+    case "apiKey":
+      if (auth.in === "query") url.searchParams.set(auth.key, auth.value);
+      else headers[auth.key] = auth.value;
+      break;
+  }
+}
+function bodyOf(def: RequestDefinition): {
+  body?: string;
+  contentType?: string;
+} {
+  const b = def.body;
+  switch (b.type) {
+    case "json":
+      return { body: b.content, contentType: "application/json" };
+    case "xml":
+      return { body: b.content, contentType: "application/xml" };
+    case "raw":
+      return { body: b.content, contentType: "text/plain" };
+    case "graphql": {
+      let variables: unknown = {};
+      try {
+        variables = JSON.parse(b.variables || "{}");
+      } catch {
+        variables = {};
+      }
+      return {
+        body: JSON.stringify({ query: b.content, variables }),
+        contentType: "application/json",
+      };
+    }
+    case "form":
+      return {
+        body: enabled(b.fields)
+          .map(
+            (f) =>
+              `${encodeURIComponent(f.name)}=${encodeURIComponent(f.value)}`
+          )
+          .join("&"),
+        contentType: "application/x-www-form-urlencoded",
+      };
+    default:
+      return {};
+  }
+}
+const errResult = (
+  url: string,
+  started: number,
+  message: string
+): ResponseResult => ({
+  status: 0,
+  statusText: "",
+  ok: false,
+  url,
+  headers: {},
+  bodyText: "",
+  size: 0,
+  durationMs: Date.now() - started,
+  error: { message },
+});
+
+export function proxiedDispatch(
+  def: RequestDefinition,
+  proxyUrl: string,
+  jarKey?: string
+): Promise<ResponseResult> {
+  let scheme = "";
+  try {
+    scheme = new URL(proxyUrl).protocol.replace(/:$/, "");
+  } catch {
+    return Promise.resolve(
+      errResult(def.url, Date.now(), `invalid proxy: ${proxyUrl}`)
+    );
+  }
+  // SOCKS must be hand-rolled (Bun's compiled runtime ignores socks-proxy-agent and its fetch
+  // has no socks); http/https proxies go through node:http + HttpsProxyAgent (works on both).
+  if (scheme.startsWith("socks"))
+    return socksDispatch(def, proxyUrl, def.url, 0, jarKey);
+  return doRequest(def, proxyUrl, def.url, 0, jarKey);
+}
+
+function agentFor(proxyUrl: string): http.Agent {
+  return new HttpsProxyAgent(proxyUrl);
+}
+
+function doRequest(
+  def: RequestDefinition,
+  proxyUrl: string,
+  currentUrl: string,
+  redirects: number,
+  jarKey?: string
+): Promise<ResponseResult> {
+  const started = Date.now();
+  return new Promise<ResponseResult>((resolve) => {
+    let u: URL;
+    try {
+      u = new URL(appendQuery(currentUrl, def.query));
+    } catch {
+      return resolve(errResult(currentUrl, started, "invalid URL"));
+    }
+    const headers = headerRecord(def.headers);
+    applyAuth(def.auth, headers, u);
+    if (jarKey) {
+      const ck = cookieHeader(jarKey, u.toString());
+      if (ck)
+        headers["Cookie"] = headers["Cookie"]
+          ? `${headers["Cookie"]}; ${ck}`
+          : ck;
+    }
+    const { body, contentType } = bodyOf(def);
+    const hasCT = Object.keys(headers).some(
+      (k) => k.toLowerCase() === "content-type"
+    );
+    if (contentType && !hasCT) headers["Content-Type"] = contentType;
+    if (body != null)
+      headers["Content-Length"] = String(Buffer.byteLength(body));
+
+    let agent: http.Agent;
+    try {
+      agent = agentFor(proxyUrl);
+    } catch {
+      return resolve(
+        errResult(u.toString(), started, `invalid proxy: ${proxyUrl}`)
+      );
+    }
+    const mod = u.protocol === "https:" ? https : http;
+    const req = mod.request(
+      u,
+      {
+        method: def.method,
+        headers,
+        agent,
+        rejectUnauthorized: !def.insecure,
+        timeout: def.timeout || 30_000,
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const loc = res.headers.location;
+        if (
+          def.followRedirects !== false &&
+          loc &&
+          [301, 302, 303, 307, 308].includes(status) &&
+          redirects < (def.maxRedirects ?? 5)
+        ) {
+          if (jarKey)
+            storeSetCookies(
+              jarKey,
+              u.toString(),
+              res.headers["set-cookie"] ?? []
+            );
+          res.resume();
+          const next = new URL(loc, u).toString();
+          const method = status === 303 ? "GET" : def.method;
+          resolve(
+            doRequest(
+              { ...def, method, query: [] },
+              proxyUrl,
+              next,
+              redirects + 1,
+              jarKey
+            )
+          );
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (jarKey)
+            storeSetCookies(
+              jarKey,
+              u.toString(),
+              res.headers["set-cookie"] ?? []
+            );
+          const buf = Buffer.concat(chunks);
+          const ct = String(res.headers["content-type"] ?? "");
+          const isText = ct === "" || TEXTY.test(ct);
+          const respHeaders: Record<string, string> = {};
+          for (const [k, v] of Object.entries(res.headers))
+            respHeaders[k] = Array.isArray(v) ? v.join(", ") : String(v ?? "");
+          const result: ResponseResult = {
+            status,
+            statusText: res.statusMessage ?? "",
+            ok: status >= 200 && status < 300,
+            url: u.toString(),
+            headers: respHeaders,
+            bodyText: isText ? buf.toString("utf8") : "",
+            contentType: ct || undefined,
+            size: buf.length,
+            durationMs: Date.now() - started,
+          };
+          if (!isText && buf.length > 0)
+            result.bodyBase64 = buf.toString("base64");
+          resolve(result);
+        });
+      }
+    );
+    req.on("error", (e) =>
+      resolve(errResult(u.toString(), started, e.message))
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(errResult(u.toString(), started, "request timed out"));
+    });
+    if (body != null) req.write(body);
+    req.end();
+  });
+}
+
+// --- SOCKS5 / SOCKS5h: tunnel via the `socks` package, then speak HTTP/1.1 over the socket
+// (Bun-compatible — it can't inject a custom socket into node:http). --------------------------
+async function socksDispatch(
+  def: RequestDefinition,
+  proxyUrl: string,
+  currentUrl: string,
+  redirects: number,
+  jarKey?: string
+): Promise<ResponseResult> {
+  const started = Date.now();
+  let u: URL;
+  let pu: URL;
+  try {
+    u = new URL(appendQuery(currentUrl, def.query));
+    pu = new URL(proxyUrl);
+  } catch {
+    return errResult(currentUrl, started, "invalid URL");
+  }
+  const isHttps = u.protocol === "https:";
+  const port = Number(u.port) || (isHttps ? 443 : 80);
+  const timeout = def.timeout || 30_000;
+
+  const headers = headerRecord(def.headers);
+  applyAuth(def.auth, headers, u);
+  headers["Host"] = u.host;
+  headers["Connection"] = "close";
+  headers["Accept-Encoding"] = "identity"; // keep the body un-compressed for simple parsing
+  if (jarKey) {
+    const ck = cookieHeader(jarKey, u.toString());
+    if (ck)
+      headers["Cookie"] = headers["Cookie"]
+        ? `${headers["Cookie"]}; ${ck}`
+        : ck;
+  }
+  const { body, contentType } = bodyOf(def);
+  if (
+    contentType &&
+    !Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
+  )
+    headers["Content-Type"] = contentType;
+  if (body != null) headers["Content-Length"] = String(Buffer.byteLength(body));
+
+  let raw: Buffer;
+  try {
+    const { socket } = await SocksClient.createConnection({
+      proxy: {
+        host: pu.hostname,
+        port: Number(pu.port) || 1080,
+        type: 5,
+        userId: pu.username ? decodeURIComponent(pu.username) : undefined,
+        password: pu.password ? decodeURIComponent(pu.password) : undefined,
+      },
+      command: "connect",
+      destination: { host: u.hostname, port },
+      timeout,
+    });
+
+    const sock: net.Socket | tls.TLSSocket = isHttps
+      ? await new Promise<tls.TLSSocket>((res, rej) => {
+          const t = tls.connect(
+            {
+              socket,
+              servername: u.hostname,
+              ALPNProtocols: ["http/1.1"],
+              rejectUnauthorized: !def.insecure,
+            },
+            () => res(t)
+          );
+          t.on("error", rej);
+        })
+      : socket;
+
+    let reqText = `${def.method} ${u.pathname}${u.search} HTTP/1.1\r\n`;
+    for (const [k, v] of Object.entries(headers)) reqText += `${k}: ${v}\r\n`;
+    reqText += "\r\n";
+    sock.write(reqText);
+    if (body != null) sock.write(body);
+
+    raw = await new Promise<Buffer>((resolve) => {
+      const chunks: Buffer[] = [];
+      sock.on("data", (c) => chunks.push(c));
+      sock.on("end", () => resolve(Buffer.concat(chunks)));
+      sock.on("error", () => resolve(Buffer.concat(chunks)));
+      sock.setTimeout(timeout, () => {
+        sock.destroy();
+        resolve(Buffer.concat(chunks));
+      });
+    });
+  } catch (e) {
+    return errResult(
+      u.toString(),
+      started,
+      e instanceof Error ? e.message : String(e)
+    );
+  }
+
+  return parseSocksResponse(
+    raw,
+    u.toString(),
+    started,
+    def,
+    proxyUrl,
+    redirects,
+    jarKey
+  );
+}
+
+function dechunk(buf: Buffer): Buffer {
+  const out: Buffer[] = [];
+  let i = 0;
+  while (i < buf.length) {
+    const nl = buf.indexOf("\r\n", i);
+    if (nl === -1) break;
+    const size = parseInt(buf.subarray(i, nl).toString("latin1").trim(), 16);
+    if (Number.isNaN(size) || size === 0) break;
+    const start = nl + 2;
+    out.push(Buffer.from(buf.subarray(start, start + size)));
+    i = start + size + 2;
+  }
+  return Buffer.concat(out);
+}
+
+function parseSocksResponse(
+  raw: Buffer,
+  url: string,
+  started: number,
+  def: RequestDefinition,
+  proxyUrl: string,
+  redirects: number,
+  jarKey?: string
+): Promise<ResponseResult> | ResponseResult {
+  const sep = raw.indexOf("\r\n\r\n");
+  if (sep === -1) return errResult(url, started, "malformed proxy response");
+  const lines = raw.subarray(0, sep).toString("latin1").split("\r\n");
+  let body: Buffer = Buffer.from(raw.subarray(sep + 4));
+  const m = (lines[0] ?? "").match(/^HTTP\/\d(?:\.\d)?\s+(\d+)\s*(.*)$/);
+  const status = m ? Number(m[1]) : 0;
+  const headers: Record<string, string> = {};
+  const setCookies: string[] = [];
+  for (const line of lines.slice(1)) {
+    const i = line.indexOf(":");
+    if (i === -1) continue;
+    const k = line.slice(0, i).trim().toLowerCase();
+    const v = line.slice(i + 1).trim();
+    if (k === "set-cookie") setCookies.push(v);
+    headers[k] = headers[k] ? `${headers[k]}, ${v}` : v;
+  }
+  if ((headers["transfer-encoding"] ?? "").toLowerCase().includes("chunked"))
+    body = dechunk(body);
+  if (jarKey) storeSetCookies(jarKey, url, setCookies);
+
+  const loc = headers["location"];
+  if (
+    def.followRedirects !== false &&
+    loc &&
+    [301, 302, 303, 307, 308].includes(status) &&
+    redirects < (def.maxRedirects ?? 5)
+  ) {
+    const next = new URL(loc, url).toString();
+    const method = status === 303 ? "GET" : def.method;
+    return socksDispatch(
+      { ...def, method, query: [] },
+      proxyUrl,
+      next,
+      redirects + 1,
+      jarKey
+    );
+  }
+
+  const ct = headers["content-type"] ?? "";
+  const isText = ct === "" || TEXTY.test(ct);
+  const result: ResponseResult = {
+    status,
+    statusText: m?.[2] ?? "",
+    ok: status >= 200 && status < 300,
+    url,
+    headers,
+    bodyText: isText ? body.toString("utf8") : "",
+    contentType: ct || undefined,
+    size: body.length,
+    durationMs: Date.now() - started,
+  };
+  if (!isText && body.length > 0) result.bodyBase64 = body.toString("base64");
+  return result;
+}

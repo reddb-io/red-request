@@ -10,3 +10,4 @@ export * from "./codegen.js";
 export * from "./import-openapi.js";
 export * from "./import-har.js";
 export * from "./import-postman.js";
+export * from "./proxy.js";

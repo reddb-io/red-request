@@ -17,6 +17,7 @@ import type {
   Kv,
 } from "@red-request/core";
 import { cookieHeader, storeSetCookies } from "./cookies.js";
+import { proxiedDispatch } from "./proxy-dispatch.js";
 
 type Plugin = unknown;
 type ReckerCall = (
@@ -176,6 +177,9 @@ export async function dispatch(
   def: RequestDefinition,
   jarKey?: string
 ): Promise<ResponseResult> {
+  // recker's HTTP/2 core can't honour a per-request proxy — route proxied requests through
+  // node:http(s) with a proxy agent (real http/https/socks5/socks5h support).
+  if (def.proxy?.trim()) return proxiedDispatch(def, def.proxy.trim(), jarKey);
   const startedAt = Date.now();
   const headers = headerRecord(def.headers);
   const bodyOpts = buildBody(def, headers);
@@ -206,7 +210,6 @@ export async function dispatch(
   else if (typeof def.maxRedirects === "number")
     options.maxRedirects = def.maxRedirects;
   if (def.insecure) options.insecure = true;
-  if (def.proxy?.trim()) options.proxy = def.proxy.trim();
 
   try {
     const client = createClient({
