@@ -43,12 +43,16 @@ async function run(
   }
 }
 
-/** Jest-ish matchers; each throws on failure (caught by rr.test or surfaced as error). */
+/** Jest-ish matchers; each throws on failure (caught by rr.test or surfaced as error).
+ *  `rr.expect(x).not.…` negates any matcher. */
 function makeExpect() {
-  return (actual: unknown) => {
+  const build = (actual: unknown, negate: boolean) => {
+    // Throw when the assertion's outcome doesn't match what we want (passed === negate).
     const ok = (passed: boolean, msg: string) => {
-      if (!passed) throw new Error(msg);
+      if (passed === negate)
+        throw new Error(negate ? msg.replace(" to ", " not to ") : msg);
     };
+    const len = (actual as { length?: number } | null | undefined)?.length;
     return {
       toBe: (e: unknown) =>
         ok(actual === e, `expected ${fmt(actual)} to be ${fmt(e)}`),
@@ -64,13 +68,36 @@ function makeExpect() {
             : Array.isArray(actual) && actual.includes(e),
           `expected ${fmt(actual)} to contain ${fmt(e)}`
         ),
+      toMatch: (re: string | RegExp) =>
+        ok(
+          new RegExp(re).test(String(actual)),
+          `expected ${fmt(actual)} to match ${re}`
+        ),
       toBeTruthy: () => ok(!!actual, `expected ${fmt(actual)} to be truthy`),
       toBeFalsy: () => ok(!actual, `expected ${fmt(actual)} to be falsy`),
+      toBeDefined: () =>
+        ok(actual !== undefined, `expected ${fmt(actual)} to be defined`),
+      toBeUndefined: () =>
+        ok(actual === undefined, `expected ${fmt(actual)} to be undefined`),
+      toBeNull: () => ok(actual === null, `expected ${fmt(actual)} to be null`),
+      toHaveLength: (n: number) =>
+        ok(len === n, `expected length ${fmt(len)} to be ${n}`),
       toBeGreaterThan: (n: number) =>
-        ok(Number(actual) > n, `expected ${fmt(actual)} > ${n}`),
+        ok(Number(actual) > n, `expected ${fmt(actual)} to be > ${n}`),
+      toBeGreaterThanOrEqual: (n: number) =>
+        ok(Number(actual) >= n, `expected ${fmt(actual)} to be >= ${n}`),
       toBeLessThan: (n: number) =>
-        ok(Number(actual) < n, `expected ${fmt(actual)} < ${n}`),
+        ok(Number(actual) < n, `expected ${fmt(actual)} to be < ${n}`),
+      toBeLessThanOrEqual: (n: number) =>
+        ok(Number(actual) <= n, `expected ${fmt(actual)} to be <= ${n}`),
     };
+  };
+  return (actual: unknown) => {
+    const m = build(actual, false) as ReturnType<typeof build> & {
+      not: ReturnType<typeof build>;
+    };
+    m.not = build(actual, true);
+    return m;
   };
 }
 
