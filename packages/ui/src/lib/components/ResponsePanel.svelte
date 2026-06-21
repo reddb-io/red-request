@@ -79,6 +79,13 @@
   });
   const bodyLines = $derived(prettyBody.split("\n"));
 
+  // Rich preview for HTML / image responses (toggle to source for HTML).
+  let preview = $state(true);
+  const ct = $derived(r?.contentType ?? "");
+  const isHtml = $derived(ct.includes("html"));
+  const isImage = $derived(ct.startsWith("image/") && !!r?.bodyBase64);
+  const imageSrc = $derived(isImage ? `data:${ct};base64,${r!.bodyBase64}` : "");
+
   // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
   // next request can use {{name}} — chaining without writing a post-response script.
   const json = $derived.by<unknown>(() => {
@@ -249,9 +256,35 @@
             {/each}
           </div>
         {/if}
-        {#if prettyBody}
-          <div class="mb-2 flex items-center gap-2">
-            <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
+        {#if isHtml}
+          <div class="mb-2 flex gap-1">
+            <button class="seg" class:is-active={preview} onclick={() => (preview = true)}
+              >preview</button
+            >
+            <button class="seg" class:is-active={!preview} onclick={() => (preview = false)}
+              >source</button
+            >
+          </div>
+        {/if}
+        {#if isImage}
+          <div class="grid place-items-center p-4">
+            <img
+              src={imageSrc}
+              alt="response"
+              class="max-h-[60vh] max-w-full rounded border border-border"
+            />
+          </div>
+        {:else if isHtml && preview}
+          <iframe
+            srcdoc={r.bodyText}
+            sandbox=""
+            title="HTML preview"
+            class="h-[60vh] w-full rounded border border-border bg-white"
+          ></iframe>
+        {:else}
+          {#if prettyBody}
+            <div class="mb-2 flex items-center gap-2">
+              <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
             {#if bodyQuery.trim()}
               <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
             {/if}
@@ -301,6 +334,7 @@
             </div>
             <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
           </div>
+          {/if}
         {/if}
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
