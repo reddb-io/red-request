@@ -3,6 +3,7 @@
   import type { ResponseResult } from "@red-request/core";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
+  import JsonTree from "./JsonTree.svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
@@ -129,6 +130,7 @@
     for (const k of keys) cur = (cur as Record<string, unknown>)?.[k];
     return cur;
   }
+  let jsonView = $state<"raw" | "tree">("raw");
   let xPath = $state("");
   let xVar = $state("");
   let xSaved = $state(false);
@@ -313,13 +315,25 @@
         {:else}
           {#if prettyBody}
             <div class="mb-2 flex items-center gap-2">
-              <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
-            {#if bodyQuery.trim()}
-              <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
-            {/if}
-          </div>
-        {/if}
-        {#if json}
+              {#if json}
+                <div class="flex gap-1">
+                  <button class="seg" class:is-active={jsonView === "raw"} onclick={() => (jsonView = "raw")}
+                    >raw</button
+                  >
+                  <button class="seg" class:is-active={jsonView === "tree"} onclick={() => (jsonView = "tree")}
+                    >tree</button
+                  >
+                </div>
+              {/if}
+              {#if jsonView === "raw"}
+                <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
+                {#if bodyQuery.trim()}
+                  <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+          {#if json}
           <div class="mb-2 flex items-center gap-2">
             <Input bind:value={xPath} placeholder="path e.g. data.token" class="mono h-6 flex-1" />
             <span class="text-fg-faint">→</span>
@@ -339,6 +353,11 @@
             {/if}
           </div>
         {/if}
+        {#if json && jsonView === "tree"}
+          <div class="overflow-auto pl-1 text-xs leading-5">
+            <JsonTree data={json} onpick={(p) => (xPath = p)} />
+          </div>
+        {:else}
         {#if matches}
           {#if matches.length === 0}
             <div class="hint p-4 text-center">No matches.</div>
@@ -364,6 +383,7 @@
             <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
           </div>
           {/if}
+        {/if}
         {/if}
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
