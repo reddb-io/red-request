@@ -67,8 +67,8 @@
         >R</span
       >
       <div class="leading-tight">
-        <h1 class="text-sm font-semibold text-fg-strong">{brand.productName}</h1>
-        <p class="text-[11px] text-fg-subtle">Open a project</p>
+        <h1 class="text-base font-semibold text-fg-strong">{brand.productName}</h1>
+        <p class="text-xs text-fg-subtle">Open a project</p>
       </div>
     </div>
 
@@ -93,9 +93,9 @@
     </div>
 
     <div class="mb-1.5 flex items-center justify-between px-1">
-      <span class="label text-[10px]">Recent</span>
+      <span class="label">Recent</span>
       {#if recents.length}
-        <span class="hint text-[10px] text-fg-faint">
+        <span class="hint text-fg-faint">
           {filtered.length}{filtered.length !== recents.length ? `/${recents.length}` : ""}
         </span>
       {/if}
@@ -127,8 +127,8 @@
                 <span class="text-fg-subtle group-hover:text-[var(--color-accent)]">▸</span>
                 <span class="truncate text-sm font-medium text-fg-strong">{r.name}</span>
               </span>
-              <span class="mono w-full truncate text-[10px] text-fg-faint">{r.dir}</span>
-              <span class="flex items-center gap-1.5 text-[10px] text-fg-faint">
+              <span class="mono w-full truncate text-xs text-fg-faint">{r.dir}</span>
+              <span class="flex items-center gap-1.5 text-xs text-fg-faint">
                 <span>{r.request_count} {r.request_count === 1 ? "request" : "requests"}</span>
                 <span>·</span>
                 <span>{fmtDate(r.last_opened)}</span>
