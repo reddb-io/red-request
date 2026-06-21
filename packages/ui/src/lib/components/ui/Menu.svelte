@@ -1,10 +1,10 @@
 <script lang="ts">
-  // Design-system dropdown menu (bits-ui DropdownMenu): accessible actions menu, themed.
+  // Wrapper over shadcn-svelte's DropdownMenu: accessible, pre-styled actions menu.
   // Items with `children` render as a submenu.
   //   <Menu items={[{label, onSelect}, {label, children:[…]}, {label, onSelect, destructive}]}>
   //     {#snippet trigger(p)}<button {...p}>⋯</button>{/snippet}
   //   </Menu>
-  import { DropdownMenu } from "bits-ui";
+  import * as DropdownMenu from "./dropdown-menu/index.js";
   import type { Snippet } from "svelte";
 
   type Item = {
@@ -21,27 +21,22 @@
     items: Item[];
     trigger: Snippet<[Record<string, unknown>]>;
   } = $props();
-
-  const itemCls = (d?: boolean) =>
-    `flex cursor-pointer items-center justify-between gap-3 rounded px-2 py-1.5 text-sm outline-none select-none data-[highlighted]:bg-[var(--color-bg-2)] ${
-      d ? "text-red-400" : "text-fg-muted data-[highlighted]:text-fg"
-    }`;
-  const menuCls = "panel z-50 min-w-40 p-1 shadow-xl outline-none";
 </script>
 
 {#snippet itemList(list: Item[])}
   {#each list as it (it.label)}
     {#if it.children}
       <DropdownMenu.Sub>
-        <DropdownMenu.SubTrigger class={itemCls()}>
-          {it.label}<span class="text-fg-faint">▸</span>
-        </DropdownMenu.SubTrigger>
-        <DropdownMenu.SubContent class={menuCls}>
+        <DropdownMenu.SubTrigger>{it.label}</DropdownMenu.SubTrigger>
+        <DropdownMenu.SubContent>
           {@render itemList(it.children)}
         </DropdownMenu.SubContent>
       </DropdownMenu.Sub>
     {:else}
-      <DropdownMenu.Item onSelect={it.onSelect} class={itemCls(it.destructive)}>
+      <DropdownMenu.Item
+        onSelect={it.onSelect}
+        variant={it.destructive ? "destructive" : "default"}
+      >
         {it.label}
       </DropdownMenu.Item>
     {/if}
@@ -52,9 +47,7 @@
   <DropdownMenu.Trigger>
     {#snippet child({ props })}{@render trigger(props)}{/snippet}
   </DropdownMenu.Trigger>
-  <DropdownMenu.Portal>
-    <DropdownMenu.Content sideOffset={4} align="end" class={menuCls}>
-      {@render itemList(items)}
-    </DropdownMenu.Content>
-  </DropdownMenu.Portal>
+  <DropdownMenu.Content align="end" class="min-w-40">
+    {@render itemList(items)}
+  </DropdownMenu.Content>
 </DropdownMenu.Root>

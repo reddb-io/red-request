@@ -1,9 +1,9 @@
 <script lang="ts" generics="T extends string = string">
-  // Design-system Select: bits-ui's accessible single-select primitive, styled with our
-  // tokens. Near drop-in for a native <select>: `<Select bind:value items={[...]} />`.
-  // items accepts string[] or { value, label?, class? }[]. Generic over the value type so
-  // it binds type-safely to enum fields (kind, method, recordType, …).
-  import { Select } from "bits-ui";
+  // Ergonomic wrapper over shadcn-svelte's Select (which itself wraps bits-ui):
+  // `<Select bind:value items={[...]} />`. items = string[] or { value, label?, class? }[].
+  // Generic over the value type so it binds type-safely to enum fields (kind, method, …).
+  import * as SelectPrimitive from "./select/index.js";
+  import { cn } from "$lib/utils.js";
 
   type Item = { value: T; label?: string; class?: string };
 
@@ -37,40 +37,28 @@
   const current = $derived(norm.find((i) => i.value === value));
 </script>
 
-<Select.Root
+<SelectPrimitive.Root
   type="single"
   bind:value
-  items={norm}
   onValueChange={onChange ? (v) => onChange(v as T) : undefined}
 >
-  <Select.Trigger
-    class="{bare ? '' : 'select'} inline-flex items-center text-left {cls}"
+  <SelectPrimitive.Trigger
+    size="sm"
     aria-label={ariaLabel}
+    class={cn(
+      "h-7",
+      bare && "border-0 bg-transparent px-2 shadow-none hover:bg-transparent",
+      cls,
+      current?.class
+    )}
   >
-    <span class="truncate {current?.class ?? ''}"
-      >{current?.label ?? placeholder}</span
-    >
-  </Select.Trigger>
-  <Select.Portal>
-    <Select.Content
-      sideOffset={4}
-      class="panel z-50 max-h-64 min-w-[var(--bits-select-anchor-width)] overflow-auto p-1 shadow-xl"
-    >
-      <Select.Viewport>
-        {#each norm as item (item.value)}
-          <Select.Item
-            value={item.value}
-            label={item.label}
-            class="flex cursor-pointer items-center justify-between gap-2 rounded px-2 py-1 text-sm text-fg-muted outline-none select-none data-[highlighted]:bg-[var(--color-bg-2)] data-[highlighted]:text-fg {item.class ??
-              ''}"
-          >
-            {#snippet children({ selected })}
-              <span class="truncate">{item.label}</span>
-              {#if selected}<span class="text-[var(--color-brand)]">✓</span>{/if}
-            {/snippet}
-          </Select.Item>
-        {/each}
-      </Select.Viewport>
-    </Select.Content>
-  </Select.Portal>
-</Select.Root>
+    <span class="truncate">{current?.label ?? placeholder}</span>
+  </SelectPrimitive.Trigger>
+  <SelectPrimitive.Content class="max-h-64 min-w-[8rem]">
+    {#each norm as item (item.value)}
+      <SelectPrimitive.Item value={item.value} label={item.label} class={item.class}>
+        {item.label}
+      </SelectPrimitive.Item>
+    {/each}
+  </SelectPrimitive.Content>
+</SelectPrimitive.Root>
