@@ -36,13 +36,13 @@
       bind:value={text}
       rows={9}
       autofocus
-      placeholder={"Paste a cURL command, or an OpenAPI / Swagger spec (JSON or YAML)…"}
+      placeholder={"Paste a cURL command, OpenAPI/Swagger, a Postman collection, or a HAR file…"}
       class="mono text-xs"
     />
     {#if error}<div class="mt-2 text-xs text-red-400">{error}</div>{/if}
     <div class="mt-3 flex items-center justify-between">
       <span class="hint"
-        >cURL → a request · OpenAPI/Swagger → a whole collection (auto-detected).</span
+        >cURL → a request · OpenAPI · Postman · HAR → a whole collection (auto-detected).</span
       >
       <div class="flex gap-2">
         <Button onclick={onClose} variant="outline" size="xs">Cancel</Button>

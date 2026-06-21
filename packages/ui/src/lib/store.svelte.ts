@@ -4,9 +4,12 @@ import {
   newRequest,
   curlToRequest,
   openapiToCollection,
+  harToCollection,
+  postmanToCollection,
   collectionFileSchema,
   DYNAMIC_VARS,
   type BodyType,
+  type ImportedCollection,
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
@@ -585,9 +588,10 @@ class Workspace {
   }
 
   /**
-   * Smart paste import: an OpenAPI/Swagger doc (JSON or YAML) becomes a whole new collection;
-   * anything else is treated as a cURL command added to the active collection. Returns what
-   * it did (or throws on a malformed spec).
+   * Smart paste import: a structured doc becomes a whole new collection — OpenAPI/Swagger
+   * (`paths`), a HAR file (`log.entries`), or a Postman v2.1 collection (`info`+`item`).
+   * Anything else is treated as a cURL command added to the active collection. Returns what
+   * it did (or throws on a malformed doc).
    */
   async importText(text: string): Promise<"collection" | "request"> {
     const trimmed = text.trim();
@@ -601,13 +605,20 @@ class Workspace {
         /* not structured — fall through to cURL */
       }
     }
-    if (
-      spec &&
-      typeof spec === "object" &&
-      (spec as Record<string, unknown>).paths
-    ) {
-      await this.importOpenAPI(spec);
-      return "collection";
+    const s = spec as Record<string, any> | null;
+    if (s && typeof s === "object") {
+      if (s.paths) {
+        await this.importCollection(openapiToCollection(s));
+        return "collection";
+      }
+      if (s.log?.entries) {
+        await this.importCollection(harToCollection(s));
+        return "collection";
+      }
+      if (s.info && Array.isArray(s.item)) {
+        await this.importCollection(postmanToCollection(s));
+        return "collection";
+      }
     }
     await this.importCurl(trimmed);
     return "request";
@@ -615,8 +626,12 @@ class Workspace {
 
   /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
   async importOpenAPI(spec: unknown): Promise<void> {
-    const imported = openapiToCollection(spec);
-    const colId = `oa-${Date.now().toString(36)}`;
+    await this.importCollection(openapiToCollection(spec));
+  }
+
+  /** Persist an imported collection (meta + requests), reload, and open it. */
+  private async importCollection(imported: ImportedCollection): Promise<void> {
+    const colId = `imp-${Date.now().toString(36)}`;
     await repo.saveCollectionMeta(
       colId,
       collectionFileSchema.parse({
