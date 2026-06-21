@@ -19,6 +19,8 @@ concurrency:
 env:
   # RedDB sidecar pinned for reproducible builds — bump when adopting a newer reddb.
   REDDB_VERSION: v1.11.0
+  # Run AppImage tooling (linuxdeploy) without FUSE, which CI runners lack.
+  APPIMAGE_EXTRACT_AND_RUN: "1"
 
 jobs:
   build:
