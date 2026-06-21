@@ -1,80 +1,81 @@
 <div align="center">
 
-<img src="brand/assets/logo.svg" alt="Red Request" width="96" height="96" />
-
-# Red Request
-
-**The open-source, white-label API client.** A Bruno/Insomnia alternative that dispatches
-through the [`recker`](https://github.com/forattini-dev/recker) multi-protocol SDK and ships
-as a fast [Tauri 2](https://tauri.app) desktop app.
+<img src="docs/hero.svg" alt="Red Request — the open-source, white-label API client" width="100%" />
 
 <p>
-  <a href="https://github.com/reddb-io/red-request/releases"><img src="https://img.shields.io/github/v/release/reddb-io/red-request?style=flat-square&color=ff2056" alt="Release"></a>
-  <a href="https://github.com/reddb-io/red-request/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/reddb-io/red-request/ci.yml?branch=main&style=flat-square&label=CI" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/badge/platform-linux%20·%20macOS%20·%20windows-555?style=flat-square" alt="Platforms">
-  <img src="https://img.shields.io/badge/built%20with-Tauri%202%20·%20Svelte%205-555?style=flat-square" alt="Stack">
+  <a href="https://github.com/reddb-io/red-request/releases"><img src="https://img.shields.io/github/v/release/reddb-io/red-request?style=for-the-badge&color=ff2056&labelColor=0b0b0d" alt="Release"></a>
+  <a href="https://github.com/reddb-io/red-request/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/reddb-io/red-request/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=0b0b0d" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge&labelColor=0b0b0d" alt="License"></a>
+  <img src="https://img.shields.io/badge/linux%20·%20macOS%20·%20windows-555?style=for-the-badge&labelColor=0b0b0d&label=runs%20on" alt="Platforms">
 </p>
+
+<strong>A Bruno/Insomnia alternative that's native, offline-first, git-friendly and truly yours.</strong><br>
+Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</code></a> multi-protocol SDK · shipped as a <a href="https://tauri.app">Tauri&nbsp;2</a> app · <strong>no Electron, no account, no telemetry.</strong>
 
 </div>
 
 ---
 
-## Install
-
-**Linux** — one line, no account, no telemetry:
+## ⚡ Install
 
 ```bash
+# Linux — one line, that's it.
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 ```
 
-**Everywhere** — grab the installer for your platform from the
-[**latest release**](https://github.com/reddb-io/red-request/releases/latest):
+<div align="center"><sub>or grab your platform from the <a href="https://github.com/reddb-io/red-request/releases/latest"><b>latest release</b></a> ↓</sub></div>
 
-| Platform            | Asset                      |
-| ------------------- | -------------------------- |
-| Linux               | `.AppImage` · `.deb`       |
-| macOS (Apple/Intel) | `.dmg` (`aarch64` / `x64`) |
-| Windows             | `.msi` · NSIS `-setup.exe` |
+| 🐧 Linux             | 🍎 macOS                       | 🪟 Windows                 |
+| -------------------- | ------------------------------ | -------------------------- |
+| `.AppImage` · `.deb` | `.dmg` — Apple Silicon & Intel | `.msi` · NSIS `-setup.exe` |
 
-> Builds are unsigned for now — macOS: right-click → **Open**; Windows: **More info → Run anyway**.
-> Uninstall on Linux with `curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash`.
+> Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.
 
 ---
 
-## Why Red Request
+## ✨ Why you'll like it
 
-- ⚡ **Native & fast** — a Tauri shell (Rust) around a SvelteKit UI. No Electron tax.
-- 🔌 **Multi-protocol by design** — every request runs through **recker**. HTTP today;
-  TCP, UDP, ping, WHOIS and DNS already shipped as first-class request _kinds_;
-  WebSocket / GraphQL / SSE / gRPC on the roadmap.
-- 💾 **Offline-first, embedded store** — content lives in a local **RedDB** `.rdb`
-  (an embedded `red` sidecar). No mandatory cloud, no sign-in.
-- 🌿 **Git-friendly** — export collections to a **YAML** tree (one request per file) to
-  version and review in PRs. Secrets are never exported.
-- 🔐 **Secrets stay safe** — sealed with **AES-256-GCM**, master key in the OS keychain.
-- 🎨 **Truly white-label** — product name, identifier, accent, logo and deep-link scheme
-  all come from a single `brand/brand.config.json`. Rebrand without touching code.
-- 🧩 **Built-ins** — command palette (`⌘K`), a runner (repeat / data-driven / flow), request
-  reordering, and native SQL migrations via RedDB.
-- 🆓 **100% MIT.**
+|                           |                                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ⚡ **Native & instant**   | A Rust (Tauri) shell around a Svelte 5 UI. Cold-starts in a blink, sips RAM — none of the Electron tax.                                                      |
+| 🔌 **Multi-protocol**     | Every request runs through **recker**. **HTTP, TCP, UDP, ping, WHOIS and DNS** ship today as first-class request _kinds_. WS / GraphQL / SSE / gRPC next.    |
+| 💾 **Offline-first**      | Your work lives in a local **RedDB** `.rdb` — no cloud, no sign-in, no "sync conflict".                                                                      |
+| 🌿 **Git-friendly**       | Export collections to a clean **YAML** tree (one request per file) you can diff and review in PRs. Secrets never leave.                                      |
+| 🔐 **Secrets done right** | Sealed with **AES-256-GCM**, master key in your **OS keychain**. Never exported, never plaintext.                                                            |
+| 🎨 **White-label**        | Name, icon, accent, deep-link scheme — all from one `brand.config.json`. Ship it as _your_ product without forking logic.                                    |
+| 🧠 **Power tools**        | `⌘K` command palette, a runner (repeat / data-driven / flow), drag-to-reorder params, a code editor with line numbers + Prettify, and native SQL migrations. |
+| 🆓 **100% MIT**           | Free forever. Yours to fork, rebrand and ship.                                                                                                               |
 
 ---
 
-## Architecture
+## 🆚 How it compares
+
+|                            | **Red Request** | Bruno |  Insomnia  | Postman |
+| -------------------------- | :-------------: | :---: | :--------: | :-----: |
+| Open source                |     ✅ MIT      |  ✅   | ⚠️ partial |   ❌    |
+| Works fully offline        |       ✅        |  ✅   |     ⚠️     |   ❌    |
+| No account required        |       ✅        |  ✅   |     ❌     |   ❌    |
+| Git-friendly files         |     ✅ YAML     |  ✅   |     ⚠️     |   ❌    |
+| Native (no Electron)       |    ✅ Tauri     |  ❌   |     ❌     |   ❌    |
+| Beyond HTTP (TCP/UDP/DNS…) |       ✅        |  ⚠️   |     ⚠️     |   ⚠️    |
+| White-label / rebrandable  |       ✅        |  ❌   |     ❌     |   ❌    |
+
+---
+
+## 🏗 Architecture
 
 ```
-Webview (SvelteKit static, Svelte 5 + shadcn-svelte)
-   ⇅  @tauri-apps/api  (invoke + events)
-Tauri / Rust  →  fs, OS keychain (secrets), brand/theming, deep links
-   ├─ stdin/stdout (NDJSON-RPC)  →  Sidecar (@red-request/engine) → recker → HTTP / TCP / UDP / DNS / …
-   └─ HTTP 127.0.0.1             →  Sidecar (RedDB `red`)         → embedded .rdb store
+ Webview  ── SvelteKit (static) · Svelte 5 · shadcn-svelte
+    │  @tauri-apps/api (invoke + events)
+ Tauri / Rust  ── fs · OS keychain (secrets) · theming · deep links
+    ├─ NDJSON-RPC (stdio) ─▶  engine sidecar  ──▶  recker  ──▶  HTTP · TCP · UDP · DNS · WHOIS · ping
+    └─ HTTP 127.0.0.1     ─▶  RedDB `red`      ──▶  embedded .rdb store
 ```
 
-recker is TypeScript and uses raw sockets, so it can't run inside the webview — it runs as
-a **sidecar** the Rust shell spawns and talks to over stdio. RedDB is a second sidecar
-serving the local store. See [`.red/adr/`](.red/adr) for the decisions and
-[`.red/CONTEXT.md`](.red/CONTEXT.md) for the glossary.
+recker is TypeScript over raw sockets, so it can't live in the webview — it runs as a
+**sidecar** the Rust shell spawns and talks to over stdio. RedDB is a second sidecar serving
+the local store. Decisions live in [`.red/adr/`](.red/adr); the glossary in
+[`.red/CONTEXT.md`](.red/CONTEXT.md).
 
 | Package                | Role                                                          |
 | ---------------------- | ------------------------------------------------------------- |
@@ -85,35 +86,33 @@ serving the local store. See [`.red/adr/`](.red/adr) for the decisions and
 
 ---
 
-## Develop
+## 🚀 Develop
 
 ```bash
 pnpm install
-pnpm reddb:fetch       # download the RedDB sidecar from its releases (or pnpm reddb:sync to build from ../reddb)
-pnpm desktop:dev       # launch the desktop app (Tauri) with hot reload
-# or just the browser UI shell:  pnpm dev
+pnpm reddb:fetch     # download the RedDB sidecar (or pnpm reddb:sync to build from ../reddb)
+pnpm desktop:dev     # launch the app with hot reload  ·  (pnpm dev = browser UI shell)
 ```
 
-Tooling: **pnpm** workspace, **Bun** for the compiled engine sidecar, **Rust** for the Tauri
-shell. `pnpm check` (typecheck) · `pnpm test` · `pnpm build`.
-
-### Projects (`rr .`)
+<details>
+<summary><b>Projects — point the app at a folder (<code>rr .</code>)</b></summary>
 
 A folder becomes a project when you open the app pointed at it — its data lives in
-`<folder>/.red/request/app.rdb`, which you can commit. With no folder, the app uses the
-global `~/.red/request/app.rdb`.
+`<folder>/.red/request/app.rdb`, which you can commit. No folder ⇒ the global
+`~/.red/request/app.rdb`.
 
 ```bash
-pnpm desktop:build              # build the app once
+pnpm desktop:build
 ln -s "$PWD/scripts/rr" ~/.local/bin/rr
-rr .                            # open the project rooted here
-rr ~/work/my-api                # …or another folder
-rr                              # global store
+rr .                  # open the project rooted here
+rr ~/work/my-api      # …or another folder
+rr                    # global store
 ```
 
----
+</details>
 
-## Rebrand (white-label)
+<details>
+<summary><b>Rebrand it (white-label)</b></summary>
 
 Edit `brand/brand.config.json`, drop your logo at the referenced path, then:
 
@@ -121,29 +120,30 @@ Edit `brand/brand.config.json`, drop your logo at the referenced path, then:
 pnpm brand:sync   # stamps the Tauri config, UI theme tokens and runtime brand constants
 ```
 
----
+</details>
 
-## Releasing
-
-Versioning is [Changesets](https://github.com/changesets/changesets)-driven:
+<details>
+<summary><b>Releasing (Changesets → tag → bundles)</b></summary>
 
 1. `pnpm changeset` — describe your change.
-2. Merge the auto-opened **“Version Packages”** PR → a `vX.Y.Z` tag is pushed.
-3. [`release.yml`](.github/workflows/release.yml) builds Linux/macOS/Windows bundles and
-   attaches them to the GitHub Release. The RedDB sidecar is pulled from
-   [reddb's releases](https://github.com/reddb-io/reddb/releases) at build time.
+2. Merge the auto-opened **“Version Packages”** PR → `v*` is tagged and
+   [`release.yml`](.github/workflows/release.yml) is dispatched (no PAT needed).
+3. It builds Linux/macOS/Windows bundles and attaches them to the GitHub Release. The RedDB
+sidecar is pulled from [reddb's releases](https://github.com/reddb-io/reddb/releases) at
+build time (macOS builds it from source until reddb ships darwin binaries).
+</details>
 
 ---
 
-## Roadmap
+## 🗺 Roadmap
 
-HTTP, environments, variable substitution, scripts/tests, six auth methods, keychain
-secrets, the multi-protocol kinds (TCP/UDP/ping/WHOIS/DNS) and a command palette are in.
-Next: WebSocket / GraphQL / SSE / gRPC, importers (Postman / Insomnia / OpenAPI / `.bru` /
-curl / HAR), code generation and a richer CI runner — see [`.red/CONTEXT.md`](.red/CONTEXT.md).
+✅ HTTP · environments · variables · scripts & tests · 6 auth methods · keychain secrets ·
+TCP/UDP/ping/WHOIS/DNS kinds · `⌘K` palette · runner · drag-reorder · code editor.
+**Next:** WebSocket / GraphQL / SSE / gRPC · importers (Postman / Insomnia / OpenAPI / `.bru`
+/ curl / HAR) · code generation · richer CI runner — see [`.red/CONTEXT.md`](.red/CONTEXT.md).
 
 ---
 
 <div align="center">
-<sub>Built by <a href="https://reddb.io">RedDB.io</a> · MIT licensed · Powered by <a href="https://github.com/forattini-dev/recker">recker</a></sub>
+<sub>Built by <a href="https://reddb.io">RedDB.io</a> · MIT · powered by <a href="https://github.com/forattini-dev/recker">recker</a> & <a href="https://github.com/reddb-io/reddb">RedDB</a></sub>
 </div>
