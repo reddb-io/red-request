@@ -88,36 +88,23 @@ main() {
   echo "→ Red Request $tag ($OS/$ARCH)"
 
   if [[ "$OS" == "linux" ]]; then
-    local archtok url tmp
-    archtok=$([[ "$ARCH" == "x86_64" ]] && echo "amd64" || echo "aarch64")
-    url="$(asset_url "$json" "${archtok}\\.AppImage$")"
-    [[ -n "$url" ]] || url="$(asset_url "$json" "\\.AppImage$")"
-    [[ -n "$url" ]] || err "no .AppImage asset in $tag"
-    tmp="$(mktemp)"
+    [[ "$ARCH" == "x86_64" ]] || err "only x86_64 Linux is published right now"
+    local url tmp sudo=""
+    url="$(asset_url "$json" "amd64\\.deb$")"
+    [[ -n "$url" ]] || url="$(asset_url "$json" "\\.deb$")"
+    [[ -n "$url" ]] || err "no .deb asset in $tag"
+    [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
+    tmp="$(mktemp --suffix=.deb)"
     echo "→ Downloading $(basename "${url//%20/ }")"
     download "$url" "$tmp"
-    mkdir -p "$INSTALL_DIR"
-    install -m 0755 "$tmp" "$INSTALL_DIR/$BIN_NAME"
+    echo "→ Installing (apt)…"
+    if command -v apt >/dev/null 2>&1; then
+      $sudo apt-get install -y "$tmp"
+    else
+      $sudo dpkg -i "$tmp" || $sudo apt-get install -f -y
+    fi
     rm -f "$tmp"
-
-    # Desktop entry (best-effort; harmless if the dir doesn't exist).
-    local apps="$HOME/.local/share/applications"
-    mkdir -p "$apps"
-    cat > "$apps/red-request.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Red Request
-Comment=Open-source API client, powered by recker
-Exec=$INSTALL_DIR/$BIN_NAME %U
-Terminal=false
-Categories=Development;Utility;
-EOF
-
-    echo "✅ Installed: $INSTALL_DIR/$BIN_NAME"
-    case ":$PATH:" in
-      *":$INSTALL_DIR:"*) echo "   Run: red-request" ;;
-      *) echo "   Add to PATH:  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
-    esac
+    echo "✅ Installed Red Request. Launch it from your app menu or run: red-request"
     return
   fi
 

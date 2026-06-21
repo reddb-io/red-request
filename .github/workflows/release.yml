@@ -30,22 +30,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux on GitHub-hosted ubuntu-22.04: Blacksmith only offers 24.04, where Tauri's
-          # AppImage tooling (linuxdeploy) is broken by AppArmor unprivileged-userns limits.
+          # Linux ships .deb only: linuxdeploy/AppImage bundling fails on CI runners
+          # (FUSE/AppArmor userns), while .deb builds cleanly. ubuntu-22.04 GitHub-hosted.
           - {
               os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
+              args: "--bundles deb",
             }
           - {
               os: blacksmith-6vcpu-macos-15,
               target: aarch64-apple-darwin,
               label: macos-arm64,
+              args: "",
             }
           - {
               os: blacksmith-8vcpu-windows-2025,
               target: x86_64-pc-windows-msvc,
               label: windows-x86_64,
+              args: "",
             }
     steps:
       - uses: actions/checkout@v4
@@ -120,13 +123,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          args: ${{ matrix.args }}
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Red Request ${{ github.event.inputs.tag || github.ref_name }}"
           releaseBody: |
             Desktop builds of Red Request. Download the asset for your platform below.
 
-            **Linux** — `curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash` (or grab the `.AppImage` / `.deb`).
-            **macOS** — open the `.dmg` (Apple Silicon = `aarch64`, Intel = `x64`).
+            **Linux** — `curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash` (or grab the `.deb`).
+            **macOS** — open the `.dmg` (Apple Silicon).
             **Windows** — run the `.msi` or the NSIS `-setup.exe`.
 
             Unsigned builds for now — macOS: right-click → Open; Windows: "More info → Run anyway".

@@ -25,9 +25,9 @@ curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.s
 
 Prefer a click? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
 
-| Linux                | macOS                  | Windows                    |
-| -------------------- | ---------------------- | -------------------------- |
-| `.AppImage` · `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
+| Linux  | macOS                  | Windows                    |
+| ------ | ---------------------- | -------------------------- |
+| `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
 
 <sub>Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.</sub>
 
