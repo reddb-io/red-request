@@ -186,6 +186,10 @@ export async function dispatch(
     ...bodyOpts,
   };
   if (def.timeout) options.timeout = def.timeout;
+  if (def.followRedirects === false) options.followRedirects = false;
+  else if (typeof def.maxRedirects === "number")
+    options.maxRedirects = def.maxRedirects;
+  if (def.insecure) options.insecure = true;
 
   try {
     const client = createClient({

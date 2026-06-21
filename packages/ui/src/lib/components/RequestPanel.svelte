@@ -28,9 +28,16 @@
     HEAD: "text-fg-muted",
     OPTIONS: "text-fg-muted",
   };
-  type Tab = "params" | "headers" | "body" | "auth" | "scripts" | "config";
+  type Tab =
+    | "params"
+    | "headers"
+    | "body"
+    | "auth"
+    | "scripts"
+    | "settings"
+    | "config";
   let tab = $state<Tab>("params");
-  const httpTabs: Tab[] = ["params", "headers", "body", "auth", "scripts"];
+  const httpTabs: Tab[] = ["params", "headers", "body", "auth", "scripts", "settings"];
   const netTabs: Tab[] = ["config", "scripts"];
   const tabs = $derived(ws.activeReq?.kind === "http" ? httpTabs : netTabs);
   $effect(() => {
@@ -263,6 +270,59 @@
             <Textarea bind:value={ws.activeReq.scripts.postResponse} rows={8} class="mono text-xs"
               placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"} />
           </div>
+        </div>
+      {:else if tab === "settings"}
+        {@const inputCls =
+          "h-7 w-28 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)]"}
+        <div class="flex max-w-md flex-col gap-3 text-sm">
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Timeout <span class="hint">ms</span></span>
+            <input
+              type="number"
+              min="0"
+              value={ws.activeReq.timeout ?? ""}
+              placeholder="none"
+              class={inputCls}
+              oninput={(e) => {
+                const v = e.currentTarget.value;
+                ws.activeReq!.timeout = v ? Math.max(0, Number(v)) : undefined;
+              }}
+            />
+          </label>
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Follow redirects</span>
+            <input
+              type="checkbox"
+              bind:checked={ws.activeReq.followRedirects}
+              class="accent-[var(--color-brand)]"
+            />
+          </label>
+          {#if ws.activeReq.followRedirects}
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-fg-muted">Max redirects</span>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                value={ws.activeReq.maxRedirects}
+                class={inputCls}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  ws.activeReq!.maxRedirects = v ? Math.min(50, Number(v)) : 0;
+                }}
+              />
+            </label>
+          {/if}
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted"
+              >Skip TLS verification <span class="hint">self-signed / dev</span></span
+            >
+            <input
+              type="checkbox"
+              bind:checked={ws.activeReq.insecure}
+              class="accent-[var(--color-brand)]"
+            />
+          </label>
         </div>
       {:else if tab === "config"}
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />

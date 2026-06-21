@@ -121,6 +121,11 @@ export const requestDefinitionSchema = z.object({
   auth: authConfigSchema.default({ type: "inherit" }),
   scripts: scriptsSchema.default({ preRequest: "", postResponse: "" }),
   timeout: z.number().int().positive().optional(),
+  /** Network behaviour (HTTP). */
+  followRedirects: z.boolean().default(true),
+  maxRedirects: z.number().int().min(0).max(50).default(5),
+  /** Skip TLS certificate verification (self-signed / dev endpoints). */
+  insecure: z.boolean().default(false),
   retry: retrySchema.optional(),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
   presetName: z.string().optional(),
