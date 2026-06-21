@@ -12,8 +12,28 @@
   import { projectLabel } from "../project";
   import * as yamlio from "../yaml-io";
   import type { LoadedCollection } from "@red-request/core";
+  import { confirm } from "@tauri-apps/plugin-dialog";
 
   let status = $state("");
+
+  // project settings (cog menu): inline rename + destructive delete
+  let renamingProject = $state(false);
+  let projRenameValue = $state("");
+  function startRenameProject() {
+    projRenameValue = projectLabel(ws.project);
+    renamingProject = true;
+  }
+  async function commitRenameProject() {
+    if (renamingProject) await ws.renameProject(projRenameValue);
+    renamingProject = false;
+  }
+  async function confirmDeleteProjectData() {
+    const ok = await confirm(
+      "Permanently delete all requests, collections and history for this project? This removes its .red/request data and cannot be undone (the rest of the folder is left untouched).",
+      { title: "Delete project data", kind: "warning" }
+    );
+    if (ok) await ws.deleteProjectData();
+  }
 
   async function doExport() {
     try {
@@ -132,9 +152,21 @@
       class="grid h-6 w-6 place-items-center rounded bg-[var(--color-brand)] text-sm font-bold text-black"
       >R</span
     >
-    <div class="flex min-w-0 flex-col leading-tight">
+    <div class="flex min-w-0 flex-1 flex-col leading-tight">
       <span class="text-sm font-semibold">{brand.productName}</span>
-      {#if ws.project}
+      {#if ws.project?.is_project && renamingProject}
+        <!-- svelte-ignore a11y_autofocus -->
+        <Input
+          bind:value={projRenameValue}
+          autofocus
+          onblur={commitRenameProject}
+          onkeydown={(e) => {
+            if (e.key === "Enter") commitRenameProject();
+            if (e.key === "Escape") renamingProject = false;
+          }}
+          class="mt-0.5 h-6 text-xs"
+        />
+      {:else if ws.project}
         <Tooltip text="Switch project — {ws.project.db_path}" side="bottom">
           {#snippet children(p)}
             <button
@@ -149,6 +181,29 @@
         </Tooltip>
       {/if}
     </div>
+    {#if ws.project?.is_project}
+      <Menu
+        items={[
+          { label: "Rename…", onSelect: startRenameProject },
+          { label: "Remove from recents", onSelect: () => ws.forgetProject() },
+          {
+            label: "Delete project data…",
+            onSelect: confirmDeleteProjectData,
+            destructive: true,
+          },
+        ]}
+      >
+        {#snippet trigger(p)}
+          <Button
+            {...p}
+            variant="ghost"
+            size="icon-xs"
+            aria-label="project settings"
+            class="shrink-0">⚙</Button
+          >
+        {/snippet}
+      </Menu>
+    {/if}
   </div>
 
   <div class="flex gap-1 px-2 pb-2">

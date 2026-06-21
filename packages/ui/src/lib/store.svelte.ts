@@ -20,6 +20,9 @@ import {
   projectInfo,
   openProject,
   recentSetCount,
+  recentRename,
+  recentRemove,
+  deleteProjectData,
   type ProjectInfo,
 } from "./project";
 
@@ -132,6 +135,33 @@ class Workspace {
   /** Return to the project selector. */
   backToSelector(): void {
     this.screen = "selector";
+  }
+
+  /** Rename the current project (display alias in recents — does not touch the folder). */
+  async renameProject(name: string): Promise<void> {
+    const dir = this.project?.project_dir;
+    if (!dir || !name.trim()) return;
+    await recentRename(dir, name.trim()).catch(() => {});
+    this.project = await projectInfo().catch(() => this.project);
+  }
+
+  /** Forget the current project (remove from recents) and return to the selector. No files touched. */
+  async forgetProject(): Promise<void> {
+    const dir = this.project?.project_dir;
+    if (dir) await recentRemove(dir).catch(() => {});
+    this.backToSelector();
+  }
+
+  /** Permanently delete the current project's data (.red/request) and return to the selector. */
+  async deleteProjectData(): Promise<void> {
+    const dir = this.project?.project_dir;
+    if (!dir) return;
+    // Switch reddb off this dir first so the sidecar releases app.rdb before we delete it.
+    await openProject(null).catch(() => {});
+    await deleteProjectData(dir).catch((e) => {
+      this.loadError = e instanceof Error ? e.message : String(e);
+    });
+    this.backToSelector();
   }
 
   /** (Re)load the store; sets loadError on failure. Used by init and Retry. */

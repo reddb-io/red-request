@@ -390,6 +390,8 @@ struct ProjectInfo {
     project_dir: Option<String>,
     is_project: bool,
     arg_launched: bool,
+    /// Custom display name from recents (falls back to the folder name on the UI side).
+    name: Option<String>,
 }
 
 fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
@@ -397,11 +399,15 @@ fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
     let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
     let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
     let arg_launched = *s.arg_launched.lock().map_err(|e| e.to_string())?;
+    let name = project_dir
+        .as_ref()
+        .and_then(|d| recent_list().into_iter().find(|r| &r.dir == d).map(|r| r.name));
     Ok(ProjectInfo {
         is_project: project_dir.is_some(),
         db_path,
         project_dir,
         arg_launched,
+        name,
     })
 }
 
@@ -499,6 +505,43 @@ fn recent_set_count(dir: String, count: u64) -> Result<(), String> {
     if changed {
         save_recents(&list)?;
     }
+    Ok(())
+}
+
+/// Set a custom display name for a recent project (does not touch the folder).
+#[tauri::command]
+fn recent_rename(dir: String, name: String) -> Result<(), String> {
+    let mut list = recent_list();
+    for r in list.iter_mut() {
+        if r.dir == dir {
+            r.name = name.clone();
+        }
+    }
+    save_recents(&list)
+}
+
+/// Forget a project: remove it from the recents list. Touches no files on disk.
+#[tauri::command]
+fn recent_remove(dir: String) -> Result<(), String> {
+    let mut list = recent_list();
+    list.retain(|r| r.dir != dir);
+    save_recents(&list)
+}
+
+/// Permanently delete a project's red-request data (`<dir>/.red/request`, i.e. the app.rdb
+/// and any backups) and forget it. Leaves the rest of the folder untouched. The caller must
+/// switch the embedded reddb away from this dir first (e.g. `open_project(None)`), else the
+/// running sidecar keeps the unlinked file open.
+#[tauri::command]
+fn delete_project_data(dir: String) -> Result<(), String> {
+    let abs = std::fs::canonicalize(&dir).unwrap_or_else(|_| std::path::PathBuf::from(&dir));
+    let red_dir = abs.join(".red").join("request");
+    if red_dir.exists() {
+        std::fs::remove_dir_all(&red_dir).map_err(|e| e.to_string())?;
+    }
+    let mut list = recent_list();
+    list.retain(|r| r.dir != dir);
+    let _ = save_recents(&list);
     Ok(())
 }
 
@@ -873,6 +916,9 @@ pub fn run() {
             recent_list,
             recent_pin,
             recent_set_count,
+            recent_rename,
+            recent_remove,
+            delete_project_data,
             secret_seal,
             secret_open,
         ])
