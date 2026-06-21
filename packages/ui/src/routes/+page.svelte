@@ -9,7 +9,7 @@
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
   import CommandPalette from "$lib/components/ui/CommandPalette.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { Tooltip } from "bits-ui";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   let cmdOpen = $state(false);
 

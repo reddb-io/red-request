@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Design-system modal: bits-ui Dialog (focus-trap, Escape, scroll-lock, outside-click)
-  // with our themed overlay + panel. Render content via the default snippet.
-  import { Dialog } from "bits-ui";
+  // Modal over shadcn-svelte's Dialog (focus-trap, Escape, scroll-lock, outside-click,
+  // overlay + portal). Render content via the default snippet; call sites size it via `class`.
+  import * as Dialog from "./dialog/index.js";
+  import { cn } from "$lib/utils.js";
   import type { Snippet } from "svelte";
 
   let {
@@ -15,18 +16,18 @@
   } = $props();
 
   let open = $state(true);
-  function onOpenChange(v: boolean) {
-    if (!v) onClose?.();
-  }
 </script>
 
-<Dialog.Root bind:open {onOpenChange}>
-  <Dialog.Portal>
-    <Dialog.Overlay class="fixed inset-0 z-50 bg-black/60" />
-    <Dialog.Content
-      class="panel fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 overflow-hidden shadow-2xl outline-none {cls}"
-    >
-      {@render children()}
-    </Dialog.Content>
-  </Dialog.Portal>
+<Dialog.Root
+  bind:open
+  onOpenChange={(v) => {
+    if (!v) onClose?.();
+  }}
+>
+  <Dialog.Content
+    showCloseButton={false}
+    class={cn("flex max-w-none gap-0 overflow-hidden p-0", cls)}
+  >
+    {@render children()}
+  </Dialog.Content>
 </Dialog.Root>
