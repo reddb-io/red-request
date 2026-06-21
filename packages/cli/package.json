@@ -1,0 +1,25 @@
+{
+  "name": "@red-request/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless collection runner — run a git-versioned Red Request YAML tree in CI.",
+  "bin": {
+    "rr-run": "./dist/cli.js"
+  },
+  "main": "./dist/cli.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "echo \"(cli: no unit tests yet)\" && exit 0"
+  },
+  "dependencies": {
+    "@red-request/core": "workspace:*",
+    "@red-request/engine": "workspace:*",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

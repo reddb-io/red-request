@@ -26,7 +26,8 @@
     "changeset": "changeset",
     "release:version": "changeset version && node scripts/sync-desktop-version.mjs",
     "release:publish": "pnpm -r build && changeset publish",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "rr:run": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
