@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <style>.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }</style>
+  <rect width="900" height="360" rx="14" fill="#0b0b0d"/>
+  <rect x="0.5" y="0.5" width="899" height="359" rx="13.5" fill="none" stroke="#26262d"/>
+
+  <!-- ============ left: request body editor ============ -->
+  <g transform="translate(24,22)">
+    <text x="0" y="12" font-size="11" font-weight="700" letter-spacing="1" fill="#52525b">BODY</text>
+    <!-- type pill + prettify -->
+    <rect x="60" y="0" width="62" height="22" rx="6" fill="#1c1c21" stroke="#26262d"/>
+    <text x="72" y="15" class="mono" font-size="11" fill="#e4e4e7">json ▾</text>
+    <rect x="132" y="0" width="66" height="22" rx="6" fill="#141417" stroke="#26262d"/>
+    <text x="165" y="15" text-anchor="middle" font-size="11" fill="#a1a1aa">Prettify</text>
+
+    <!-- editor frame -->
+    <g transform="translate(0,34)">
+      <rect width="406" height="280" rx="9" fill="#1c1c21" stroke="#26262d"/>
+      <!-- gutter -->
+      <rect width="34" height="280" rx="9" fill="#141417"/>
+      <rect x="20" width="14" height="280" fill="#141417"/>
+      <line x1="34" y1="0" x2="34" y2="280" stroke="#26262d"/>
+      <!-- current-line band (line 3) -->
+      <rect x="34" y="70" width="372" height="26" fill="#ffffff" fill-opacity="0.04"/>
+      <g class="mono" font-size="13">
+        <!-- line numbers -->
+        <g fill="#52525b" text-anchor="end">
+          <text x="26" y="34">1</text><text x="26" y="60">2</text>
+          <text x="26" y="88" fill="#a1a1aa">3</text>
+          <text x="26" y="114">4</text><text x="26" y="140">5</text>
+          <text x="26" y="166">6</text><text x="26" y="192">7</text>
+        </g>
+        <!-- code -->
+        <text x="48" y="34" fill="#e4e4e7">{</text>
+        <text x="64" y="60" fill="#60a5fa">"name"</text><text x="120" y="60" fill="#e4e4e7">: </text><text x="134" y="60" fill="#6ee7b7">"Ada"</text><text x="174" y="60" fill="#e4e4e7">,</text>
+        <text x="64" y="88" fill="#60a5fa">"role"</text><text x="116" y="88" fill="#e4e4e7">: </text><text x="130" y="88" fill="#6ee7b7">"</text><!-- var inside body -->
+        <tspan></tspan>
+        <rect x="138" y="76" width="62" height="18" rx="4" fill="#10b981" fill-opacity="0.16"/>
+        <text x="143" y="88" class="mono" font-size="13" fill="#6ee7b7">{{role}}</text>
+        <text x="200" y="88" fill="#6ee7b7">"</text>
+        <rect x="206" y="78" width="2" height="14" fill="#ff2056"/>
+        <text x="64" y="114" fill="#60a5fa">"tags"</text><text x="116" y="114" fill="#e4e4e7">: [</text><text x="138" y="114" fill="#6ee7b7">"db"</text><text x="166" y="114" fill="#e4e4e7">, </text><text x="180" y="114" fill="#6ee7b7">"api"</text><text x="216" y="114" fill="#e4e4e7">],</text>
+        <text x="64" y="140" fill="#60a5fa">"active"</text><text x="128" y="140" fill="#e4e4e7">: </text><text x="142" y="140" fill="#fbbf24">true</text>
+        <text x="48" y="166" fill="#e4e4e7">}</text>
+      </g>
+    </g>
+    <text x="0" y="332" class="mono" font-size="11" fill="#52525b">line numbers · current-line highlight · {{vars}} in the body</text>
+  </g>
+
+  <!-- ============ right: response ============ -->
+  <g transform="translate(454,22)">
+    <text x="0" y="12" font-size="11" font-weight="700" letter-spacing="1" fill="#52525b">RESPONSE</text>
+    <text x="78" y="13" class="mono" font-size="12" font-weight="700" fill="#34d399">200 OK</text>
+    <text x="150" y="13" class="mono" font-size="12" fill="#71717a">128 ms · 2.1 KB</text>
+    <!-- copy button -->
+    <rect x="356" y="-2" width="66" height="22" rx="6" fill="#141417" stroke="#26262d"/>
+    <text x="389" y="13" text-anchor="middle" font-size="11" fill="#6ee7b7">Copied ✓</text>
+
+    <g transform="translate(0,34)">
+      <rect width="422" height="280" rx="9" fill="#0b0b0d" stroke="#26262d"/>
+      <rect width="34" height="280" rx="9" fill="#141417"/>
+      <rect x="20" width="14" height="280" fill="#141417"/>
+      <line x1="34" y1="0" x2="34" y2="280" stroke="#26262d"/>
+      <g class="mono" font-size="13">
+        <g fill="#52525b" text-anchor="end">
+          <text x="26" y="34">1</text><text x="26" y="60">2</text><text x="26" y="88">3</text>
+          <text x="26" y="114">4</text><text x="26" y="140">5</text><text x="26" y="166">6</text><text x="26" y="192">7</text>
+        </g>
+        <text x="48" y="34" fill="#e4e4e7">{</text>
+        <text x="64" y="60" fill="#60a5fa">"args"</text><text x="116" y="60" fill="#e4e4e7">: {},</text>
+        <text x="64" y="88" fill="#60a5fa">"headers"</text><text x="136" y="88" fill="#e4e4e7">: {</text>
+        <text x="80" y="114" fill="#60a5fa">"Accept"</text><text x="144" y="114" fill="#e4e4e7">: </text><text x="158" y="114" fill="#6ee7b7">"application/json"</text>
+        <text x="64" y="140" fill="#e4e4e7">},</text>
+        <text x="64" y="166" fill="#60a5fa">"url"</text><text x="108" y="166" fill="#e4e4e7">: </text><text x="122" y="166" fill="#6ee7b7">"https://…/get"</text>
+        <text x="48" y="192" fill="#e4e4e7">}</text>
+      </g>
+    </g>
+    <text x="0" y="332" class="mono" font-size="11" fill="#52525b">numbered, syntax-aware, one-click Copy</text>
+  </g>
+</svg>

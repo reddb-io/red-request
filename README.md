@@ -41,14 +41,20 @@ it doesn't. Open a `{{` and an autocomplete of every known variable drops in. Pa
 like `/users/:id` are detected automatically and take a literal _or_ a `{{var}}` from your
 environment.
 
+<div align="center"><img src="docs/showcase-vars.svg" alt="Variable highlighting with autocomplete" width="92%"></div>
+
 **A real editor, not a textarea.** The request body and the response come with a line-number
 gutter, a current-line highlight, one-click **Prettify** for JSON, and **Copy** on the
 response. Pick a body type and the matching `Content-Type` and `Accept` headers are written
 for you.
 
+<div align="center"><img src="docs/showcase-editor.svg" alt="Body & response code editor with line numbers" width="92%"></div>
+
 **Beyond HTTP.** Every request is dispatched through **recker**, so alongside HTTP you get
 **TCP, UDP, ping, WHOIS and DNS** as first-class request kinds — with the same variables,
 history and latency dashboard. WebSocket / GraphQL / SSE / gRPC are next.
+
+<div align="center"><img src="docs/showcase-kinds.svg" alt="Multi-protocol request kinds with results" width="92%"></div>
 
 **Move at the speed of thought.** A `⌘K` command palette jumps to any request or action. A
 runner replays a request as a **repeat**, a **data-driven** sweep, or a **flow** that threads

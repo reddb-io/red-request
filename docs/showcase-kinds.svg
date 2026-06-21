@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="340" viewBox="0 0 900 340" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <style>.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }</style>
+  <rect width="900" height="340" rx="14" fill="#0b0b0d"/>
+  <rect x="0.5" y="0.5" width="899" height="339" rx="13.5" fill="none" stroke="#26262d"/>
+
+  <!-- ===== sidebar ===== -->
+  <rect x="1" y="1" width="300" height="338" rx="13" fill="#141417"/>
+  <line x1="301" y1="1" x2="301" y2="339" stroke="#26262d"/>
+  <g transform="translate(22,26)">
+    <rect width="22" height="22" rx="6" fill="#ff2056"/>
+    <text x="11" y="16" text-anchor="middle" font-size="13" font-weight="800" fill="#0b0b0d">R</text>
+    <text x="34" y="12" font-size="13" font-weight="700" fill="#f4f4f5">Red Request</text>
+    <text x="34" y="28" class="mono" font-size="11" fill="#71717a">httpbingo ⇄</text>
+  </g>
+  <text x="22" y="86" font-size="10" font-weight="700" letter-spacing="1" fill="#52525b">SAMPLE · HTTPBINGO</text>
+
+  <!-- request rows: badge + name -->
+  <g font-family="ui-sans-serif" font-size="13">
+    <!-- helper: each row -->
+    <!-- GET (active) -->
+    <rect x="12" y="98" width="278" height="30" rx="6" fill="#1c1c21"/>
+    <rect x="20" y="105" width="46" height="16" rx="4" fill="#1c1c21"/>
+    <text x="24" y="117" class="mono" font-size="11" font-weight="800" fill="#34d399">GET</text>
+    <text x="76" y="117" fill="#e4e4e7">GET anything</text>
+
+    <rect x="20" y="139" width="46" height="16" rx="4"/>
+    <text x="24" y="151" class="mono" font-size="11" font-weight="800" fill="#fbbf24">POST</text>
+    <text x="76" y="151" fill="#a1a1aa">POST json</text>
+
+    <rect x="20" y="173" width="46" height="16" rx="4"/>
+    <text x="24" y="185" class="mono" font-size="11" font-weight="800" fill="#818cf8">DNS</text>
+    <text x="76" y="185" fill="#a1a1aa">DNS · {{host}}</text>
+
+    <rect x="20" y="207" width="46" height="16" rx="4"/>
+    <text x="24" y="219" class="mono" font-size="11" font-weight="800" fill="#f472b6">PING</text>
+    <text x="76" y="219" fill="#a1a1aa">Ping · {{host}}</text>
+
+    <rect x="20" y="241" width="46" height="16" rx="4"/>
+    <text x="24" y="253" class="mono" font-size="11" font-weight="800" fill="#fb923c">WHOIS</text>
+    <text x="76" y="253" fill="#a1a1aa">WHOIS example.com</text>
+
+    <rect x="20" y="275" width="46" height="16" rx="4"/>
+    <text x="24" y="287" class="mono" font-size="11" font-weight="800" fill="#22d3ee">TCP</text>
+    <text x="76" y="287" fill="#a1a1aa">TCP :443 handshake</text>
+
+    <rect x="20" y="309" width="46" height="16" rx="4"/>
+    <text x="24" y="321" class="mono" font-size="11" font-weight="800" fill="#2dd4bf">UDP</text>
+    <text x="76" y="321" fill="#a1a1aa">UDP probe</text>
+  </g>
+
+  <!-- ===== right: a DNS result + ping stats ===== -->
+  <g transform="translate(332,26)">
+    <text x="0" y="12" font-size="11" font-weight="700" letter-spacing="1" fill="#52525b">DNS · {{host}}</text>
+    <text x="120" y="13" class="mono" font-size="12" font-weight="700" fill="#34d399">OK</text>
+    <text x="150" y="13" class="mono" font-size="12" fill="#71717a">A · 18 ms</text>
+
+    <g transform="translate(0,28)">
+      <rect width="540" height="120" rx="9" fill="#1c1c21" stroke="#26262d"/>
+      <g class="mono" font-size="13" fill="#e4e4e7">
+        <text x="16" y="30">152.199.39.<tspan fill="#6ee7b7">108</tspan></text>
+        <text x="16" y="54">152.199.39.<tspan fill="#6ee7b7">110</tspan></text>
+        <text x="16" y="78">2606:2800:<tspan fill="#6ee7b7">21f:cb07</tspan>:…</text>
+      </g>
+      <g transform="translate(320,16)" font-size="12">
+        <rect width="200" height="88" rx="7" fill="#141417" stroke="#26262d"/>
+        <text x="14" y="22" font-size="10" font-weight="700" letter-spacing="1" fill="#52525b">META</text>
+        <text x="14" y="44" class="mono" fill="#a1a1aa">records  <tspan fill="#f4f4f5" font-weight="700">3</tspan></text>
+        <text x="14" y="64" class="mono" fill="#a1a1aa">server   <tspan fill="#f4f4f5" font-weight="700">1.1.1.1</tspan></text>
+        <text x="14" y="80" class="mono" fill="#a1a1aa">ttl      <tspan fill="#f4f4f5" font-weight="700">300s</tspan></text>
+      </g>
+    </g>
+
+    <!-- ping latency mini-chart -->
+    <g transform="translate(0,176)">
+      <text x="0" y="12" font-size="11" font-weight="700" letter-spacing="1" fill="#52525b">PING · 8× — TCP-connect</text>
+      <text x="190" y="13" class="mono" font-size="12" fill="#71717a">avg 12.4 ms · 0% loss</text>
+      <g transform="translate(0,24)">
+        <rect width="540" height="104" rx="9" fill="#1c1c21" stroke="#26262d"/>
+        <!-- bars -->
+        <g fill="#ff2056" fill-opacity="0.85">
+          <rect x="24"  y="60" width="40" height="34" rx="3"/>
+          <rect x="86"  y="44" width="40" height="50" rx="3"/>
+          <rect x="148" y="52" width="40" height="42" rx="3"/>
+          <rect x="210" y="38" width="40" height="56" rx="3"/>
+          <rect x="272" y="58" width="40" height="36" rx="3"/>
+          <rect x="334" y="48" width="40" height="46" rx="3"/>
+          <rect x="396" y="40" width="40" height="54" rx="3"/>
+          <rect x="458" y="56" width="40" height="38" rx="3"/>
+        </g>
+        <line x1="16" y1="94" x2="524" y2="94" stroke="#26262d"/>
+      </g>
+    </g>
+  </g>
+</svg>
