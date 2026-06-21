@@ -93,6 +93,18 @@ export const netConfigSchema = z.object({
 });
 export type NetConfig = z.infer<typeof netConfigSchema>;
 
+/** A saved response snapshot attached to a request (for docs / quick reference / mocking). */
+export const savedExampleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.number().default(0),
+  statusText: z.string().default(""),
+  contentType: z.string().optional(),
+  bodyText: z.string().default(""),
+  savedAt: z.number().default(0),
+});
+export type SavedExample = z.infer<typeof savedExampleSchema>;
+
 /**
  * A single request — serialized one-per-file under `requests/<slug>.yaml`.
  * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
@@ -131,6 +143,8 @@ export const requestDefinitionSchema = z.object({
   /** Route through an HTTP/HTTPS/SOCKS proxy (e.g. http://127.0.0.1:8080). */
   proxy: z.string().optional(),
   retry: retrySchema.optional(),
+  /** Saved response snapshots (docs / mocking) — versioned with the request. */
+  examples: z.array(savedExampleSchema).default([]),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
   presetName: z.string().optional(),
 });

@@ -13,6 +13,7 @@ import {
   type LoadedCollection,
   type RequestDefinition,
   type ResponseResult,
+  type SavedExample,
   type StoredEnvironment,
   type ScriptTest,
   type HistoryEntry,
@@ -60,6 +61,8 @@ class Workspace {
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);
+  /** When set, the response panel shows this saved example instead of the live response. */
+  exampleView = $state<ResponseResult | null>(null);
   unresolved = $state<string[]>([]);
   effectiveUrl = $state("");
   errorMsg = $state<string | null>(null);
@@ -241,6 +244,7 @@ class Workspace {
     this.activeEnvName =
       this.activeEnvName ?? col.environments[0]?.name ?? null;
     this.response = null;
+    this.exampleView = null;
     this.errorMsg = null;
     this.unresolved = [];
     // reset the stream panel; close any connection from the previously selected request
@@ -276,6 +280,7 @@ class Workspace {
   async send(): Promise<void> {
     if (!this.activeReq || this.sending) return;
     this.sending = true;
+    this.exampleView = null;
     this.errorMsg = null;
     this.tests = [];
     this.logs = [];
@@ -451,6 +456,50 @@ class Workspace {
       col.collection.vars[name] = value;
       await this.persistCollection();
     }
+  }
+
+  // --- saved examples -------------------------------------------------------
+  /** Snapshot the current live response as a named example on the active request. */
+  async saveExample(name: string): Promise<void> {
+    const req = this.activeReq;
+    const res = this.response;
+    if (!req || !res) return;
+    const ex: SavedExample = {
+      id: `ex-${Date.now().toString(36)}`,
+      name: name.trim() || `${res.status} · ${new Date().toLocaleString()}`,
+      status: res.status,
+      statusText: res.statusText,
+      contentType: res.contentType,
+      bodyText: res.bodyText,
+      savedAt: Date.now(),
+    };
+    req.examples = [...(req.examples ?? []), ex];
+    await this.save();
+  }
+
+  /** Show a saved example in the response panel (or clear with null). */
+  viewExample(ex: SavedExample | null): void {
+    this.exampleView = ex
+      ? {
+          status: ex.status,
+          statusText: ex.statusText,
+          ok: ex.status > 0 && ex.status < 400,
+          url: "",
+          headers: {},
+          bodyText: ex.bodyText,
+          contentType: ex.contentType,
+          size: ex.bodyText.length,
+          durationMs: 0,
+        }
+      : null;
+  }
+
+  async deleteExample(id: string): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    req.examples = (req.examples ?? []).filter((e) => e.id !== id);
+    this.exampleView = null;
+    await this.save();
   }
 
   // --- websocket ------------------------------------------------------------

@@ -76,7 +76,12 @@
     }
   }
 
-  const r = $derived(ws.response);
+  const r = $derived(ws.exampleView ?? ws.response);
+  let exName = $state("");
+  async function doSaveExample() {
+    await ws.saveExample(exName);
+    exName = "";
+  }
   const failed = $derived(ws.tests.filter((t) => !t.passed).length);
   const hasScripts = $derived(
     ws.tests.length > 0 || ws.logs.length > 0 || ws.scriptError !== null
@@ -250,7 +255,44 @@
           >{saved ? "Saved ✓" : "Save"}</Button
         >
       {/if}
+      {#if ws.response && !ws.exampleView}
+        <Button
+          onclick={doSaveExample}
+          variant="outline"
+          size="xs"
+          title="Save this response as an example on the request">+ Example</Button
+        >
+      {/if}
     </div>
+    {#if ws.exampleView}
+      <div
+        class="flex items-center gap-2 border-b border-border bg-[var(--color-bg-1)] px-3 py-1 text-xs text-fg-muted"
+      >
+        <span class="text-[var(--color-brand)]">● viewing saved example</span>
+        <button class="ml-auto underline hover:text-fg" onclick={() => ws.viewExample(null)}
+          >back to live</button
+        >
+      </div>
+    {/if}
+    {#if ws.activeReq?.examples?.length}
+      <div class="flex flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
+        <span class="hint mr-1">examples:</span>
+        {#each ws.activeReq.examples as ex (ex.id)}
+          <span
+            class="group/ex inline-flex items-center gap-1 rounded border border-border bg-[var(--color-bg-2)] px-1.5 py-0.5 text-xs"
+          >
+            <button class="hover:text-[var(--color-brand)]" onclick={() => ws.viewExample(ex)}
+              title={`${ex.status} · ${ex.name}`}>{ex.name}</button
+            >
+            <button
+              class="text-fg-faint opacity-0 group-hover/ex:opacity-100 hover:text-red-400"
+              title="delete example"
+              onclick={() => ws.deleteExample(ex.id)}>✕</button
+            >
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
       {#each ["body", "headers", "timings"] as const as t (t)}
