@@ -4,8 +4,108 @@ import type { AuthConfig } from "./auth.js";
 /** A flat name→value map. */
 export type VariableScope = Record<string, string>;
 
-const PLACEHOLDER = /\{\{\s*([\w.-]+)\s*\}\}/g;
+const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*\}\}/g;
 const MAX_PASSES = 5;
+
+// ---------------------------------------------------------------------------
+// Dynamic variables — Postman-style `{{$name}}` tokens generated fresh on each
+// resolve (not stored in any scope). Each occurrence is independent.
+// ---------------------------------------------------------------------------
+const randInt = (min: number, max: number) =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
+const pick = <T>(a: readonly T[]): T =>
+  a[Math.floor(Math.random() * a.length)]!;
+const FIRST = [
+  "Ada",
+  "Alan",
+  "Grace",
+  "Linus",
+  "Margaret",
+  "Dennis",
+  "Barbara",
+  "Ken",
+  "Radia",
+  "Tim",
+];
+const LAST = [
+  "Lovelace",
+  "Turing",
+  "Hopper",
+  "Torvalds",
+  "Hamilton",
+  "Ritchie",
+  "Liskov",
+  "Thompson",
+  "Perlman",
+  "Lee",
+];
+const WORDS = [
+  "lorem",
+  "ipsum",
+  "dolor",
+  "vector",
+  "matrix",
+  "quantum",
+  "photon",
+  "cipher",
+  "delta",
+  "nimbus",
+];
+
+function uuid(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    return (ch === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+/** name → (generator, human description). Exposed for autocomplete/highlighting. */
+export const DYNAMIC_VARS: Record<string, { gen: () => string; desc: string }> =
+  {
+    $uuid: { gen: uuid, desc: "random UUID v4" },
+    $guid: { gen: uuid, desc: "random UUID v4 (alias)" },
+    $timestamp: {
+      gen: () => String(Math.floor(Date.now() / 1000)),
+      desc: "unix time (seconds)",
+    },
+    $isoTimestamp: {
+      gen: () => new Date().toISOString(),
+      desc: "ISO-8601 datetime",
+    },
+    $randomInt: { gen: () => String(randInt(0, 1000)), desc: "integer 0–1000" },
+    $randomEmail: {
+      gen: () =>
+        `${pick(FIRST).toLowerCase()}.${pick(LAST).toLowerCase()}${randInt(1, 999)}@example.com`,
+      desc: "random email",
+    },
+    $randomFirstName: { gen: () => pick(FIRST), desc: "random first name" },
+    $randomLastName: { gen: () => pick(LAST), desc: "random last name" },
+    $randomFullName: {
+      gen: () => `${pick(FIRST)} ${pick(LAST)}`,
+      desc: "random full name",
+    },
+    $randomWord: { gen: () => pick(WORDS), desc: "random word" },
+    $randomBoolean: {
+      gen: () => (Math.random() < 0.5 ? "true" : "false"),
+      desc: "true / false",
+    },
+    $randomIP: {
+      gen: () =>
+        `${randInt(1, 255)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 255)}`,
+      desc: "random IPv4",
+    },
+    $randomHexColor: {
+      gen: () => "#" + randInt(0, 0xffffff).toString(16).padStart(6, "0"),
+      desc: "random hex colour",
+    },
+  };
+
+/** Resolve a `{{$name}}` dynamic token, or undefined if it isn't one. */
+export function resolveDynamic(name: string): string | undefined {
+  return DYNAMIC_VARS[name]?.gen();
+}
 
 /**
  * Merge cascading scopes into one lookup. Earlier scopes win, so callers pass them in
@@ -45,11 +145,16 @@ export function resolveTemplate(
         changed = true;
         return lookup[name] ?? "";
       }
+      const dyn = resolveDynamic(name);
+      if (dyn !== undefined) {
+        changed = true;
+        return dyn;
+      }
       return match;
     });
     if (!changed) break;
   }
-  // Whatever placeholders remain are genuinely unknown.
+  // Whatever placeholders remain are genuinely unknown (dynamic ones are already gone).
   for (const m of value.matchAll(PLACEHOLDER)) {
     if (m[1]) unresolved.add(m[1]);
   }

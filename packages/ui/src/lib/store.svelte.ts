@@ -3,6 +3,7 @@ import {
   storedEnvironmentSchema,
   newRequest,
   curlToRequest,
+  DYNAMIC_VARS,
   type BodyType,
   type LoadedCollection,
   type RequestDefinition,
@@ -86,9 +87,11 @@ class Workspace {
     return out;
   }
 
-  /** Variable names resolvable in the current scope. */
+  /** Variable names resolvable in the current scope, plus the dynamic {{$…}} generators. */
   get knownVars(): string[] {
-    return Object.keys(this.varInfo).sort((a, b) => a.localeCompare(b));
+    return [...Object.keys(this.varInfo), ...Object.keys(DYNAMIC_VARS)].sort(
+      (a, b) => a.localeCompare(b)
+    );
   }
 
   /** name → hover-tooltip text (value for vars; masked for secrets — never the plaintext). */
@@ -96,6 +99,8 @@ class Workspace {
     const out: Record<string, string> = {};
     for (const [k, info] of Object.entries(this.varInfo))
       out[k] = info.secret ? "🔒 secret" : info.value || "(empty)";
+    for (const [k, info] of Object.entries(DYNAMIC_VARS))
+      out[k] = `⚡ ${info.desc}`;
     return out;
   }
 

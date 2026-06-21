@@ -1,6 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { mergeScopes, resolveTemplate, resolveRequest } from "./resolver.js";
+import {
+  mergeScopes,
+  resolveTemplate,
+  resolveRequest,
+  resolveDynamic,
+} from "./resolver.js";
 import { newRequest } from "./request.js";
+
+describe("dynamic variables", () => {
+  it("resolves {{$…}} tokens without a scope and never reports them unresolved", () => {
+    const r = resolveTemplate("id={{$uuid}}&t={{$timestamp}}&x={{nope}}", {});
+    expect(r.value).toMatch(/^id=[0-9a-f-]{36}&t=\d{10}&x=\{\{nope\}\}$/);
+    expect(r.unresolved).toEqual(["nope"]);
+  });
+  it("each occurrence is independent", () => {
+    const [a, b] = resolveTemplate("{{$uuid}} {{$uuid}}", {}).value.split(" ");
+    expect(a).not.toBe(b);
+  });
+  it("a real scope var wins over a dynamic name; unknown $tokens are undefined", () => {
+    expect(
+      resolveTemplate("{{$timestamp}}", { $timestamp: "fixed" }).value
+    ).toBe("fixed");
+    expect(resolveDynamic("$randomEmail")).toMatch(/@example\.com$/);
+    expect(resolveDynamic("$nope")).toBeUndefined();
+  });
+});
 
 describe("mergeScopes", () => {
   it("gives precedence to earlier scopes", () => {
