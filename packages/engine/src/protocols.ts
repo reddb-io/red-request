@@ -188,11 +188,13 @@ export function runTls(
     let connectMs = 0;
     let settled = false;
     const servername = sni || host;
+    // IP addresses cannot be used as TLS servername (RFC 6066 §3); omit when host is a raw IP.
+    const isIp = /^[\d.:]+$/.test(servername);
 
     const sock = tls.connect({
       host,
       port,
-      servername,
+      ...(isIp ? {} : { servername }),
       rejectUnauthorized: !insecure,
     });
 
@@ -226,7 +228,7 @@ export function runTls(
       const tlsMeta = {
         version: protocol ?? null,
         cipher: cipher?.name ?? null,
-        sni: servername,
+        sni: isIp ? null : servername,
         cert:
           cert && Object.keys(cert).length > 0
             ? {
@@ -254,21 +256,24 @@ export function runTls(
       }
 
       sock.write(payload);
-      setTimeout(() => {
-        const recv = Buffer.concat(chunks).toString("utf8");
-        const total = performance.now() - t0;
-        finish(
-          ok(
-            `TLS connected to ${host}:${port}\n` +
-              (recv ? `\n${recv}` : "(no data received)"),
-            total,
-            {
-              timings: { tls: connectMs, total },
-              meta: { tls: tlsMeta },
-            }
-          )
-        );
-      }, Math.min(1000, timeoutMs));
+      setTimeout(
+        () => {
+          const recv = Buffer.concat(chunks).toString("utf8");
+          const total = performance.now() - t0;
+          finish(
+            ok(
+              `TLS connected to ${host}:${port}\n` +
+                (recv ? `\n${recv}` : "(no data received)"),
+              total,
+              {
+                timings: { tls: connectMs, total },
+                meta: { tls: tlsMeta },
+              }
+            )
+          );
+        },
+        Math.min(1000, timeoutMs)
+      );
     });
 
     sock.on("data", (d) => chunks.push(d));

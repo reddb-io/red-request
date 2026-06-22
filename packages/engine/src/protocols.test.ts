@@ -1,11 +1,64 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import net from "node:net";
+import tls from "node:tls";
 import dgram from "node:dgram";
 import type { AddressInfo } from "node:net";
-import { runTcp, runUdp, runPing, runDns } from "./protocols.js";
+import { runTcp, runTls, runUdp, runPing, runDns } from "./protocols.js";
+
+// Self-signed certificate for loopback TLS tests (CN=localhost, SAN=DNS:localhost,IP:127.0.0.1).
+const TEST_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCrCajtVfHS49hi
+aSFdzQuGEbfJWxFrmxf4OrTH0EzHhee/a/7XcsUmBEc0iH1VnMs7EfnQNUFscyza
+Zcs05fxc90HVxOjpcR1fGBkqV0Yl333vbI9Mxr4Z2PdwDfuO8/nkHSUNYGM9LFA5
+YGgJ6o+lXs8SgrSNVblqJSjHUCZSqYl5x0ochbhOpwRdCq/BBhmraNtifuSAEKXy
+UHr81nsTZzFjelOjUHIl9rmKfRXfY3H5bDbgr5aRxVOMJQovOMD8/L+lDKGpOniS
+T9meZCQtSM8itCmnNJbchXrUBekJdiMYwdlJcbfC+CmpHPhCAq0W8NBY2yRcPyXo
+0A/uVTKbAgMBAAECggEAIas8IsRJX09U2EKDu/hSLWkteajArCMSu92qmq7pfllg
+vnDe8MB6CLrM3Y2Exqaf5xfpyk/BejzN9owVTWt8mzxdLFyf0NxggMi4o3ocp/Xv
+z4LaTq3M3D+2rctC2ugyJ/KIybJQtskTXcgZkuImttIMB0PNkQjv//IireGcOact
+SVG5WqoyiR3gaGOg5jGZ/mqBsu55lkp5VUjnX1KjZGWLus5D3+vXKaL3hPcJf3ys
+wSnTQtm+Sdpzdb60rbDdYOPuuBDIM+onOmMS2YjAK51QEoeC1qUbTo9mhoemeSyh
+Yo6RQ41IVPXFNylOWC3946pa+2CSLwFVjDQvgApQMQKBgQDnWb7r4pOAoToEHWGD
+I6utJhGrtMZFFi4gXcTQfktb0HPkqVRUPYMzlcxN8yZ6I8vR+MWRQjAaHn4AP8lA
+obCT+OhY+hbZBrWZXwBjnePOjS/qzHYA6qzA8WwhZlnzN/6IaP0T+ZTuG/fH0uH/
+ohjrw5VEQC/Izv7R6ppF/IrO+QKBgQC9QtZ8+ddJNnnjh6wBk+rrhLcqpkbFTKJq
+R85tEw0pZpw5aZqkxOCR+bXWSmTyKQuQue/1wNjMcnhfQo13gySeuT50/qtnvtQa
+lMFlrbj0IJ0OK4IiqUiYeEpwtMRoQjw90M8Ssu4IsKnIMMkPVfMzA/B6qMf7BZx4
+UM3BcnBvMwKBgBx780LNucV7lE4PZAMmcCu4ZTKT5ll5OqKniOT2t8aNKse7hXN9
+w1qller/BfzBzYWDsKeK06tTl8XmFJxNjBUb71eNKyT7a35/sOeS+AplXcH1/I1u
+V2jGEL8n/+kvOrqG2qoL76dFcEN9FnBH//N/ODCYCooZ2kv0K5x0VI7ZAoGATlAP
+zJrc+FBwUzPaerSoKlg6Ko2vDwjM08luozeU5KKu1hragH9upTh8g3U5G/Lb9EDc
+CAaKLt7W7CPvwZokVwEz1NlkN4OA5JbVB6vAslOkaS6bpJgDkAOGWeiStMljf/id
+FpGvaS0gs9Nr/sqD3YItybN5PGdv/WECIp+l4n0CgYBVCMywA2ZBOLbm4+qL1i8h
+u4E1rc51BGBlieQZNoRVGhwrMgJLYhm/KJbKbp/ZDd6fGvisHMjaHu3cpRrb/6JG
+gDIbkeM6EfC3WHpx1C7hPQ0oFq845mWQrSzOZxAVrIx66J+Iqrz4lELRksu+WcLQ
++22N84W0bSgnhnqMsLMjTw==
+-----END PRIVATE KEY-----`;
+
+const TEST_CERT = `-----BEGIN CERTIFICATE-----
+MIIDJTCCAg2gAwIBAgIUZB559eMBJsnQGRh7MwoVXajew0QwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDYyMjE2NDAxOFoXDTM2MDYx
+OTE2NDAxOFowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAqwmo7VXx0uPYYmkhXc0LhhG3yVsRa5sX+Dq0x9BMx4Xn
+v2v+13LFJgRHNIh9VZzLOxH50DVBbHMs2mXLNOX8XPdB1cTo6XEdXxgZKldGJd99
+72yPTMa+Gdj3cA37jvP55B0lDWBjPSxQOWBoCeqPpV7PEoK0jVW5aiUox1AmUqmJ
+ecdKHIW4TqcEXQqvwQYZq2jbYn7kgBCl8lB6/NZ7E2cxY3pTo1ByJfa5in0V32Nx
++Ww24K+WkcVTjCUKLzjA/Py/pQyhqTp4kk/ZnmQkLUjPIrQppzSW3IV61AXpCXYj
+GMHZSXG3wvgpqRz4QgKtFvDQWNskXD8l6NAP7lUymwIDAQABo28wbTAdBgNVHQ4E
+FgQUQfircYvDgfWywWO01XxlTbaxmxQwHwYDVR0jBBgwFoAUQfircYvDgfWywWO0
+1XxlTbaxmxQwDwYDVR0TAQH/BAUwAwEB/zAaBgNVHREEEzARgglsb2NhbGhvc3SH
+BH8AAAEwDQYJKoZIhvcNAQELBQADggEBAGI/F8jf/wgi1OQFGtu5DBiR4vyeoUc/
+UniVRhdG98m0lEo7kY4eCm73691SPXGH/WBSKXsNdVAGtNus35cTt9302Z3ctDHu
+KyZqZcyaUz1/pyU1QanKYkzoZmtAcslel5rQXGvB7VGbCBCLiH65BBwaW0jJq0mJ
+d6+y9iJDbSiMa0TUCS8cY/LpDqGM/+PdM9/+bVIbbGmlmY+ENPCrYo01vKodIf4O
+CRybeX5dENhKh7eHgKo37Uu7LuR0UP1Vb7LVkGN2aBHDoanFa29y4tMwck/5UT+L
+BcTCTa31tpwZEubvFdLvZC/ICzN3t+0TFewCDeJR+ANyjQUgVCD6DMg=
+-----END CERTIFICATE-----`;
 
 let tcpServer: net.Server;
 let tcpPort = 0;
+let tlsServer: tls.Server;
+let tlsPort = 0;
 let udpServer: dgram.Socket;
 let udpPort = 0;
 const liveSockets = new Set<net.Socket>();
@@ -19,6 +72,19 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => tcpServer.listen(0, "127.0.0.1", r));
   tcpPort = (tcpServer.address() as AddressInfo).port;
+
+  const liveTlsSockets = new Set<tls.TLSSocket>();
+  tlsServer = tls.createServer({ key: TEST_KEY, cert: TEST_CERT }, (sock) => {
+    liveTlsSockets.add(sock);
+    sock.on("error", () => {});
+    sock.on("close", () => liveTlsSockets.delete(sock));
+    sock.end("tls-hello");
+  });
+  await new Promise<void>((r) => tlsServer.listen(0, "127.0.0.1", r));
+  tlsPort = (tlsServer.address() as AddressInfo).port;
+  // expose for afterAll cleanup
+  (tlsServer as unknown as Record<string, unknown>).__liveSockets =
+    liveTlsSockets;
 
   udpServer = dgram.createSocket("udp4");
   udpServer.on("message", (msg, rinfo) => {
@@ -35,8 +101,58 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const s of liveSockets) s.destroy();
+  const liveTlsSockets = (tlsServer as unknown as Record<string, unknown>)
+    .__liveSockets as Set<tls.TLSSocket> | undefined;
+  if (liveTlsSockets) for (const s of liveTlsSockets) s.destroy();
   await new Promise<void>((r) => tcpServer.close(() => r()));
+  await new Promise<void>((r) => tlsServer.close(() => r()));
   await new Promise<void>((r) => udpServer.close(() => r()));
+});
+
+describe("runTls", () => {
+  it("connects and reports TLS version, cipher, cert, and SNI in meta.tls", async () => {
+    const r = await runTls("127.0.0.1", tlsPort, "", "localhost", true, 5000);
+    expect(r.ok).toBe(true);
+    expect(r.bodyText).toContain("TLS connected to 127.0.0.1");
+    expect(r.timings?.tls).toBeGreaterThanOrEqual(0);
+
+    const t = r.meta?.tls as Record<string, unknown>;
+    expect(t).toBeTruthy();
+    expect(typeof t.version).toBe("string");
+    expect(typeof t.cipher).toBe("string");
+    expect(t.sni).toBe("localhost");
+
+    const cert = t.cert as Record<string, unknown>;
+    expect(cert).toBeTruthy();
+    expect(String(cert.subject)).toContain("localhost");
+    expect(String(cert.issuer)).toContain("localhost");
+    expect(typeof cert.validFrom).toBe("string");
+    expect(typeof cert.validTo).toBe("string");
+    expect(Array.isArray(cert.san)).toBe(true);
+    expect((cert.san as string[]).some((s) => s.includes("localhost"))).toBe(
+      true
+    );
+  });
+
+  it("reads server data when payload is provided", async () => {
+    const r = await runTls(
+      "127.0.0.1",
+      tlsPort,
+      "ping",
+      "localhost",
+      true,
+      5000
+    );
+    expect(r.ok).toBe(true);
+    expect(r.bodyText).toContain("tls-hello");
+    expect(r.meta?.tls).toBeTruthy();
+  });
+
+  it("fails on a closed port", async () => {
+    const r = await runTls("127.0.0.1", 1, "", "", true, 1000);
+    expect(r.ok).toBe(false);
+    expect(r.error?.message).toBeTruthy();
+  });
 });
 
 describe("runTcp", () => {
