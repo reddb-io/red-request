@@ -40,7 +40,10 @@ function dispatchProtocol(def: RequestDefinition): Promise<ResponseResult> {
         n.payload,
         n.waitResponse,
         n.timeoutMs,
-        n.payloadMode
+        n.payloadMode,
+        n.multicast
+          ? { ttl: n.multicastTtl, iface: n.multicastInterface || undefined }
+          : undefined
       );
     case "ping":
       return runPing(n.host, n.port, n.count, n.timeoutMs);

@@ -392,13 +392,21 @@ export async function runPing(
   };
 }
 
+/** Multicast send/join options for {@link runUdp}. `host` (the destination) is the group
+ *  address; `iface` is an optional local interface address (empty/undefined = OS default). */
+export interface MulticastOptions {
+  ttl: number;
+  iface?: string;
+}
+
 export function runUdp(
   host: string,
   port: number,
   payload: string,
   waitResponse: boolean,
   timeoutMs: number,
-  payloadMode?: "text" | "hex"
+  payloadMode?: "text" | "hex",
+  multicast?: MulticastOptions
 ): Promise<ResponseResult> {
   const t0 = performance.now();
   const payloadBuf = resolvePayload(payload, payloadMode);
@@ -406,7 +414,10 @@ export function runUdp(
     return Promise.resolve(fail(payloadBuf.message, 0));
   }
   return new Promise((resolve) => {
-    const sock = dgram.createSocket("udp4");
+    // Multicast needs reuseAddr so the group port can be shared with other members.
+    const sock = multicast
+      ? dgram.createSocket({ type: "udp4", reuseAddr: true })
+      : dgram.createSocket("udp4");
     let settled = false;
     const done = (res: ResponseResult) => {
       if (settled) return;
@@ -454,18 +465,42 @@ export function runUdp(
       if (timer) clearTimeout(timer);
       done(fail(errMsg(e), performance.now() - t0));
     });
-    sock.send(buf, port, host, (err) => {
-      if (err) {
-        if (timer) clearTimeout(timer);
-        done(fail(errMsg(err), performance.now() - t0));
-      } else if (!waitResponse) {
-        done(
-          ok(
-            `sent ${buf.length} bytes to ${host}:${port}`,
-            performance.now() - t0
-          )
-        );
-      }
-    });
+    const sendDatagram = () => {
+      sock.send(buf, port, host, (err) => {
+        if (err) {
+          if (timer) clearTimeout(timer);
+          done(fail(errMsg(err), performance.now() - t0));
+        } else if (!waitResponse) {
+          done(
+            ok(
+              `sent ${buf.length} bytes to ${host}:${port}`,
+              performance.now() - t0
+            )
+          );
+        }
+      });
+    };
+
+    if (multicast) {
+      // Bind an ephemeral local port and join the group, then send to host:port.
+      // Binding to an ephemeral port (not the group port) means our own loopback'd
+      // datagram isn't echoed back to us — we only collect genuine responses.
+      sock.bind(() => {
+        try {
+          if (multicast.iface) sock.addMembership(host, multicast.iface);
+          else sock.addMembership(host);
+          if (multicast.iface) sock.setMulticastInterface(multicast.iface);
+          sock.setMulticastTTL(multicast.ttl);
+          sock.setMulticastLoopback(true);
+        } catch (e) {
+          if (timer) clearTimeout(timer);
+          done(fail(errMsg(e), performance.now() - t0));
+          return;
+        }
+        sendDatagram();
+      });
+    } else {
+      sendDatagram();
+    }
   });
 }

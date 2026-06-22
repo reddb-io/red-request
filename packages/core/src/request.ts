@@ -91,6 +91,14 @@ export const netConfigSchema = z.object({
   /** How `payload` is interpreted for TCP/UDP/TLS: "text" = UTF-8, "hex" = exact bytes. */
   payloadMode: z.enum(["text", "hex"]).default("text"),
   waitResponse: z.boolean().default(true),
+  /** UDP multicast: when true the engine joins the multicast group at `host`,
+   *  sends to `host:port`, and collects responses. `host` is the group address
+   *  (e.g. 239.x.x.x / 224.x.x.x). When false, UDP stays plain unicast. */
+  multicast: z.boolean().default(false),
+  /** Multicast hop limit (TTL) for outgoing datagrams (kind === "udp", multicast). */
+  multicastTtl: z.number().int().min(0).max(255).default(1),
+  /** Local interface address to bind the multicast membership/egress to. Empty = OS default. */
+  multicastInterface: z.string().default(""),
   recordType: dnsRecordTypeSchema.default("A"),
   count: z.number().int().min(1).max(50).default(4),
   timeoutMs: z.number().int().min(100).max(60000).default(5000),
@@ -141,6 +149,9 @@ export const requestDefinitionSchema = z.object({
     payload: "",
     payloadMode: "text",
     waitResponse: true,
+    multicast: false,
+    multicastTtl: 1,
+    multicastInterface: "",
     recordType: "A",
     count: 4,
     timeoutMs: 5000,
