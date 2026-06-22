@@ -1265,6 +1265,35 @@ async fn oauth_authorize(
     })
 }
 
+/// Kill every child process we spawned — the recker engine sidecar, the embedded
+/// `red server`, and the long-lived `red connect` REPL. Idempotent (each `take()`
+/// leaves `None`, so a second call is a no-op), so it is safe to call from every
+/// shutdown path. Without this a closed/killed app leaves orphaned `red server`
+/// processes squatting on the single-writer `.rdb` lock, and the next launch's
+/// sidecar can't open the DB → respawn loop ("[reddb] sidecar terminated").
+fn reap_sidecars(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<EngineState>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+    }
+    if let Some(db) = app.try_state::<EmbeddedDb>() {
+        if let Ok(mut guard) = db.child.lock() {
+            if let Some(child) = guard.take() {
+                let _ = child.kill();
+            }
+        }
+        // Best-effort reap of the long-lived `red connect` REPL.
+        if let Ok(mut guard) = db.rql.try_lock() {
+            if let Some(sess) = guard.take() {
+                let _ = sess.child.kill();
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1274,6 +1303,13 @@ pub fn run() {
         .manage(EngineState::default())
         .manage(EmbeddedDb::default())
         .manage(OauthState::default())
+        .on_window_event(|window, event| {
+            // Closing the window (native title-bar close included) reaps our sidecars too,
+            // not just the process-exit path — so no orphaned `red server` is left behind.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                reap_sidecars(window.app_handle());
+            }
+        })
         .setup(|app| {
             // Deep links (rr:// branded scheme).
             let dl_handle = app.handle().clone();
@@ -1381,28 +1417,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // Reap the engine sidecar on exit.
-            if let tauri::RunEvent::Exit = event {
-                if let Some(state) = app_handle.try_state::<EngineState>() {
-                    if let Ok(mut guard) = state.child.lock() {
-                        if let Some(child) = guard.take() {
-                            let _ = child.kill();
-                        }
-                    }
-                }
-                if let Some(db) = app_handle.try_state::<EmbeddedDb>() {
-                    if let Ok(mut guard) = db.child.lock() {
-                        if let Some(child) = guard.take() {
-                            let _ = child.kill();
-                        }
-                    }
-                    // Best-effort reap of the long-lived `red connect` REPL.
-                    if let Ok(mut guard) = db.rql.try_lock() {
-                        if let Some(sess) = guard.take() {
-                            let _ = sess.child.kill();
-                        }
-                    }
-                }
+            // Reap our sidecars on every graceful shutdown path. ExitRequested fires when
+            // the last window closes (before teardown); Exit fires as the process ends.
+            // The helper is idempotent, so covering both never double-kills.
+            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+                reap_sidecars(&app_handle);
             }
         });
 }
