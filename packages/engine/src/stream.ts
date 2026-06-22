@@ -36,10 +36,14 @@ export function wsOpen(
   conns.set(id, state);
   ws.onopen = () => emit(id, "open", { url: resolved.url });
   ws.onmessage = (e: any) => {
-    const payload: Record<string, unknown> = {
-      dir: "in",
-      data: typeof e.data === "string" ? e.data : "[binary frame]",
-    };
+    const isText = typeof e.data === "string";
+    const payload: Record<string, unknown> = { dir: "in" };
+    if (isText) {
+      payload.data = e.data;
+    } else {
+      payload.data = Buffer.from(e.data).toString("base64");
+      payload.isBinary = true;
+    }
     // Pair with the last sent frame if there is one; unsolicited frames have no correlationId.
     if (state.lastFrameId !== null) payload.correlationId = state.lastFrameId;
     emit(id, "message", payload);
