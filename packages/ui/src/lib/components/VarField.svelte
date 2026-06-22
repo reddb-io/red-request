@@ -3,6 +3,7 @@
   // is known, red when not) via a backdrop layer behind a transparent input, and offers an
   // autocomplete dropdown of known variables while you type inside {{ … }}.
   import { tick } from "svelte";
+  import { suggestGraphQL, type GqlSchema, type GqlSuggestion } from "@red-request/core";
 
   type Props = {
     // optional so callers can bind an optional field (e.g. graphql variables); "" when unset.
@@ -22,6 +23,8 @@
     ariaLabel?: string;
     /** Code-editor mode (multiline only): line-number gutter + current-line highlight, no wrap. */
     lineNumbers?: boolean;
+    /** When provided, offer GraphQL field/argument autocomplete from this introspected schema. */
+    gqlSchema?: GqlSchema | null;
   };
   let {
     value = $bindable(""),
@@ -36,6 +39,7 @@
     flush = false,
     ariaLabel = "",
     lineNumbers = false,
+    gqlSchema = null,
   }: Props = $props();
 
   let el = $state<HTMLInputElement | HTMLTextAreaElement | undefined>();
@@ -69,6 +73,11 @@
   let menuItems = $state<string[]>([]);
   let menuIndex = $state(0);
   let tokenStart = $state(-1);
+  // "var" inserts {{name}} for a {{ … }} token; "gql" replaces the partial identifier under the
+  // cursor with a schema-sourced GraphQL field/argument name.
+  let menuMode = $state<"var" | "gql">("var");
+  let gqlItems = $state<GqlSuggestion[]>([]);
+  let wordStart = $state(-1);
 
   const knownSet = $derived(new Set(known));
   const pathSet = $derived(new Set(pathNames ?? []));
@@ -155,28 +164,48 @@
     const caret = el.selectionStart ?? (value ?? "").length;
     const before = (value ?? "").slice(0, caret);
     const open = before.lastIndexOf("{{");
-    if (open === -1 || before.indexOf("}}", open) !== -1) {
-      showMenu = false;
+    if (open !== -1 && before.indexOf("}}", open) === -1) {
+      // Inside a {{ … }} token: suggest known variables (takes priority over schema fields).
+      const q = before
+        .slice(open + 2)
+        .trim()
+        .toLowerCase();
+      menuMode = "var";
+      tokenStart = open;
+      menuItems = known.filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
+      menuIndex = 0;
+      showMenu = menuItems.length > 0;
       return;
     }
-    const q = before
-      .slice(open + 2)
-      .trim()
-      .toLowerCase();
-    tokenStart = open;
-    menuItems = known.filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
-    menuIndex = 0;
-    showMenu = menuItems.length > 0;
+    if (gqlSchema) {
+      // Schema-driven GraphQL field/argument autocomplete on the partial identifier.
+      const suggestions = suggestGraphQL(gqlSchema, value ?? "", caret).slice(0, 8);
+      const word = /([A-Za-z_]\w*)$/.exec(before)?.[1] ?? "";
+      menuMode = "gql";
+      wordStart = caret - word.length;
+      gqlItems = suggestions;
+      menuItems = suggestions.map((s) => s.label);
+      menuIndex = 0;
+      showMenu = menuItems.length > 0;
+      return;
+    }
+    showMenu = false;
   }
 
   async function accept(name: string) {
     if (!el) return;
     const caret = el.selectionStart ?? (value ?? "").length;
-    const rest = (value ?? "").slice(caret);
-    const tail = rest.startsWith("}}") ? rest.slice(2) : rest;
-    value = (value ?? "").slice(0, tokenStart) + "{{" + name + "}}" + tail;
+    let pos: number;
+    if (menuMode === "gql") {
+      value = (value ?? "").slice(0, wordStart) + name + (value ?? "").slice(caret);
+      pos = wordStart + name.length;
+    } else {
+      const rest = (value ?? "").slice(caret);
+      const tail = rest.startsWith("}}") ? rest.slice(2) : rest;
+      value = (value ?? "").slice(0, tokenStart) + "{{" + name + "}}" + tail;
+      pos = tokenStart + 2 + name.length + 2;
+    }
     showMenu = false;
-    const pos = tokenStart + 2 + name.length + 2;
     await tick();
     el.setSelectionRange(pos, pos);
     el.focus();
@@ -298,8 +327,16 @@
               ? 'bg-[var(--color-bg-2)] text-fg-strong'
               : 'text-fg-muted'} hover:bg-[var(--color-bg-2)]"
           >
-            <span class="text-xs text-emerald-400">⬩</span>
+            <span class="text-xs {menuMode === 'gql' && gqlItems[i]?.kind === 'argument'
+              ? 'text-sky-400'
+              : 'text-emerald-400'}">{menuMode === "gql" && gqlItems[i]?.kind === "argument"
+                ? "›"
+                : "⬩"}</span>
             <span class="truncate">{item}</span>
+            {#if menuMode === "gql" && gqlItems[i]?.type}
+              <span class="ml-auto truncate text-xs text-[var(--color-brand)]">{gqlItems[i]!
+                  .type}</span>
+            {/if}
           </button>
         </li>
       {/each}

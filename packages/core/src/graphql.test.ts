@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSchema, INTROSPECTION_QUERY } from "./graphql.js";
+import { parseSchema, suggestGraphQL, INTROSPECTION_QUERY } from "./graphql.js";
 
 // A trimmed-down `__schema` payload shaped like a real introspection response.
 const introspection = {
@@ -111,5 +111,62 @@ describe("parseSchema", () => {
       types: [],
     });
     expect(parseSchema({}).types).toEqual([]);
+  });
+});
+
+describe("suggestGraphQL", () => {
+  const schema = parseSchema(introspection);
+  const labels = (text: string, caret = text.length) =>
+    suggestGraphQL(schema, text, caret).map((s) => s.label);
+
+  it("degrades to no suggestions without a schema", () => {
+    expect(suggestGraphQL(null, "query { ", 8)).toEqual([]);
+    expect(suggestGraphQL(undefined, "query { ", 8)).toEqual([]);
+    expect(suggestGraphQL(parseSchema({}), "query { ", 8)).toEqual([]);
+  });
+
+  it("offers root query fields inside the top-level selection set", () => {
+    expect(labels("query { ")).toEqual(["user"]);
+    expect(labels("{ ")).toEqual(["user"]);
+  });
+
+  it("filters fields by the partial word at the cursor", () => {
+    expect(labels("query { us")).toEqual(["user"]);
+    expect(labels("query { zzz")).toEqual([]);
+  });
+
+  it("follows the operation keyword to the matching root type", () => {
+    expect(labels("mutation { ")).toEqual(["createUser"]);
+    expect(labels("subscription { ")).toEqual(["userAdded"]);
+  });
+
+  it("descends into a field's type for nested selection sets", () => {
+    expect(labels("query { user { ").sort()).toEqual(["id", "tags"]);
+    expect(labels("query { user { i")).toEqual(["id"]);
+  });
+
+  it("pops back to the outer type when a selection set closes", () => {
+    expect(labels("query { user { id } ")).toEqual(["user"]);
+  });
+
+  it("suggests argument names inside a field's argument list", () => {
+    expect(labels("mutation { createUser(").sort()).toEqual(["email", "name"]);
+    expect(labels("mutation { createUser(na")).toEqual(["name"]);
+    expect(labels("query { user(i")).toEqual(["id"]);
+  });
+
+  it("carries the field type and description into field suggestions", () => {
+    const [user] = suggestGraphQL(schema, "query { ", 8);
+    expect(user).toMatchObject({
+      label: "user",
+      kind: "field",
+      type: "User!",
+      desc: "Fetch a user by id",
+    });
+  });
+
+  it("returns nothing outside any selection set", () => {
+    expect(suggestGraphQL(schema, "query ", 6)).toEqual([]);
+    expect(suggestGraphQL(schema, "", 0)).toEqual([]);
   });
 });
