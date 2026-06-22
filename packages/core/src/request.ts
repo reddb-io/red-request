@@ -88,6 +88,8 @@ export const netConfigSchema = z.object({
   host: z.string().default(""),
   port: z.number().int().min(0).max(65535).default(0),
   payload: z.string().default(""),
+  /** How `payload` is interpreted for TCP/UDP/TLS: "text" = UTF-8, "hex" = exact bytes. */
+  payloadMode: z.enum(["text", "hex"]).default("text"),
   waitResponse: z.boolean().default(true),
   recordType: dnsRecordTypeSchema.default("A"),
   count: z.number().int().min(1).max(50).default(4),
@@ -137,6 +139,7 @@ export const requestDefinitionSchema = z.object({
     host: "",
     port: 0,
     payload: "",
+    payloadMode: "text",
     waitResponse: true,
     recordType: "A",
     count: 4,
