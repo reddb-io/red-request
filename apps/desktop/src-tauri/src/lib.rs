@@ -803,12 +803,62 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
     }
 }
 
+/// Enforce single-writer on a `.rdb`: kill any `red server` already bound to this
+/// exact db file before we spawn ours. Such a process is either a crash orphan (we
+/// can't reap on SIGKILL) or a second app instance on the same store — two writers
+/// on one .rdb corrupt the B-tree, so the newest launch wins. Linux-only (scans
+/// /proc); a no-op elsewhere.
+#[cfg(target_os = "linux")]
+fn kill_stale_reddb(db_path: &std::path::Path) {
+    let me = std::process::id();
+    let want = db_path.to_string_lossy();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == me {
+            continue;
+        }
+        // /proc/<pid>/cmdline is NUL-separated argv.
+        let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+            continue;
+        };
+        let args: Vec<String> = raw
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect();
+        let is_red_server = args
+            .first()
+            .is_some_and(|a| a.rsplit('/').next().unwrap_or(a) == "red")
+            && args.iter().any(|a| a == "server");
+        let on_this_db = args.windows(2).any(|w| w[0] == "--path" && w[1] == *want);
+        if is_red_server && on_this_db {
+            log::warn!(
+                target: "reddb",
+                "single-writer guard: killing stale red server pid {pid} on {want}"
+            );
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn kill_stale_reddb(_db_path: &std::path::Path) {}
+
 /// Spawn one reddb sidecar for `db_path` and wait until it answers /stats.
 /// On readiness failure the child is killed (so a failed start can't orphan a process).
 async fn spawn_reddb_once(
     app: &tauri::AppHandle,
     db_path: &std::path::Path,
 ) -> Result<(String, String, CommandChild), String> {
+    // Single-writer guard: clear any stale/concurrent server on this exact db first.
+    kill_stale_reddb(db_path);
     let free_port = || {
         std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
@@ -1442,6 +1492,19 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Reap sidecars on SIGTERM/SIGINT/SIGHUP (kill, Ctrl-C, terminal/session
+            // close). Tauri only reaps on a graceful window close + RunEvent::Exit, so
+            // a signalled exit would otherwise orphan `red server` on the .rdb. ctrlc
+            // runs this on its own thread, so normal Rust (locks, kill) is safe here.
+            let sig_handle = app.handle().clone();
+            if let Err(e) = ctrlc::set_handler(move || {
+                log::warn!(target: "app", "termination signal — reaping sidecars and exiting");
+                reap_sidecars(&sig_handle);
+                std::process::exit(0);
+            }) {
+                log::warn!(target: "app", "could not install signal handler: {e}");
+            }
+
             // Deep links (rr:// branded scheme).
             let dl_handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {

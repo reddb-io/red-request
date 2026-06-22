@@ -23,6 +23,10 @@ tauri-plugin-dialog = "2"
 # this crate; the plugin also lets the webview funnel JS logs into the same sink.
 tauri-plugin-log = "2"
 log = "0.4"
+# Reap the reddb/engine sidecars on SIGTERM/SIGINT/SIGHUP (kill, logout, Ctrl-C).
+# Tauri only reaps on a graceful window close, so without this a signalled exit
+# orphans `red server` holding the .rdb's single-writer lock.
+ctrlc = { version = "3", features = ["termination"] }
 # reddb CRUD is routed through Rust (reqwest) rather than webview fetch — avoids the
 # WebKit mixed-content block AND gives us full control over the request framing
 # (Content-Length, not chunked, which reddb 0.1.5 needs).
