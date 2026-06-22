@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
   import type { ResponseResult } from "@red-request/core";
+  import { detectBodyMode } from "@red-request/core";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import JsonTree from "./JsonTree.svelte";
@@ -118,14 +119,21 @@
   const isImage = $derived(ct.startsWith("image/") && !!r?.bodyBase64);
   const imageSrc = $derived(isImage ? `data:${ct};base64,${r!.bodyBase64}` : "");
 
-  // text/hex toggle for the active response body. Binary payloads (non-text bytes surfaced
-  // by the engine as bodyBase64, e.g. a binary UDP reply) default to hex; text bodies can
-  // still be flipped to hex on demand. `view` resets to the per-response default via $derived.
-  const hasBinary = $derived(!!r?.bodyBase64 && !isImage);
-  let viewOverride = $state<"text" | "hex" | null>(null);
-  const bodyView = $derived<"text" | "hex">(
-    viewOverride ?? (hasBinary ? "hex" : "text")
+  // text/hex toggle for the active response body. detectBodyMode() decides the default:
+  // binary payloads open in hex, text/JSON payloads open in text view. The user can still
+  // flip the toggle manually via viewOverride. `viewOverride` resets on each new response
+  // (see $effect below) so each response falls back to its own auto-detected default.
+  const autoMode = $derived(
+    r
+      ? detectBodyMode({
+          contentType: r.contentType,
+          bodyBase64: r.bodyBase64,
+          bodyText: r.bodyText,
+        })
+      : "text"
   );
+  let viewOverride = $state<"text" | "hex" | null>(null);
+  const bodyView = $derived<"text" | "hex">(viewOverride ?? (autoMode === "binary" ? "hex" : "text"));
   // Bytes for the hex view: prefer the raw binary payload, else the UTF-8 of the text body.
   const hexBytes = $derived(
     r?.bodyBase64 ? undefined : new TextEncoder().encode(r?.bodyText ?? "")
