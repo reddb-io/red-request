@@ -97,6 +97,9 @@ class Workspace {
   activeColId = $state<string | null>(null);
   activeReq = $state<RequestDefinition | null>(null);
   activeEnvName = $state<string | null>(null);
+  /** Introspected GraphQL schemas, keyed by request URL, so query autocomplete reflects
+   *  the active endpoint's schema rather than a static list. Populated by introspectGraphQL. */
+  gqlSchemas = $state<Record<string, GqlSchema>>({});
   /** Top-level navigation: icon-bar selects one. Home bundles dashboard + proxy/profile
    *  management; Requests is the workspace (collections + active request); Settings holds
    *  project-level config. The Sidebar's old segmented [requests|dashboard] is gone. */
@@ -196,6 +199,14 @@ class Workspace {
     return [...Object.keys(this.varInfo), ...Object.keys(DYNAMIC_VARS)].sort(
       (a, b) => a.localeCompare(b)
     );
+  }
+
+  /** The introspected schema for the active request's endpoint, or null before introspection
+   *  (autocomplete degrades gracefully to nothing). Keyed by URL so switching requests/endpoints
+   *  switches the schema in scope. */
+  get activeGqlSchema(): GqlSchema | null {
+    const url = this.activeReq?.url;
+    return (url && this.gqlSchemas[url]) || null;
   }
 
   /** name → hover-tooltip text (value for vars; masked for secrets — never the plaintext). */
@@ -1116,7 +1127,10 @@ class Workspace {
     if (json.errors?.length) throw new Error(json.errors[0]!.message);
     if (!json.data?.__schema)
       throw new Error("no __schema in the response (introspection disabled?)");
-    return parseSchema(json.data.__schema);
+    const schema = parseSchema(json.data.__schema);
+    // Cache against the endpoint so the query editor can autocomplete from it.
+    if (req.url) this.gqlSchemas[req.url] = schema;
+    return schema;
   }
 
   // --- collection structure (requests + folders) --------------------------
