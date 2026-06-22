@@ -62,6 +62,7 @@ export const requestKindSchema = z.enum([
   "sse",
   "grpc",
   "tcp",
+  "tls",
   "udp",
   "ping",
   "whois",
@@ -91,6 +92,8 @@ export const netConfigSchema = z.object({
   recordType: dnsRecordTypeSchema.default("A"),
   count: z.number().int().min(1).max(50).default(4),
   timeoutMs: z.number().int().min(100).max(60000).default(5000),
+  /** SNI hostname sent in the TLS ClientHello (kind === "tls"). Defaults to host when empty. */
+  sni: z.string().default(""),
 });
 export type NetConfig = z.infer<typeof netConfigSchema>;
 
@@ -138,6 +141,7 @@ export const requestDefinitionSchema = z.object({
     recordType: "A",
     count: 4,
     timeoutMs: 5000,
+    sni: "",
   }),
   headers: z.array(kvSchema).default([]),
   query: z.array(kvSchema).default([]),

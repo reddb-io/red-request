@@ -3,6 +3,7 @@
 // returns a ResponseResult so history/dashboard/runner/scripts work uniformly.
 import net from "node:net";
 import dgram from "node:dgram";
+import tls from "node:tls";
 import { createClient } from "recker/client";
 import { createDNS } from "recker/dns";
 import type { ResponseResult } from "@red-request/core";
@@ -160,6 +161,121 @@ export function runTcp(
         Math.min(1000, timeoutMs)
       );
     });
+    sock.on("data", (d) => chunks.push(d));
+    // `on` (persistent) so a late error after finish can't go uncaught.
+    sock.on("error", (e) => finish(fail(errMsg(e), performance.now() - t0)));
+  });
+}
+
+function formatDN(dn: Record<string, string> | undefined): string {
+  if (!dn) return "";
+  return Object.entries(dn)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(", ");
+}
+
+export function runTls(
+  host: string,
+  port: number,
+  payload: string,
+  sni: string,
+  insecure: boolean,
+  timeoutMs: number
+): Promise<ResponseResult> {
+  const t0 = performance.now();
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let connectMs = 0;
+    let settled = false;
+    const servername = sni || host;
+    // IP addresses cannot be used as TLS servername (RFC 6066 §3); omit when host is a raw IP.
+    const isIp = /^[\d.:]+$/.test(servername);
+
+    const sock = tls.connect({
+      host,
+      port,
+      ...(isIp ? {} : { servername }),
+      rejectUnauthorized: !insecure,
+    });
+
+    const finish = (res: ResponseResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      sock.destroy();
+      resolve(res);
+    };
+
+    const timer = setTimeout(
+      () =>
+        finish(fail(`timeout after ${timeoutMs}ms`, performance.now() - t0)),
+      timeoutMs
+    );
+
+    sock.once("secureConnect", () => {
+      connectMs = performance.now() - t0;
+
+      const cipher = sock.getCipher();
+      const cert = sock.getPeerCertificate();
+      const protocol = sock.getProtocol();
+
+      const san: string[] = cert?.subjectaltname
+        ? cert.subjectaltname
+            .split(",")
+            .map((s) => s.trim().replace(/^(?:DNS:|IP Address:)/, ""))
+        : [];
+
+      const tlsMeta = {
+        version: protocol ?? null,
+        cipher: cipher?.name ?? null,
+        sni: isIp ? null : servername,
+        cert:
+          cert && Object.keys(cert).length > 0
+            ? {
+                subject: formatDN(
+                  cert.subject as unknown as Record<string, string>
+                ),
+                issuer: formatDN(
+                  cert.issuer as unknown as Record<string, string>
+                ),
+                validFrom: cert.valid_from ?? null,
+                validTo: cert.valid_to ?? null,
+                san,
+              }
+            : null,
+      };
+
+      if (!payload) {
+        finish(
+          ok(`TLS connected to ${host}:${port}`, connectMs, {
+            timings: { tls: connectMs, total: connectMs },
+            meta: { tls: tlsMeta },
+          })
+        );
+        return;
+      }
+
+      sock.write(payload);
+      setTimeout(
+        () => {
+          const recv = Buffer.concat(chunks).toString("utf8");
+          const total = performance.now() - t0;
+          finish(
+            ok(
+              `TLS connected to ${host}:${port}\n` +
+                (recv ? `\n${recv}` : "(no data received)"),
+              total,
+              {
+                timings: { tls: connectMs, total },
+                meta: { tls: tlsMeta },
+              }
+            )
+          );
+        },
+        Math.min(1000, timeoutMs)
+      );
+    });
+
     sock.on("data", (d) => chunks.push(d));
     // `on` (persistent) so a late error after finish can't go uncaught.
     sock.on("error", (e) => finish(fail(errMsg(e), performance.now() - t0)));

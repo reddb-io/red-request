@@ -35,14 +35,14 @@
     </div>
   </label>
 
-  {#if kind === "tcp" || kind === "udp" || kind === "ping"}
+  {#if kind === "tcp" || kind === "udp" || kind === "ping" || kind === "tls"}
     <label class="flex items-center gap-2 text-sm">
       <span class="w-24 text-fg-muted">port</span>
       <Input type="number" min="0" max="65535" bind:value={net.port} class="h-7 w-28" />
     </label>
   {/if}
 
-  {#if kind === "tcp" || kind === "udp"}
+  {#if kind === "tcp" || kind === "udp" || kind === "tls"}
     <label class="flex items-start gap-2 text-sm">
       <span class="w-24 pt-1 text-fg-muted">payload</span>
       <div class="flex-1">
@@ -54,6 +54,22 @@
           rows={3}
           ariaLabel="payload"
           placeholder="bytes to send (optional)"
+        />
+      </div>
+    </label>
+  {/if}
+
+  {#if kind === "tls"}
+    <label class="flex items-center gap-2 text-sm">
+      <span class="w-24 text-fg-muted">SNI</span>
+      <div class="flex-1">
+        <VarField
+          bind:value={net.sni}
+          known={ws.knownVars}
+          values={ws.varTitles}
+          dense
+          ariaLabel="SNI hostname"
+          placeholder="hostname (defaults to host)"
         />
       </div>
     </label>

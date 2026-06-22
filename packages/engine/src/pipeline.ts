@@ -8,7 +8,7 @@ import {
 } from "@red-request/core";
 import { dispatch } from "./recker.js";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
-import { runWhois, runDns, runTcp, runUdp, runPing } from "./protocols.js";
+import { runWhois, runDns, runTcp, runTls, runUdp, runPing } from "./protocols.js";
 
 /** Dispatch a non-HTTP kind to its protocol handler. */
 function dispatchProtocol(def: RequestDefinition): Promise<ResponseResult> {
@@ -16,6 +16,8 @@ function dispatchProtocol(def: RequestDefinition): Promise<ResponseResult> {
   switch (def.kind) {
     case "tcp":
       return runTcp(n.host, n.port, n.payload, n.timeoutMs);
+    case "tls":
+      return runTls(n.host, n.port, n.payload, n.sni, def.insecure, n.timeoutMs);
     case "udp":
       return runUdp(n.host, n.port, n.payload, n.waitResponse, n.timeoutMs);
     case "ping":
