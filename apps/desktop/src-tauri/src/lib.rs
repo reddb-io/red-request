@@ -1,8 +1,8 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -683,7 +683,12 @@ async fn reddb_version(app: tauri::AppHandle) -> Result<String, String> {
     }
     .map_err(|e| format!("failed to run red --version: {e}"))?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let ver = text.trim().split_whitespace().last().unwrap_or("").to_string();
+    let ver = text
+        .trim()
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .to_string();
     if ver.is_empty() {
         Err("could not parse reddb version".to_string())
     } else {
