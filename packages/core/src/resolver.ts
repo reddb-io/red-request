@@ -269,6 +269,97 @@ const randString = (len: number, alphabet: string): string => {
 const isLen = (a: FnArg | undefined): a is number =>
   typeof a === "number" && Number.isInteger(a) && a >= 0;
 
+// ---------------------------------------------------------------------------
+// datetime.* offsets — a relative offset token of the form `[+-]N[smhdwMy]`
+// (seconds, minutes, hours, days, weeks, months, years) applied to a base date.
+// Offsets arrive as single-quoted string literals via the argument grammar.
+// Parsing is total: a malformed token yields `undefined` (the caller leaves the
+// token unresolved) and never throws.
+// ---------------------------------------------------------------------------
+
+const OFFSET = /^([+-])(\d+)([smhdwMy])$/;
+const UNIT_MS: Record<string, number> = {
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+
+/**
+ * Apply a relative offset token to `base`, returning a new Date, or `undefined`
+ * for a malformed token. Months (`M`) and years (`y`) shift the calendar fields
+ * so e.g. `+1M` lands on the same day-of-month next month; the sub-month units
+ * use exact millisecond arithmetic.
+ */
+export function applyOffset(base: Date, token: string): Date | undefined {
+  const m = OFFSET.exec(token);
+  if (!m) return undefined;
+  const n = (m[1] === "-" ? -1 : 1) * Number(m[2]);
+  const unit = m[3]!;
+  if (unit === "M") {
+    const d = new Date(base.getTime());
+    d.setUTCMonth(d.getUTCMonth() + n);
+    return d;
+  }
+  if (unit === "y") {
+    const d = new Date(base.getTime());
+    d.setUTCFullYear(d.getUTCFullYear() + n);
+    return d;
+  }
+  return new Date(base.getTime() + n * UNIT_MS[unit]!);
+}
+
+const pad = (n: number, len = 2): string => String(n).padStart(len, "0");
+
+/** Format a date (UTC) using a small token vocabulary for `datetime.now`. */
+function formatDate(d: Date, fmt: string): string {
+  return fmt.replace(/YYYY|MM|DD|HH|mm|ss|SSS/g, (tok) => {
+    switch (tok) {
+      case "YYYY":
+        return pad(d.getUTCFullYear(), 4);
+      case "MM":
+        return pad(d.getUTCMonth() + 1);
+      case "DD":
+        return pad(d.getUTCDate());
+      case "HH":
+        return pad(d.getUTCHours());
+      case "mm":
+        return pad(d.getUTCMinutes());
+      case "ss":
+        return pad(d.getUTCSeconds());
+      case "SSS":
+        return pad(d.getUTCMilliseconds(), 3);
+      default:
+        return tok;
+    }
+  });
+}
+
+/**
+ * Resolve a base "now" date, optionally shifted by a single offset argument.
+ * Returns `undefined` when an offset is supplied but malformed or non-string.
+ */
+function nowWithOffset(offsetArg: FnArg | undefined): Date | undefined {
+  const base = new Date();
+  if (offsetArg === undefined) return base;
+  if (typeof offsetArg !== "string") return undefined;
+  return applyOffset(base, offsetArg);
+}
+
+/** Build a `datetime.*` entry that emits `now` (optionally offset) via `fmt`. */
+const datetimeFn = (
+  fmt: (d: Date) => string,
+  desc: string
+): { apply: (args: FnArg[]) => string | undefined; desc: string } => ({
+  desc,
+  apply: (args) => {
+    if (args.length > 1) return undefined;
+    const d = nowWithOffset(args[0]);
+    return d ? fmt(d) : undefined;
+  },
+});
+
 /**
  * namespace.name → (apply, human description) for parameterized functions. Each
  * `apply` validates arity/types itself and returns `undefined` on any malformed
@@ -321,6 +412,38 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
       return String(pick(args));
     },
   },
+  "datetime.iso8601": datetimeFn(
+    (d) => d.toISOString(),
+    "current time, ISO-8601 / RFC-3339 (offset?)"
+  ),
+  "datetime.unix": datetimeFn(
+    (d) => String(Math.floor(d.getTime() / 1000)),
+    "current unix time in seconds (offset?)"
+  ),
+  "datetime.unixMs": datetimeFn(
+    (d) => String(d.getTime()),
+    "current unix time in milliseconds (offset?)"
+  ),
+  "datetime.date": datetimeFn(
+    (d) => d.toISOString().slice(0, 10),
+    "current date, YYYY-MM-DD (offset?)"
+  ),
+  "datetime.time": datetimeFn(
+    (d) => d.toISOString().slice(11, 19),
+    "current time, HH:MM:SS (offset?)"
+  ),
+  "datetime.now": {
+    desc: "current time in a custom format (format?, offset?)",
+    apply: (args) => {
+      if (args.length > 2) return undefined;
+      const [fmt, offset] = args;
+      if (fmt !== undefined && typeof fmt !== "string") return undefined;
+      if (offset !== undefined && typeof offset !== "string") return undefined;
+      const d = nowWithOffset(offset);
+      if (!d) return undefined;
+      return fmt === undefined ? d.toISOString() : formatDate(d, fmt);
+    },
+  },
 };
 
 /**
@@ -334,8 +457,13 @@ export function resolveFunctionCall(
 ): string | undefined {
   const parsed = parseArgs(source);
   if (!parsed.ok) return undefined;
-  // No arguments → the zero-arg catalog; otherwise the parameterized catalog.
-  if (parsed.args.length === 0) return TEMPLATE_FUNCTIONS[name]?.gen();
+  // With no arguments, prefer the zero-arg catalog; functions whose arguments
+  // are all optional (e.g. `datetime.*`) live only in the parameterized catalog,
+  // so fall through to it with an empty argument list.
+  if (parsed.args.length === 0) {
+    const zero = TEMPLATE_FUNCTIONS[name];
+    if (zero) return zero.gen();
+  }
   return TEMPLATE_FUNCTIONS_WITH_ARGS[name]?.apply(parsed.args);
 }
 
