@@ -193,7 +193,7 @@ install_linux() {
   say "${cur:+upgrading $cur → }${cur:-installing }$tag ($OS/$ARCH)"
   url="$(asset_url "$tag" "$asset")"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
-  trap 'rm -rf "$tmp"' RETURN
+  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
 
   say "downloading $asset"
   download "$url" "$tmp/$asset" || err "download failed — is $asset published in $tag? ($url)"

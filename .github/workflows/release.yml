@@ -40,7 +40,7 @@ jobs:
               os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
-              args: "--bundles deb,appimage --verbose",
+              args: "--bundles deb,appimage",
             }
           - {
               os: blacksmith-6vcpu-macos-15,
@@ -189,7 +189,7 @@ jobs:
             macOS)
               stage "$BR/dmg/*.dmg"           "red-request-darwin-aarch64.dmg" ;;
             Windows)
-              stage "$BR"/nsis/*-setup.exe    "red-request-windows-x86_64-setup.exe" ;;
+              stage "$BR/nsis/*-setup.exe"    "red-request-windows-x86_64-setup.exe" ;;
           esac
           ls -la "$OUT"
 
