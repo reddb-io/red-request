@@ -8,6 +8,7 @@
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import { Input } from "./ui/input/index.js";
+  import { Textarea } from "./ui/textarea/index.js";
 
   let {
     kind,
@@ -17,6 +18,19 @@
   const recordTypes = dnsRecordTypeSchema.options;
   const hostLabel = $derived(
     kind === "whois" ? "domain" : kind === "dns" ? "name" : "host"
+  );
+
+  const isHexMode = $derived(net.payloadMode === "hex");
+
+  function isValidHex(s: string): boolean {
+    const clean = s.replace(/\s+/g, "");
+    return clean.length === 0 || (/^[0-9a-fA-F]+$/.test(clean) && clean.length % 2 === 0);
+  }
+
+  const hexError = $derived(
+    isHexMode && net.payload && !isValidHex(net.payload)
+      ? "invalid hex: must be an even number of hex digits (0-9 a-f)"
+      : null
   );
 </script>
 
@@ -43,18 +57,46 @@
   {/if}
 
   {#if kind === "tcp" || kind === "udp" || kind === "tls"}
+    <div class="flex items-center gap-2 text-sm">
+      <span class="w-24 text-fg-muted">payload</span>
+      <div class="flex overflow-hidden rounded border border-border text-xs">
+        <button
+          type="button"
+          onclick={() => (net.payloadMode = "text")}
+          class="px-2 py-0.5 {net.payloadMode !== 'hex' ? 'bg-[var(--color-brand)] text-white' : 'text-fg-muted hover:text-fg'}"
+        >text</button>
+        <button
+          type="button"
+          onclick={() => (net.payloadMode = "hex")}
+          class="px-2 py-0.5 {net.payloadMode === 'hex' ? 'bg-[var(--color-brand)] text-white' : 'text-fg-muted hover:text-fg'}"
+        >hex</button>
+      </div>
+    </div>
     <label class="flex items-start gap-2 text-sm">
-      <span class="w-24 pt-1 text-fg-muted">payload</span>
+      <span class="w-24 pt-1 text-fg-muted"></span>
       <div class="flex-1">
-        <VarField
-          bind:value={net.payload}
-          known={ws.knownVars}
-        values={ws.varTitles}
-          multiline
-          rows={3}
-          ariaLabel="payload"
-          placeholder="bytes to send (optional)"
-        />
+        {#if isHexMode}
+          <Textarea
+            bind:value={net.payload}
+            rows={3}
+            class="mono text-xs {hexError ? 'border-red-500' : ''}"
+            aria-label="payload (hex)"
+            placeholder="de ad be ef  (hex pairs, spaces optional)"
+          />
+          {#if hexError}
+            <p class="mt-1 text-xs text-red-400">{hexError}</p>
+          {/if}
+        {:else}
+          <VarField
+            bind:value={net.payload}
+            known={ws.knownVars}
+            values={ws.varTitles}
+            multiline
+            rows={3}
+            ariaLabel="payload"
+            placeholder="bytes to send (optional)"
+          />
+        {/if}
       </div>
     </label>
   {/if}
