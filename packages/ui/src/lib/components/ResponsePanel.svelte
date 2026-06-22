@@ -4,6 +4,7 @@
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import JsonTree from "./JsonTree.svelte";
+  import HexViewer from "./HexViewer.svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
@@ -115,6 +116,25 @@
   const isHtml = $derived(ct.includes("html"));
   const isImage = $derived(ct.startsWith("image/") && !!r?.bodyBase64);
   const imageSrc = $derived(isImage ? `data:${ct};base64,${r!.bodyBase64}` : "");
+
+  // text/hex toggle for the active response body. Binary payloads (non-text bytes surfaced
+  // by the engine as bodyBase64, e.g. a binary UDP reply) default to hex; text bodies can
+  // still be flipped to hex on demand. `view` resets to the per-response default via $derived.
+  const hasBinary = $derived(!!r?.bodyBase64 && !isImage);
+  let viewOverride = $state<"text" | "hex" | null>(null);
+  const bodyView = $derived<"text" | "hex">(
+    viewOverride ?? (hasBinary ? "hex" : "text")
+  );
+  // Bytes for the hex view: prefer the raw binary payload, else the UTF-8 of the text body.
+  const hexBytes = $derived(
+    r?.bodyBase64 ? undefined : new TextEncoder().encode(r?.bodyText ?? "")
+  );
+  // Drop a manual text/hex choice when the active response changes, so each response falls
+  // back to its own default (hex for binary, text otherwise).
+  $effect(() => {
+    void r;
+    viewOverride = null;
+  });
 
   // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
   // next request can use {{name}} — chaining without writing a post-response script.
@@ -331,7 +351,17 @@
             {/each}
           </div>
         {/if}
-        {#if isHtml}
+        {#if (r.bodyText || r.bodyBase64) && !isImage}
+          <div class="mb-2 flex gap-1">
+            <button class="seg" class:is-active={bodyView === "text"} onclick={() => (viewOverride = "text")}
+              >text</button
+            >
+            <button class="seg" class:is-active={bodyView === "hex"} onclick={() => (viewOverride = "hex")}
+              >hex</button
+            >
+          </div>
+        {/if}
+        {#if isHtml && bodyView === "text"}
           <div class="mb-2 flex gap-1">
             <button class="seg" class:is-active={preview} onclick={() => (preview = true)}
               >preview</button
@@ -341,7 +371,9 @@
             >
           </div>
         {/if}
-        {#if isImage}
+        {#if bodyView === "hex" && !isImage}
+          <HexViewer bytes={hexBytes} base64={r.bodyBase64} />
+        {:else if isImage}
           <div class="grid place-items-center p-4">
             <img
               src={imageSrc}
