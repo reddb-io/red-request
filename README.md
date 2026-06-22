@@ -23,10 +23,11 @@ Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</cod
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 ```
 
-On Linux this fetches the single-file **AppImage**, verifies its `sha256` against the release
-`checksums.txt`, and puts `red-request` (plus an `rr` shortcut) on your PATH at `~/.local/bin`
-— no apt, no sudo, no dependencies to resolve. Re-running upgrades in place and no-ops when
-you're already current. To remove it (binary + `rr` link + PATH line):
+On Linux this installs the **`.deb`** (verifying its `sha256` against the release
+`checksums.txt` first) — it links the system's WebKitGTK/glibc so the app and its bundled
+sidecars start reliably. Needs apt/sudo; re-run any time to upgrade. Prefer the portable
+single-file build? Add `--appimage` to drop a no-sudo AppImage on your PATH at `~/.local/bin`
+(note: an AppImage built on an older glibc can be unstable on newer hosts). To remove either:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash
