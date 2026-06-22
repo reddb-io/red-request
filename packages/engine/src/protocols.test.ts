@@ -3,7 +3,14 @@ import net from "node:net";
 import tls from "node:tls";
 import dgram from "node:dgram";
 import type { AddressInfo } from "node:net";
-import { runTcp, runTls, runUdp, runPing, runDns } from "./protocols.js";
+import {
+  runTcp,
+  runTls,
+  runUdp,
+  runPing,
+  runDns,
+  parseHexPayload,
+} from "./protocols.js";
 
 // Self-signed certificate for loopback TLS tests (CN=localhost, SAN=DNS:localhost,IP:127.0.0.1).
 const TEST_KEY = `-----BEGIN PRIVATE KEY-----
@@ -206,4 +213,69 @@ describe("runDns", () => {
     expect(Array.isArray(r.meta?.records)).toBe(true);
     expect((r.meta?.records as string[]).length).toBeGreaterThan(0);
   }, 15000);
+});
+
+describe("parseHexPayload", () => {
+  it("parses lowercase hex", () => {
+    expect(parseHexPayload("deadbeef")).toEqual(
+      Buffer.from([0xde, 0xad, 0xbe, 0xef])
+    );
+  });
+
+  it("parses uppercase hex", () => {
+    expect(parseHexPayload("DEADBEEF")).toEqual(
+      Buffer.from([0xde, 0xad, 0xbe, 0xef])
+    );
+  });
+
+  it("ignores whitespace between pairs", () => {
+    expect(parseHexPayload("de ad be ef")).toEqual(
+      Buffer.from([0xde, 0xad, 0xbe, 0xef])
+    );
+  });
+
+  it("returns empty buffer for empty string", () => {
+    expect(parseHexPayload("")).toEqual(Buffer.alloc(0));
+    expect(parseHexPayload("   ")).toEqual(Buffer.alloc(0));
+  });
+
+  it("throws on odd number of hex digits", () => {
+    expect(() => parseHexPayload("abc")).toThrow(/invalid hex/);
+  });
+
+  it("throws on non-hex characters", () => {
+    expect(() => parseHexPayload("zz")).toThrow(/invalid hex/);
+    expect(() => parseHexPayload("0g")).toThrow(/invalid hex/);
+  });
+});
+
+describe("runUdp hex mode", () => {
+  it("sends exact bytes from hex payload and echoes them", async () => {
+    // UDP loopback server echoes: Buffer.concat([Buffer.from("echo:"), msg])
+    // We send hex "68656c6c6f" = "hello" → expect "echo:hello"
+    const r = await runUdp(
+      "127.0.0.1",
+      udpPort,
+      "68 65 6c 6c 6f",
+      true,
+      2000,
+      "hex"
+    );
+    expect(r.ok).toBe(true);
+    expect(r.bodyText).toContain("echo:hello");
+  });
+
+  it("returns an error result for invalid hex without opening a socket", async () => {
+    const r = await runUdp("127.0.0.1", udpPort, "xyz", true, 2000, "hex");
+    expect(r.ok).toBe(false);
+    expect(r.error?.message).toMatch(/invalid hex/);
+  });
+});
+
+describe("runTcp hex mode", () => {
+  it("returns an error result for invalid hex without connecting", async () => {
+    const r = await runTcp("127.0.0.1", tcpPort, "xyz", 2000, "hex");
+    expect(r.ok).toBe(false);
+    expect(r.error?.message).toMatch(/invalid hex/);
+  });
 });
