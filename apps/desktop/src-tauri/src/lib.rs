@@ -436,6 +436,11 @@ struct EmbeddedDb {
     /// A long-lived `red connect` REPL (the RQL conduit). One persistent connection
     /// reused for every query — the async mutex also serializes calls (one in-flight).
     rql: tokio::sync::Mutex<Option<RqlSession>>,
+    /// Monotonic sidecar generation, bumped on every (re)spawn. A terminated child's
+    /// watcher only clears shared state when its generation is still current — so a
+    /// project switch (kill old child → spawn new) can't have the old child's async
+    /// Terminated event null the URL the new sidecar just published (black screen).
+    gen: std::sync::atomic::AtomicU64,
 }
 
 /// A persistent `red connect <grpc> --json` REPL: write an RQL line to stdin, read one
@@ -813,12 +818,28 @@ async fn spawn_reddb_once(
                 .map_err(|e| format!("failed to start reddb: {e}"))?
         }
     };
-    // Drain output; if the sidecar dies, clear the URL so the next request respawns it.
+    // Claim this spawn's generation. The watcher below uses it to tell "my child
+    // died" from "a child I replaced during a project switch died".
+    let my_gen = app
+        .state::<EmbeddedDb>()
+        .gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    // Drain output; if the *current* sidecar dies, clear the URL so the next request
+    // respawns it. A managed project switch kills the old child and spawns a new one
+    // (bumping `gen`); without the generation guard the old child's async Terminated
+    // event would null the URL the NEW sidecar just published → app stuck "reddb not
+    // ready" (black screen on switch).
     let watch = app.clone();
     tauri::async_runtime::spawn(async move {
         while let Some(ev) = rx.recv().await {
             if let CommandEvent::Terminated(_) = ev {
                 if let Some(s) = watch.try_state::<EmbeddedDb>() {
+                    // Stale child from a superseded generation — its death is expected
+                    // (we killed it to switch projects); leave the current state alone.
+                    if s.gen.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
+                        break;
+                    }
                     if let Ok(mut u) = s.url.lock() {
                         *u = None;
                     }
@@ -832,8 +853,8 @@ async fn spawn_reddb_once(
                             let _ = old.child.kill();
                         }
                     }
+                    eprintln!("[reddb] sidecar terminated");
                 }
-                eprintln!("[reddb] sidecar terminated");
                 break;
             }
         }
