@@ -190,7 +190,7 @@ install_linux() {
     return 0
   fi
 
-  say "${cur:+upgrading $cur → }${cur:-installing }$tag ($OS/$ARCH)"
+  if [[ -n "$cur" ]]; then say "upgrading $cur → $tag ($OS/$ARCH)"; else say "installing $tag ($OS/$ARCH)"; fi
   url="$(asset_url "$tag" "$asset")"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
