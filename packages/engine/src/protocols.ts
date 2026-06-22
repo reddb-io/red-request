@@ -9,6 +9,15 @@ import type { ResponseResult } from "@red-request/core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** A datagram is "binary" if it carries control bytes other than the common text whitespace
+ *  (tab, LF, CR). Such payloads are surfaced as base64 so the UI can render them as hex. */
+function isBinary(buf: Buffer): boolean {
+  for (const b of buf) {
+    if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) return true;
+  }
+  return false;
+}
+
 function ok(
   bodyText: string,
   durationMs: number,
@@ -266,11 +275,20 @@ export function runUdp(
       : null;
     sock.on("message", (m) => {
       if (timer) clearTimeout(timer);
+      // Surface the raw datagram bytes when they aren't clean text, so the response panel's
+      // hex viewer can inspect a binary UDP reply end-to-end (offset│hex│ASCII).
+      const binary = isBinary(m);
+      const extra: Partial<ResponseResult> = { meta: { received: m.length } };
+      if (binary) {
+        extra.bodyBase64 = m.toString("base64");
+        extra.contentType = "application/octet-stream";
+      }
       done(
         ok(
-          `sent ${buf.length} bytes to ${host}:${port}\nreceived ${m.length} bytes:\n${m.toString("utf8")}`,
+          `sent ${buf.length} bytes to ${host}:${port}\nreceived ${m.length} bytes:\n` +
+            (binary ? "(binary payload — view as hex)" : m.toString("utf8")),
           performance.now() - t0,
-          { meta: { received: m.length } }
+          extra
         )
       );
     });
