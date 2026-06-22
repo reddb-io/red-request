@@ -122,6 +122,31 @@
       <span class="w-24 text-fg-muted">wait reply</span>
       <input type="checkbox" bind:checked={net.waitResponse} class="accent-[var(--color-brand)]" />
     </label>
+    <label class="flex items-center gap-2 text-sm">
+      <span class="w-24 text-fg-muted">multicast</span>
+      <input type="checkbox" bind:checked={net.multicast} class="accent-[var(--color-brand)]" />
+      <span class="hint">join the group at <span class="mono">host</span> and collect responses</span>
+    </label>
+    {#if net.multicast}
+      <label class="flex items-center gap-2 text-sm">
+        <span class="w-24 text-fg-muted">TTL</span>
+        <Input type="number" min="0" max="255" bind:value={net.multicastTtl} class="h-7 w-28" />
+        <span class="hint">hop limit</span>
+      </label>
+      <label class="flex items-center gap-2 text-sm">
+        <span class="w-24 text-fg-muted">interface</span>
+        <div class="flex-1">
+          <VarField
+            bind:value={net.multicastInterface}
+            known={ws.knownVars}
+            values={ws.varTitles}
+            dense
+            ariaLabel="multicast interface"
+            placeholder="local iface address (defaults to OS choice)"
+          />
+        </div>
+      </label>
+    {/if}
   {/if}
 
   {#if kind === "ping"}
