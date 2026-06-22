@@ -31,6 +31,58 @@ async function request(
   throw new Error("embedded RedDB did not become ready");
 }
 
+/** Result of an RQL statement run via the `red connect` conduit. */
+export interface RqlResult {
+  ok: boolean;
+  /** Flat result rows (column → value), as `red connect --json` returns them. */
+  records: Array<Record<string, unknown>>;
+  columns: string[];
+  error?: string;
+}
+
+/** Run an RQL statement (RedDB's SQL) through `red connect` — the native conduit shared
+ *  by local and remote (`reds://`) connections. Retries until the server is ready. */
+export async function rql(query: string): Promise<RqlResult> {
+  let reply: HttpReply | null = null;
+  for (let i = 0; i < 80; i++) {
+    try {
+      reply = await invoke<HttpReply>("reddb_rql", { query });
+      break;
+    } catch (e) {
+      if (i === 79) throw e;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  if (!reply) return { ok: false, records: [], columns: [], error: "no reply" };
+  let j: {
+    ok?: boolean;
+    error?: string;
+    data?: { columns?: string[]; records?: Array<Record<string, unknown>> };
+  };
+  try {
+    j = JSON.parse(reply.body);
+  } catch {
+    return {
+      ok: false,
+      records: [],
+      columns: [],
+      error: reply.body.slice(0, 200),
+    };
+  }
+  if (!j.ok)
+    return {
+      ok: false,
+      records: [],
+      columns: [],
+      error: j.error ?? "rql error",
+    };
+  return {
+    ok: true,
+    records: j.data?.records ?? [],
+    columns: j.data?.columns ?? [],
+  };
+}
+
 /** Read a collection's declared model (`kv`/`table`/`mixed`/…), or null if it doesn't exist. */
 async function collectionModel(name: string): Promise<string | null> {
   // Query the system table (always `table` model, so this SELECT can't mis-declare anything).
@@ -135,6 +187,59 @@ export async function kvList<T>(
     } catch {
       /* skip malformed */
     }
+  }
+  return out;
+}
+
+// --- RedDB-native SQL migrations -------------------------------------------
+// RedDB ships a first-class migration system in the query engine: `CREATE MIGRATION`
+// registers SQL (status pending, stored in the `red_migrations` system collection),
+// and `APPLY MIGRATION *` runs every pending one in dependency order (Kahn topo-sort),
+// resumable for BATCH data migrations. We register the app's shipped migrations
+// (idempotently) and apply all pending on every project boot.
+
+/** A migration the app ships and guarantees is applied. `sql` is the body after `AS`. */
+export interface MigrationDef {
+  name: string;
+  sql: string;
+  dependsOn?: string[];
+}
+
+/** Register any shipped migrations not yet in `red_migrations`, then apply all pending.
+ *  Idempotent and safe to run on every boot (no-op when nothing is pending). Routes
+ *  through the `red connect` RQL conduit (Phase 1 of the unified local/remote path). */
+export async function runMigrations(defs: MigrationDef[]): Promise<void> {
+  if (defs.length) {
+    const existing = await rql("SELECT name FROM red_migrations");
+    const have = new Set(existing.records.map((r) => r.name as string));
+    for (const d of defs) {
+      if (have.has(d.name)) continue;
+      const dep = d.dependsOn?.length
+        ? ` DEPENDS ON ${d.dependsOn.join(", ")}`
+        : "";
+      const r = await rql(`CREATE MIGRATION ${d.name}${dep} AS ${d.sql}`);
+      if (!r.ok)
+        throw new Error(`failed to register migration ${d.name}: ${r.error}`);
+    }
+  }
+  const applied = await rql("APPLY MIGRATION *");
+  if (!applied.ok)
+    throw new Error(`APPLY MIGRATION * failed: ${applied.error}`);
+}
+
+/** Applied / pending counts for the Settings → Data store summary. */
+export async function migrationSummary(): Promise<{
+  applied: number;
+  pending: number;
+  failed: number;
+}> {
+  const r = await rql("SELECT status FROM red_migrations").catch(() => null);
+  const out = { applied: 0, pending: 0, failed: 0 };
+  if (!r || !r.ok) return out;
+  for (const row of r.records) {
+    if (row.status === "applied") out.applied++;
+    else if (row.status === "pending") out.pending++;
+    else if (row.status === "failed") out.failed++;
   }
   return out;
 }

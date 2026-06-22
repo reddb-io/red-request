@@ -294,6 +294,9 @@ class Workspace {
     this.loadError = null;
     try {
       await repo.ensureStore();
+      // RedDB-native migrations: register + APPLY MIGRATION * (pending → applied in
+      // dependency order). No-op when nothing's pending; runs on every project boot.
+      await repo.runMigrations();
       await repo.ensureSample();
       this.network = await repo.loadNetwork();
       await this.reload();
@@ -1651,9 +1654,7 @@ class Workspace {
   }
 
   /** Refresh the AuthEditor status pill for an oauth2 config. */
-  async oauthStatus(
-    auth: Extract<AuthConfig, { type: "oauth2" }>
-  ): Promise<{
+  async oauthStatus(auth: Extract<AuthConfig, { type: "oauth2" }>): Promise<{
     state: "none" | "valid" | "expired";
     expiresAt: number;
     scope?: string;

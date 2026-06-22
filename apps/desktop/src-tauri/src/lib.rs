@@ -397,6 +397,9 @@ fn secret_open(iv: String, ct: String) -> Result<String, String> {
 #[derive(Default)]
 struct EmbeddedDb {
     url: Mutex<Option<String>>,
+    /// gRPC address (host:port) of the embedded server — the conduit for `red connect`
+    /// (RQL over the native protocol). Bare host:port, no scheme.
+    grpc: Mutex<Option<String>>,
     child: Mutex<Option<CommandChild>>,
     db_path: Mutex<String>,
     project_dir: Mutex<Option<String>>,
@@ -723,12 +726,16 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
 async fn spawn_reddb_once(
     app: &tauri::AppHandle,
     db_path: &std::path::Path,
-) -> Result<(String, CommandChild), String> {
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .map_err(|e| e.to_string())?;
-    let bind = format!("127.0.0.1:{port}");
+) -> Result<(String, String, CommandChild), String> {
+    let free_port = || {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .map_err(|e| e.to_string())
+    };
+    let bind = format!("127.0.0.1:{}", free_port()?);
+    // gRPC front-door for `red connect` (RQL conduit), alongside the HTTP API.
+    let grpc = format!("127.0.0.1:{}", free_port()?);
     let args = [
         "server".to_string(),
         "--http".to_string(),
@@ -736,6 +743,9 @@ async fn spawn_reddb_once(
         db_path.to_string_lossy().to_string(),
         "--http-bind".to_string(),
         bind.clone(),
+        "--grpc".to_string(),
+        "--grpc-bind".to_string(),
+        grpc.clone(),
     ];
     let shell = app.shell();
     let sidecar = shell
@@ -773,7 +783,7 @@ async fn spawn_reddb_once(
         let _ = child.kill();
         return Err(e);
     }
-    Ok((bind, child))
+    Ok((bind, grpc, child))
 }
 
 async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
@@ -788,8 +798,8 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let (bind, child) = match spawn_reddb_once(&app, &db_path).await {
-        Ok(pair) => pair,
+    let (bind, grpc, child) = match spawn_reddb_once(&app, &db_path).await {
+        Ok(triple) => triple,
         Err(e) => {
             // reddb couldn't open the file. A non-empty existing file is almost certainly an
             // older on-disk format (RedDB file format is not backward-compatible across major
@@ -824,6 +834,7 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
 
     let state = app.state::<EmbeddedDb>();
     *state.url.lock().map_err(|e| e.to_string())? = Some(format!("http://{bind}"));
+    *state.grpc.lock().map_err(|e| e.to_string())? = Some(grpc);
     *state.child.lock().map_err(|e| e.to_string())? = Some(child);
     Ok(())
 }
@@ -883,6 +894,56 @@ async fn reddb_request(
     Ok(HttpReply {
         status: res.status().as_u16(),
         body: res.text().await.unwrap_or_default(),
+    })
+}
+
+/// Run an RQL statement via `red connect` — the native RQL conduit (the same one used
+/// for remote `reds://` connections). Returns `red connect`'s raw `--json` output, e.g.
+/// `{"ok":true,"data":{"columns":[…],"records":[…]}}`. The webview interprets `ok`/`data`.
+/// Phase 1: targets the embedded server's gRPC front-door (local). Remote/auth come later.
+#[tauri::command]
+async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, String> {
+    let grpc_addr = |a: &tauri::AppHandle| -> Result<Option<String>, String> {
+        Ok(a.state::<EmbeddedDb>()
+            .grpc
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone())
+    };
+    let mut grpc = grpc_addr(&app)?;
+    if grpc.is_none() {
+        // Self-heal: bring the embedded server (and its gRPC front-door) up.
+        let db = app.state::<EmbeddedDb>();
+        let _guard = db.spawn_lock.lock().await;
+        if grpc_addr(&app)?.is_none() {
+            let _ = start_reddb(app.clone()).await;
+        }
+        grpc = grpc_addr(&app)?;
+    }
+    let grpc = grpc.ok_or_else(|| "reddb gRPC not ready".to_string())?;
+
+    let args = vec![
+        "connect".to_string(),
+        grpc,
+        "--query".to_string(),
+        query,
+        "--json".to_string(),
+    ];
+    let shell = app.shell();
+    let output = match shell.sidecar("red") {
+        Ok(cmd) => cmd.args(args).output().await,
+        Err(_) => {
+            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
+            shell.command(bin).args(args).output().await
+        }
+    }
+    .map_err(|e| format!("red connect failed: {e}"))?;
+    // `red connect` reports query errors in-band via `{"ok":false,…}` and still exits 0;
+    // a non-zero exit means the client/transport itself failed.
+    let status = if output.status.success() { 200 } else { 502 };
+    Ok(HttpReply {
+        status,
+        body: String::from_utf8_lossy(&output.stdout).to_string(),
     })
 }
 
@@ -1208,6 +1269,7 @@ pub fn run() {
             engine_call,
             reddb_url,
             reddb_request,
+            reddb_rql,
             project_info,
             open_project,
             recent_list,

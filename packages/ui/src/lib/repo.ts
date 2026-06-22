@@ -23,6 +23,12 @@ import {
   type NetworkSettings,
 } from "@red-request/core";
 import * as db from "./reddb";
+import { MIGRATIONS } from "./migrations";
+
+/** Register + apply any pending RedDB-native migrations. Run on every project boot. */
+export const runMigrations = () => db.runMigrations(MIGRATIONS);
+/** Applied/pending/failed migration counts for the Settings → Data summary. */
+export const migrationSummary = () => db.migrationSummary();
 
 export const COL = "rr_collections";
 export const REQ = "rr_requests";
