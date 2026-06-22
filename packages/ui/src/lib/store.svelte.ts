@@ -130,6 +130,10 @@ class Workspace {
       data: string;
       ts: number;
       status?: "sent" | "error";
+      /** Unique id of this sent frame (out frames only). */
+      frameId?: string;
+      /** Links an incoming frame back to the sent frame that provoked it. */
+      correlationId?: string;
     }[]
   >([]);
   private wsConnId: string | null = null;
@@ -926,7 +930,9 @@ class Workspace {
   private pushWs(
     dir: "in" | "out" | "sys",
     data: string,
-    status?: "sent" | "error"
+    status?: "sent" | "error",
+    frameId?: string,
+    correlationId?: string
   ): void {
     this.wsMessages = [
       ...this.wsMessages.slice(-499),
@@ -935,6 +941,8 @@ class Workspace {
         data,
         ts: Date.now(),
         ...(status !== undefined ? { status } : {}),
+        ...(frameId !== undefined ? { frameId } : {}),
+        ...(correlationId !== undefined ? { correlationId } : {}),
       },
     ];
   }
@@ -957,7 +965,9 @@ class Workspace {
           String(d.data ?? ""),
           d.dir === "out"
             ? (d.status as "sent" | "error" | undefined)
-            : undefined
+            : undefined,
+          d.frameId as string | undefined,
+          d.correlationId as string | undefined
         );
         break;
       case "close":
