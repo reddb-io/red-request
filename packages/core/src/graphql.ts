@@ -1,4 +1,7 @@
-// GraphQL introspection: query + a small schema parser for the Schema explorer.
+// GraphQL introspection: the standard introspection query plus a pure parser that
+// turns a `__schema` payload into the schema model the explorer renders. Lives in
+// core (next to the other import/parse functions) so it can be unit-tested without
+// the UI; see graphql.test.ts.
 export const INTROSPECTION_QUERY = `query IntrospectionQuery {
   __schema {
     queryType { name }
@@ -51,6 +54,7 @@ function typeName(t: any): string {
   return t.name ?? "";
 }
 
+/** Parse a `__schema` introspection payload into the explorer's schema model. */
 export function parseSchema(s: any): GqlSchema {
   const types: GqlType[] = (s?.types ?? [])
     .filter((t: any) => t?.name && !t.name.startsWith("__"))
