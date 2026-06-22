@@ -4,6 +4,8 @@ import {
   resolveTemplate,
   resolveRequest,
   resolveDynamic,
+  resolveFunction,
+  TEMPLATE_FUNCTIONS,
 } from "./resolver.js";
 import { newRequest } from "./request.js";
 
@@ -23,6 +25,73 @@ describe("dynamic variables", () => {
     ).toBe("fixed");
     expect(resolveDynamic("$randomEmail")).toMatch(/@example\.com$/);
     expect(resolveDynamic("$nope")).toBeUndefined();
+  });
+});
+
+describe("function-call interpolation", () => {
+  const PATTERNS: Record<string, RegExp> = {
+    "rand.uuid":
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    "rand.guid":
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    "rand.email": /^[a-z]+\.[a-z]+\d{1,3}@example\.com$/,
+    "rand.username": /^[a-z]+\d{1,3}$/,
+    "rand.firstName": /^[A-Z][a-z]+$/,
+    "rand.lastName": /^[A-Z][a-z]+$/,
+    "rand.fullName": /^[A-Z][a-z]+ [A-Z][a-z]+$/,
+    "rand.word": /^[a-z]+$/,
+    "rand.bool": /^(true|false)$/,
+    "rand.ip": /^(\d{1,3}\.){3}\d{1,3}$/,
+    "rand.hexColor": /^#[0-9a-f]{6}$/,
+  };
+
+  it("the registry exposes exactly the documented zero-arg rand.* catalog", () => {
+    expect(Object.keys(TEMPLATE_FUNCTIONS).sort()).toEqual(
+      Object.keys(PATTERNS).sort()
+    );
+  });
+
+  for (const [name, re] of Object.entries(PATTERNS)) {
+    it(`{{${name}()}} resolves to a fresh value`, () => {
+      const r = resolveTemplate(`{{${name}()}}`, {});
+      expect(r.value).toMatch(re);
+      expect(r.unresolved).toEqual([]);
+      expect(resolveFunction(name)).toMatch(re);
+    });
+  }
+
+  it("recognizes function tokens without breaking adjacent {{var}} resolution", () => {
+    const r = resolveTemplate("u={{$uuid}} h={{ host }} w={{rand.word()}}", {
+      host: "api.test",
+    });
+    expect(r.value).toMatch(/^u=[0-9a-f-]{36} h=api\.test w=[a-z]+$/);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it("tolerates whitespace inside the token and parentheses", () => {
+    const r = resolveTemplate("{{  rand.bool(  )  }}", {});
+    expect(r.value).toMatch(/^(true|false)$/);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it("two occurrences in one template are independent", () => {
+    const [a, b] = resolveTemplate(
+      "{{rand.uuid()}} {{rand.uuid()}}",
+      {}
+    ).value.split(" ");
+    expect(a).not.toBe(b);
+  });
+
+  it("leaves an unknown function verbatim and reports it as unresolved", () => {
+    const r = resolveTemplate("{{rand.nope()}}/{{rand.uuid()}}", {});
+    expect(r.value).toMatch(/^\{\{rand\.nope\(\)\}\}\/[0-9a-f-]{36}$/);
+    expect(r.unresolved).toEqual(["rand.nope()"]);
+  });
+
+  it("a bare {{rand.uuid}} without parens is treated as an unknown variable", () => {
+    const r = resolveTemplate("{{rand.uuid}}", {});
+    expect(r.value).toBe("{{rand.uuid}}");
+    expect(r.unresolved).toEqual(["rand.uuid"]);
   });
 });
 
