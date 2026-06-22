@@ -5,8 +5,12 @@ import type { AuthConfig } from "./auth.js";
 export type VariableScope = Record<string, string>;
 
 // Matches both flat variable tokens (`{{var}}`, group 1) and namespaced
-// function-call tokens (`{{ns.fn()}}`, group 2 captures the parentheses).
-const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*(\(\s*\))?\s*\}\}/g;
+// function-call tokens (`{{ns.fn(args)}}`). Group 1 is the name; group 2, when
+// present, is the raw argument source between the parentheses (empty for `()`).
+// The argument source forbids `}` so the greedy capture can never span past the
+// token's own closing `}}` into a neighbouring token; literal args never contain
+// `}` (no nested interpolation in this version).
+const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*(?:\(([^}]*)\))?\s*\}\}/g;
 const MAX_PASSES = 5;
 
 // ---------------------------------------------------------------------------
@@ -159,9 +163,180 @@ export const TEMPLATE_FUNCTIONS: Record<
   },
 };
 
-/** Resolve a `{{ns.fn()}}` function token, or undefined if the function is unknown. */
+/** Resolve a zero-arg `{{ns.fn()}}` function token, or undefined if unknown. */
 export function resolveFunction(name: string): string | undefined {
   return TEMPLATE_FUNCTIONS[name]?.gen();
+}
+
+// ---------------------------------------------------------------------------
+// Argument grammar — parameterized `{{ns.fn(arg,arg,...)}}` tokens. Arguments
+// are literals only (no nested interpolation): integers/floats, single-quoted
+// strings, and a variadic comma-separated list. Parsing is total: malformed
+// input yields an `{ok:false}` result rather than throwing, so a bad token is
+// left verbatim and reported as unresolved.
+// ---------------------------------------------------------------------------
+
+/** A parsed literal argument. */
+export type FnArg = number | string;
+
+export type ParsedArgs =
+  | { ok: true; args: FnArg[] }
+  | { ok: false; error: string };
+
+const NUMERIC = /^[+-]?(\d+\.?\d*|\.\d+)$/;
+const WS = /\s/;
+
+/**
+ * Parse a raw argument source (the text between `(` and `)`) into literals.
+ * Accepts integers, floats, and single-quoted strings (with `\'`/`\\` escapes),
+ * separated by commas and tolerant of surrounding whitespace. Returns a tagged
+ * result; never throws.
+ */
+export function parseArgs(source: string): ParsedArgs {
+  const s = source;
+  const n = s.length;
+  const args: FnArg[] = [];
+  let i = 0;
+
+  const skipWs = () => {
+    while (i < n && WS.test(s[i]!)) i++;
+  };
+
+  skipWs();
+  if (i >= n) return { ok: true, args };
+
+  while (true) {
+    skipWs();
+    if (i >= n) return { ok: false, error: "missing argument" };
+
+    if (s[i] === "'") {
+      // Single-quoted string literal.
+      i++;
+      let str = "";
+      let closed = false;
+      while (i < n) {
+        const ch = s[i]!;
+        if (ch === "\\" && i + 1 < n) {
+          str += s[i + 1];
+          i += 2;
+          continue;
+        }
+        if (ch === "'") {
+          closed = true;
+          i++;
+          break;
+        }
+        str += ch;
+        i++;
+      }
+      if (!closed) return { ok: false, error: "unterminated string" };
+      args.push(str);
+    } else {
+      // Numeric literal: consume up to the next comma.
+      let tok = "";
+      while (i < n && s[i] !== ",") {
+        tok += s[i];
+        i++;
+      }
+      tok = tok.trim();
+      if (!NUMERIC.test(tok)) {
+        return { ok: false, error: `non-numeric argument: '${tok}'` };
+      }
+      args.push(Number(tok));
+    }
+
+    skipWs();
+    if (i >= n) return { ok: true, args };
+    if (s[i] !== ",") {
+      return { ok: false, error: `unexpected token: '${s[i]}'` };
+    }
+    i++; // consume comma, expect another argument
+  }
+}
+
+const ALPHANUM =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const HEX = "0123456789abcdef";
+
+const randString = (len: number, alphabet: string): string => {
+  let out = "";
+  for (let k = 0; k < len; k++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return out;
+};
+
+const isLen = (a: FnArg | undefined): a is number =>
+  typeof a === "number" && Number.isInteger(a) && a >= 0;
+
+/**
+ * namespace.name → (apply, human description) for parameterized functions. Each
+ * `apply` validates arity/types itself and returns `undefined` on any malformed
+ * call so the resolver can leave the token unresolved.
+ */
+export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
+  string,
+  { apply: (args: FnArg[]) => string | undefined; desc: string }
+> = {
+  "rand.int": {
+    desc: "random integer in [min,max]",
+    apply: (args) => {
+      if (args.length !== 2) return undefined;
+      const [min, max] = args;
+      if (typeof min !== "number" || typeof max !== "number") return undefined;
+      const lo = Math.ceil(min);
+      const hi = Math.floor(max);
+      if (hi < lo) return undefined;
+      return String(randInt(lo, hi));
+    },
+  },
+  "rand.float": {
+    desc: "random float in [min,max)",
+    apply: (args) => {
+      if (args.length !== 2) return undefined;
+      const [min, max] = args;
+      if (typeof min !== "number" || typeof max !== "number") return undefined;
+      if (max < min) return undefined;
+      return String(Math.random() * (max - min) + min);
+    },
+  },
+  "rand.string": {
+    desc: "random alphanumeric string of length len",
+    apply: (args) => {
+      if (args.length !== 1 || !isLen(args[0])) return undefined;
+      return randString(args[0], ALPHANUM);
+    },
+  },
+  "rand.hex": {
+    desc: "random hex string of length len",
+    apply: (args) => {
+      if (args.length !== 1 || !isLen(args[0])) return undefined;
+      return randString(args[0], HEX);
+    },
+  },
+  "rand.pick": {
+    desc: "random pick from the given literal arguments",
+    apply: (args) => {
+      if (args.length < 1) return undefined;
+      return String(pick(args));
+    },
+  },
+};
+
+/**
+ * Resolve a `{{ns.fn(source)}}` call. `source` is the raw text between the
+ * parens. Returns the generated value, or undefined if the args are malformed
+ * or the function/arity is unknown (caller leaves the token verbatim).
+ */
+export function resolveFunctionCall(
+  name: string,
+  source: string
+): string | undefined {
+  const parsed = parseArgs(source);
+  if (!parsed.ok) return undefined;
+  // No arguments → the zero-arg catalog; otherwise the parameterized catalog.
+  if (parsed.args.length === 0) return TEMPLATE_FUNCTIONS[name]?.gen();
+  return TEMPLATE_FUNCTIONS_WITH_ARGS[name]?.apply(parsed.args);
 }
 
 /**
@@ -199,10 +374,11 @@ export function resolveTemplate(
     let changed = false;
     value = value.replace(
       PLACEHOLDER,
-      (match, name: string, call: string | undefined) => {
-        // A trailing `()` marks a function-call token; dispatch through the registry.
-        if (call !== undefined) {
-          const fn = resolveFunction(name);
+      (match, name: string, args: string | undefined) => {
+        // A trailing `(…)` marks a function-call token; dispatch through the
+        // registry, parsing any literal arguments first.
+        if (args !== undefined) {
+          const fn = resolveFunctionCall(name, args);
           if (fn !== undefined) {
             changed = true;
             return fn;
@@ -227,7 +403,9 @@ export function resolveTemplate(
   // tokens are already gone). Report function tokens with their `()` so they read
   // distinctly from unknown variables.
   for (const m of value.matchAll(PLACEHOLDER)) {
-    if (m[1]) unresolved.add(m[2] !== undefined ? `${m[1]}()` : m[1]);
+    if (m[1]) {
+      unresolved.add(m[2] !== undefined ? `${m[1]}(${m[2].trim()})` : m[1]);
+    }
   }
   return { value, unresolved: [...unresolved] };
 }
