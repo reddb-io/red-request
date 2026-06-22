@@ -5,7 +5,9 @@ import {
   resolveRequest,
   resolveDynamic,
   resolveFunction,
+  parseArgs,
   TEMPLATE_FUNCTIONS,
+  TEMPLATE_FUNCTIONS_WITH_ARGS,
 } from "./resolver.js";
 import { newRequest } from "./request.js";
 
@@ -92,6 +94,137 @@ describe("function-call interpolation", () => {
     const r = resolveTemplate("{{rand.uuid}}", {});
     expect(r.value).toBe("{{rand.uuid}}");
     expect(r.unresolved).toEqual(["rand.uuid"]);
+  });
+});
+
+describe("argument parser", () => {
+  it("parses an empty argument list", () => {
+    expect(parseArgs("")).toEqual({ ok: true, args: [] });
+    expect(parseArgs("   ")).toEqual({ ok: true, args: [] });
+  });
+
+  it("parses integer and float literals", () => {
+    expect(parseArgs("1")).toEqual({ ok: true, args: [1] });
+    expect(parseArgs("3.14")).toEqual({ ok: true, args: [3.14] });
+    expect(parseArgs("-5, +2")).toEqual({ ok: true, args: [-5, 2] });
+    expect(parseArgs(".5")).toEqual({ ok: true, args: [0.5] });
+  });
+
+  it("parses single-quoted string literals, including embedded commas and parens", () => {
+    expect(parseArgs("'a'")).toEqual({ ok: true, args: ["a"] });
+    expect(parseArgs("'a,b'")).toEqual({ ok: true, args: ["a,b"] });
+    expect(parseArgs("'a)b'")).toEqual({ ok: true, args: ["a)b"] });
+    expect(parseArgs("'it\\'s'")).toEqual({ ok: true, args: ["it's"] });
+  });
+
+  it("parses a variadic, mixed, whitespace-padded list", () => {
+    expect(parseArgs(" 1 , 'two' , 3.0 ")).toEqual({
+      ok: true,
+      args: [1, "two", 3],
+    });
+  });
+
+  it("rejects non-numeric bare tokens", () => {
+    expect(parseArgs("abc").ok).toBe(false);
+    expect(parseArgs("1, two").ok).toBe(false);
+  });
+
+  it("rejects an unterminated string", () => {
+    expect(parseArgs("'oops").ok).toBe(false);
+  });
+
+  it("rejects dangling/empty entries", () => {
+    expect(parseArgs("1,").ok).toBe(false);
+    expect(parseArgs("1,,2").ok).toBe(false);
+    expect(parseArgs("'a' 'b'").ok).toBe(false);
+  });
+});
+
+describe("parameterized rand.* functions", () => {
+  it("the with-args registry exposes exactly the documented catalog", () => {
+    expect(Object.keys(TEMPLATE_FUNCTIONS_WITH_ARGS).sort()).toEqual(
+      ["rand.float", "rand.hex", "rand.int", "rand.pick", "rand.string"].sort()
+    );
+  });
+
+  it("rand.int returns an integer within [min,max]", () => {
+    for (let i = 0; i < 200; i++) {
+      const r = resolveTemplate("{{rand.int(1,6)}}", {});
+      expect(r.unresolved).toEqual([]);
+      const n = Number(r.value);
+      expect(Number.isInteger(n)).toBe(true);
+      expect(n).toBeGreaterThanOrEqual(1);
+      expect(n).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("rand.float returns a float within [min,max)", () => {
+    for (let i = 0; i < 200; i++) {
+      const n = Number(resolveTemplate("{{rand.float(0,1)}}", {}).value);
+      expect(n).toBeGreaterThanOrEqual(0);
+      expect(n).toBeLessThan(1);
+    }
+  });
+
+  it("rand.string honours the requested length and is alphanumeric", () => {
+    const r = resolveTemplate("{{rand.string(12)}}", {});
+    expect(r.unresolved).toEqual([]);
+    expect(r.value).toMatch(/^[A-Za-z0-9]{12}$/);
+    expect(resolveTemplate("{{rand.string(0)}}", {}).value).toBe("");
+  });
+
+  it("rand.hex honours the requested length and is hex", () => {
+    const r = resolveTemplate("{{rand.hex(8)}}", {});
+    expect(r.unresolved).toEqual([]);
+    expect(r.value).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it("rand.pick returns one of its arguments (variadic, mixed)", () => {
+    for (let i = 0; i < 50; i++) {
+      const v = resolveTemplate("{{rand.pick('a','b','c')}}", {}).value;
+      expect(["a", "b", "c"]).toContain(v);
+    }
+    for (let i = 0; i < 50; i++) {
+      const v = resolveTemplate("{{rand.pick(1,2,3)}}", {}).value;
+      expect(["1", "2", "3"]).toContain(v);
+    }
+  });
+
+  it("tolerates whitespace inside the call", () => {
+    const n = Number(resolveTemplate("{{ rand.int( 1, 100 ) }}", {}).value);
+    expect(Number.isInteger(n)).toBe(true);
+    expect(n).toBeGreaterThanOrEqual(1);
+    expect(n).toBeLessThanOrEqual(100);
+  });
+
+  it("leaves malformed calls unresolved without throwing", () => {
+    const cases = [
+      "{{rand.int(1)}}", // wrong arity
+      "{{rand.int(1,2,3)}}", // wrong arity
+      "{{rand.int('a',2)}}", // non-numeric where number required
+      "{{rand.string(-1)}}", // invalid length
+      "{{rand.string(1.5)}}", // non-integer length
+      "{{rand.pick()}}", // variadic needs at least one
+      "{{rand.pick('a)}}", // unterminated string
+    ];
+    for (const t of cases) {
+      const r = resolveTemplate(t, {});
+      expect(r.value).toBe(t);
+      expect(r.unresolved.length).toBe(1);
+    }
+  });
+
+  it("reports a malformed call with a clear, distinct signal", () => {
+    const r = resolveTemplate("{{rand.int(1)}}", {});
+    expect(r.unresolved).toEqual(["rand.int(1)"]);
+  });
+
+  it("two occurrences are independent", () => {
+    const [a, b] = resolveTemplate(
+      "{{rand.string(16)}} {{rand.string(16)}}",
+      {}
+    ).value.split(" ");
+    expect(a).not.toBe(b);
   });
 });
 
