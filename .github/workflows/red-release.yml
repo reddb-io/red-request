@@ -1,0 +1,99 @@
+name: Auto-release
+
+# red-skills-style release: every push to main is inspected; if it carries releasable
+# conventional commits since the last tag, we bump the WHOLE monorepo to one new version
+# (scripts/set-version.mjs), commit `chore(release): vX.Y.Z [skip release]`, create + push
+# the `vX.Y.Z` tag, and dispatch release.yml (which builds the AppImage/.deb + checksums and
+# publishes the GitHub Release for that tag). No changesets, no Version-Packages PR.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: red-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write # to dispatch release.yml via `gh workflow run`
+
+jobs:
+  release:
+    name: version → tag → build
+    runs-on: ubuntu-latest
+    # Double-guarded against reacting to our own bump commit: bot actor AND [skip release].
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, '[skip release]')
+    env:
+      LEFTHOOK: "0" # the bot commit must not fire the pre-commit hook (needs a built repo)
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # full history + tags so the bump can diff against the last tag
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Decide next version from conventional commits
+        id: bump
+        run: |
+          set -euo pipefail
+          PREV="$(git tag --list 'v*.*.*' --sort=-v:refname | head -n1)"
+          if [[ -z "$PREV" ]]; then
+            NEXT="0.1.0"; KIND="initial"
+          else
+            LOG="$(git log --format='%B' "${PREV}..HEAD")"
+            if grep -qE '(^|[[:space:]])BREAKING[ -]CHANGE|^[a-z]+(\([^)]*\))?!:' <<<"$LOG"; then KIND=major
+            elif grep -qE '^feat(\([^)]*\))?:' <<<"$LOG"; then KIND=minor
+            elif grep -qE '^(fix|perf|refactor|build|ci|chore|docs|test|style|revert)(\([^)]*\))?:' <<<"$LOG"; then KIND=patch
+            else KIND=none; fi
+            IFS='.' read -r MA MI PA <<<"${PREV#v}"
+            case "$KIND" in
+              major) NEXT="$((MA+1)).0.0" ;;
+              minor) NEXT="${MA}.$((MI+1)).0" ;;
+              patch) NEXT="${MA}.${MI}.$((PA+1))" ;;
+              none)
+                echo "no releasable commits since ${PREV} — skipping"
+                echo "skip=1" >>"$GITHUB_OUTPUT"; exit 0 ;;
+            esac
+          fi
+          echo "next=$NEXT" >>"$GITHUB_OUTPUT"
+          echo "→ ${PREV:-<none>} → v$NEXT ($KIND)"
+
+      - name: Sync versions, commit, tag, dispatch build
+        if: steps.bump.outputs.skip != '1'
+        run: |
+          set -euo pipefail
+          NEXT="${{ steps.bump.outputs.next }}"; TAG="v$NEXT"
+
+          node scripts/set-version.mjs "$NEXT"
+          node scripts/check-versions.mjs   # refuse to tag a drifting monorepo
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m "chore(release): ${TAG} [skip release]"
+
+          # Land the bump on main, rebasing if AFK merges raced us in the meantime.
+          pushed=0
+          for i in 1 2 3 4 5; do
+            if git push origin HEAD:main; then pushed=1; break; fi
+            echo "push rejected — rebasing onto origin/main (attempt $i)…"
+            git fetch origin main
+            git rebase origin/main
+            sleep $((i * 3))
+          done
+          [[ "$pushed" == 1 ]] || { echo "could not land the version bump on main" >&2; exit 1; }
+
+          # Tag the commit that actually landed (post-rebase HEAD), then push the tag.
+          git tag -a "$TAG" -m "Release ${TAG}"
+          git push origin "refs/tags/${TAG}"
+
+          # A GITHUB_TOKEN tag push does NOT trigger release.yml, so dispatch it explicitly
+          # (allowed with actions: write — no PAT needed).
+          gh workflow run release.yml --ref main -f tag="$TAG"
+          echo "✅ released ${TAG} and dispatched the build"
