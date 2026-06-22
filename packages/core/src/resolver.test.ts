@@ -6,6 +6,7 @@ import {
   resolveDynamic,
   resolveFunction,
   parseArgs,
+  applyOffset,
   TEMPLATE_FUNCTIONS,
   TEMPLATE_FUNCTIONS_WITH_ARGS,
 } from "./resolver.js";
@@ -143,7 +144,19 @@ describe("argument parser", () => {
 describe("parameterized rand.* functions", () => {
   it("the with-args registry exposes exactly the documented catalog", () => {
     expect(Object.keys(TEMPLATE_FUNCTIONS_WITH_ARGS).sort()).toEqual(
-      ["rand.float", "rand.hex", "rand.int", "rand.pick", "rand.string"].sort()
+      [
+        "rand.float",
+        "rand.hex",
+        "rand.int",
+        "rand.pick",
+        "rand.string",
+        "datetime.iso8601",
+        "datetime.unix",
+        "datetime.unixMs",
+        "datetime.date",
+        "datetime.time",
+        "datetime.now",
+      ].sort()
     );
   });
 
@@ -225,6 +238,138 @@ describe("parameterized rand.* functions", () => {
       {}
     ).value.split(" ");
     expect(a).not.toBe(b);
+  });
+});
+
+describe("offset parsing (applyOffset)", () => {
+  const base = new Date("2026-06-22T12:00:00.000Z");
+
+  it("shifts by each sub-month unit with exact millisecond arithmetic", () => {
+    expect(applyOffset(base, "+30s")!.getTime() - base.getTime()).toBe(30_000);
+    expect(applyOffset(base, "+5m")!.getTime() - base.getTime()).toBe(300_000);
+    expect(applyOffset(base, "+1h")!.getTime() - base.getTime()).toBe(
+      3_600_000
+    );
+    expect(applyOffset(base, "-7d")!.getTime() - base.getTime()).toBe(
+      -7 * 86_400_000
+    );
+    expect(applyOffset(base, "+2w")!.getTime() - base.getTime()).toBe(
+      2 * 604_800_000
+    );
+  });
+
+  it("shifts months and years on the calendar", () => {
+    expect(applyOffset(base, "+1M")!.toISOString()).toBe(
+      "2026-07-22T12:00:00.000Z"
+    );
+    expect(applyOffset(base, "-1y")!.toISOString()).toBe(
+      "2025-06-22T12:00:00.000Z"
+    );
+  });
+
+  it("returns undefined for malformed offsets (never throws)", () => {
+    for (const t of [
+      "7",
+      "-7q",
+      "",
+      "1h",
+      "+h",
+      "+1.5d",
+      "++1d",
+      "-7 d",
+      "d",
+    ]) {
+      expect(applyOffset(base, t)).toBeUndefined();
+    }
+  });
+});
+
+describe("datetime.* functions", () => {
+  it("the with-args registry includes the datetime catalog", () => {
+    for (const k of [
+      "datetime.iso8601",
+      "datetime.unix",
+      "datetime.unixMs",
+      "datetime.date",
+      "datetime.time",
+      "datetime.now",
+    ]) {
+      expect(TEMPLATE_FUNCTIONS_WITH_ARGS[k]).toBeDefined();
+    }
+  });
+
+  it("iso8601() emits a valid ISO-8601 / RFC-3339 string", () => {
+    const r = resolveTemplate("{{datetime.iso8601()}}", {});
+    expect(r.unresolved).toEqual([]);
+    expect(r.value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(Number.isNaN(Date.parse(r.value))).toBe(false);
+  });
+
+  it("unix() emits integer seconds and unixMs() integer milliseconds", () => {
+    expect(resolveTemplate("{{datetime.unix()}}", {}).value).toMatch(/^\d+$/);
+    expect(resolveTemplate("{{datetime.unixMs()}}", {}).value).toMatch(/^\d+$/);
+  });
+
+  it("date() and time() emit the date / time portions", () => {
+    expect(resolveTemplate("{{datetime.date()}}", {}).value).toMatch(
+      /^\d{4}-\d{2}-\d{2}$/
+    );
+    expect(resolveTemplate("{{datetime.time()}}", {}).value).toMatch(
+      /^\d{2}:\d{2}:\d{2}$/
+    );
+  });
+
+  it("an offset shifts the result by the parsed duration (relative)", () => {
+    const now = Number(resolveTemplate("{{datetime.unix()}}", {}).value);
+    const plus = Number(resolveTemplate("{{datetime.unix('+1h')}}", {}).value);
+    // Asserted as a relative difference, never a wall-clock absolute.
+    expect(plus - now).toBeGreaterThanOrEqual(3599);
+    expect(plus - now).toBeLessThanOrEqual(3601);
+  });
+
+  it("now() defaults to ISO; now(format) formats with the given tokens", () => {
+    expect(resolveTemplate("{{datetime.now()}}", {}).value).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+    );
+    const r = resolveTemplate("{{datetime.now('YYYY-MM-DD')}}", {});
+    expect(r.unresolved).toEqual([]);
+    expect(r.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("now(format, offset) applies the offset before formatting", () => {
+    const a = resolveTemplate(
+      "{{datetime.now('YYYY-MM-DDTHH:mm:ss')}}",
+      {}
+    ).value;
+    const b = resolveTemplate(
+      "{{datetime.now('YYYY-MM-DDTHH:mm:ss','+1h')}}",
+      {}
+    ).value;
+    const diff = (Date.parse(b + "Z") - Date.parse(a + "Z")) / 1000;
+    expect(diff).toBeGreaterThanOrEqual(3599);
+    expect(diff).toBeLessThanOrEqual(3601);
+  });
+
+  it("leaves an invalid offset unresolved without throwing", () => {
+    for (const t of ["{{datetime.unix('7')}}", "{{datetime.iso8601('-7q')}}"]) {
+      const r = resolveTemplate(t, {});
+      expect(r.value).toBe(t);
+      expect(r.unresolved.length).toBe(1);
+    }
+  });
+
+  it("reports an invalid offset with a clear, distinct signal", () => {
+    expect(resolveTemplate("{{datetime.unix('7')}}", {}).unresolved).toEqual([
+      "datetime.unix('7')",
+    ]);
+  });
+
+  it("two iso8601 occurrences never throw and stay resolved", () => {
+    const r = resolveTemplate(
+      "{{datetime.iso8601()}}|{{datetime.iso8601('-1d')}}",
+      {}
+    );
+    expect(r.unresolved).toEqual([]);
   });
 });
 
