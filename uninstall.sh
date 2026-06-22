@@ -47,6 +47,9 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
 done
 
 # The .deb install (install.sh's default Linux path) — purge so config files go too.
+# Deliberately NO `autoremove` / `--auto-remove`: that would drag out shared runtime
+# deps (libwebkit2gtk-4.1-0, libgtk-3-0, …) other apps may rely on. We only remove
+# the red-request package itself; its dependencies stay installed.
 if command -v dpkg >/dev/null 2>&1 && dpkg -s "$BIN_NAME" >/dev/null 2>&1; then
   sudo=""; [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
   if $sudo apt-get purge -y "$BIN_NAME"; then echo "✓ removed apt package $BIN_NAME"; removed=1; fi

@@ -149,25 +149,34 @@ fetch_verified() { # tag asset dir
 # ── linux: .deb via apt (default) ──────────────────────────────────────────
 deb_installed_version() { dpkg-query -W -f='${Version}' "$BIN_NAME" 2>/dev/null || printf ''; }
 
-# A prior `--appimage` run drops the 100 MB+ AppImage (and the `rr` shortcut)
-# into ~/.local/bin, which usually precedes /usr/bin on PATH and shadows the
-# .deb we just installed — the user keeps launching the old AppImage and its
-# bundled-glib errors (e.g. "undefined symbol: g_task_set_static_name" from the
-# system gvfs modules). Remove our own managed AppImage and re-point the short
-# alias at the system binary so /usr/bin/$BIN_NAME wins. Only touches files this
-# installer created: $DATA_DIR/version is written solely by install_appimage.
+# Absolute path of the binary the .deb installs (e.g. /usr/bin/red-request).
+deb_binary_path() { dpkg-query -L "$BIN_NAME" 2>/dev/null | grep -m1 -E "/bin/${BIN_NAME}\$" || true; }
+
+# A prior `--appimage` run drops the 100 MB+ AppImage into ~/.local/bin, which
+# usually precedes /usr/bin on PATH and shadows the .deb we just installed — the
+# user keeps launching the old AppImage and its bundled-glib errors (e.g.
+# "undefined symbol: g_task_set_static_name" from the system gvfs modules).
+# Remove our own managed AppImage so /usr/bin/$BIN_NAME wins. Only touches files
+# this installer created: $DATA_DIR/version is written solely by install_appimage.
 clear_appimage_shadow() {
   [[ -f "$DATA_DIR/version" ]] || return 0
-  local deb_bin
-  deb_bin="$(dpkg-query -L "$BIN_NAME" 2>/dev/null | grep -m1 -E "/bin/${BIN_NAME}\$" || true)"
   say "removing prior AppImage install — it shadows the .deb on PATH"
-  rm -f "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/$SHORTCUT" "$DATA_DIR/version" "$DESKTOP_DIR/red-request.desktop"
+  rm -f "$INSTALL_DIR/$BIN_NAME" "$DATA_DIR/version" "$DESKTOP_DIR/red-request.desktop"
   rmdir "$DATA_DIR" 2>/dev/null || true
-  if [[ -n "$deb_bin" && "$deb_bin" != "$INSTALL_DIR/$BIN_NAME" ]]; then
-    ln -sf "$deb_bin" "$INSTALL_DIR/$SHORTCUT"
-    ok "re-pointed $SHORTCUT → $deb_bin"
-  fi
   have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+}
+
+# The .deb ships red-request/red/red-request-engine in /usr/bin but no `rr`
+# alias (it was historically AppImage-only). Always (re)create it pointing at
+# the system binary, and ensure $INSTALL_DIR is on PATH, so `rr` works the same
+# for both build forms — including a fresh .deb install after an uninstall.
+ensure_deb_shortcut() {
+  local deb_bin; deb_bin="$(deb_binary_path)"
+  [[ -n "$deb_bin" ]] || { warn "could not locate the installed $BIN_NAME binary; skipping $SHORTCUT alias"; return 0; }
+  mkdir -p "$INSTALL_DIR"
+  ln -sf "$deb_bin" "$INSTALL_DIR/$SHORTCUT"
+  ok "linked $SHORTCUT → $deb_bin"
+  ensure_path
 }
 
 install_deb() {
@@ -201,7 +210,8 @@ install_deb() {
   fi
   ok "${cur:+upgraded to }Red Request $tag installed (.deb)"
   clear_appimage_shadow
-  say "launch it from your app menu, or run:  $BIN_NAME"
+  ensure_deb_shortcut
+  say "launch it from your app menu, or run:  $BIN_NAME   (or  $SHORTCUT .  to open the current folder)"
 }
 
 # ── path wiring (AppImage only) ─────────────────────────────────────────────
