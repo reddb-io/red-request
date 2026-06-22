@@ -1,6 +1,8 @@
-// Minimal RedDB KV client. All HTTP is proxied through the Rust `reddb_request` command
-// (reqwest) — the webview's native fetch to http://127.0.0.1 is blocked as mixed content,
-// and Rust gives us correct request framing for the embedded reddb. Values are JSON strings.
+// RedDB client. Every operation is RQL (RedDB's SQL) sent through the Rust `reddb_rql`
+// command, which runs `red connect` — the native conduit shared by the local embedded
+// server and remote `reds://` connections. KV ops use the native `KV PUT/GET/DELETE` /
+// `LIST KV` verbs (model stays `kv`); values are JSON strings. Keys are single-quoted
+// (so dots/colons are literal) and `'` is escaped as `''`.
 import { invoke } from "@tauri-apps/api/core";
 
 interface HttpReply {
@@ -8,28 +10,11 @@ interface HttpReply {
   body: string;
 }
 
-/** One reddb HTTP call via Rust, retrying until the sidecar is ready. */
-async function request(
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<HttpReply> {
-  const payload = {
-    method,
-    path,
-    body: body === undefined ? null : JSON.stringify(body),
-  };
-  for (let i = 0; i < 80; i++) {
-    try {
-      return await invoke<HttpReply>("reddb_request", payload);
-    } catch (e) {
-      // "reddb not ready" until the sidecar comes up — retry briefly.
-      if (i === 79) throw e;
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  throw new Error("embedded RedDB did not become ready");
-}
+/** Escape a single-quoted RQL string literal. */
+const esc = (s: string) => s.replace(/'/g, "''");
+/** A `collection.'key'` reference — the key quoted so dots/colons stay literal. */
+const kvRef = (collection: string, key: string) =>
+  `${collection}.'${esc(key)}'`;
 
 /** Result of an RQL statement run via the `red connect` conduit. */
 export interface RqlResult {
@@ -83,40 +68,18 @@ export async function rql(query: string): Promise<RqlResult> {
   };
 }
 
-/** Read a collection's declared model (`kv`/`table`/`mixed`/…), or null if it doesn't exist. */
-async function collectionModel(name: string): Promise<string | null> {
-  // Query the system table (always `table` model, so this SELECT can't mis-declare anything).
-  const r = await request("POST", "/query", {
-    query: `SELECT model FROM red.collections WHERE name = '${name}'`,
-  });
-  if (r.status >= 300) return null;
-  try {
-    const j = JSON.parse(r.body) as {
-      result?: { records?: Array<{ values?: { model?: string } }> };
-    };
-    return j.result?.records?.[0]?.values?.model ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /**
- * Ensure `name` is usable as a KV collection.
- *
- * In reddb 1.11.0 a collection's model is fixed by first use: the first `PUT …/kvs/{key}`
- * auto-creates it as model `kv` (exactly what we want), so we deliberately do NOT pre-create
- * it — a bare `POST /collections` only yields a transient `mixed` model and can't set `kv`.
- * The hazard is a store written by an OLDER build, whose `kvList` used `SELECT` and thus
- * locked these collections to model `table`, which now rejects KV writes with
- * `INVALID_OPERATION`. `POST` is idempotent and won't change an existing model, so we heal:
- * if the collection already exists with a non-`kv` model, drop it (its rows are already
- * invisible to our `/scan` reader) and let the first `kvPut` recreate it as `kv`.
+ * Ensure `name` exists as a KV collection. `CREATE KV` errors if it already exists, so we
+ * check the `red.collections` catalog first and only create when absent.
  */
 export async function ensureKvCollection(name: string): Promise<void> {
-  const model = await collectionModel(name);
-  if (model && model !== "kv") {
-    await request("DELETE", `/collections/${name}`);
-  }
+  const found = await rql(
+    `SELECT name FROM red.collections WHERE name = '${esc(name)}'`
+  );
+  if (found.ok && found.records.length > 0) return;
+  const c = await rql(`CREATE KV ${name}`);
+  if (!c.ok && !/already exists/i.test(c.error ?? ""))
+    throw new Error(`CREATE KV ${name}: ${c.error}`);
 }
 
 export async function kvPut(
@@ -124,64 +87,47 @@ export async function kvPut(
   key: string,
   value: unknown
 ): Promise<void> {
-  const r = await request("PUT", `/collections/${collection}/kvs/${key}`, {
-    value: JSON.stringify(value),
-  });
-  if (r.status >= 300) {
-    throw new Error(`kvPut ${collection}/${key} → ${r.status} ${r.body}`);
-  }
+  const r = await rql(
+    `KV PUT ${kvRef(collection, key)} = '${esc(JSON.stringify(value))}'`
+  );
+  if (!r.ok) throw new Error(`kvPut ${collection}/${key}: ${r.error}`);
 }
 
 export async function kvGet<T>(
   collection: string,
   key: string
 ): Promise<T | null> {
-  const r = await request("GET", `/collections/${collection}/kvs/${key}`);
-  if (r.status === 404) return null;
-  const j = JSON.parse(r.body) as { ok?: boolean; value?: string };
-  if (!j.ok || j.value == null) return null;
-  return JSON.parse(j.value) as T;
-}
-
-export async function kvDelete(collection: string, key: string): Promise<void> {
-  await request("DELETE", `/collections/${collection}/kvs/${key}`);
-}
-
-interface ScanItem {
-  data?: { named?: { key?: string; value?: string } };
-}
-
-/**
- * List every entry of a KV collection via the KV-native `/scan` endpoint.
- *
- * We deliberately do NOT use `POST /query {SELECT key,value}`: in reddb 1.11.0 a SQL SELECT
- * declares the collection's model as `table`, after which KV writes are rejected with
- * `INVALID_OPERATION: collection is declared as 'table' and does not allow 'kv' operations`.
- * `/scan` returns the same rows (`items[].data.named.{key,value}`) and keeps the model `kv`.
- * (In 0.1.5 `/scan` was broken — fixed in 1.11.0, the version we now bundle.)
- */
-export async function kvCount(collection: string): Promise<number> {
-  const r = await request("GET", `/collections/${collection}/scan`);
-  if (r.status >= 300) return 0;
+  const r = await rql(`KV GET ${kvRef(collection, key)}`);
+  if (!r.ok || r.records.length === 0) return null;
+  const v = r.records[0]!.value;
+  if (typeof v !== "string") return null;
   try {
-    const j = JSON.parse(r.body) as { items?: ScanItem[] };
-    return j.items?.length ?? 0;
+    return JSON.parse(v) as T;
   } catch {
-    return 0;
+    return null;
   }
 }
 
+export async function kvDelete(collection: string, key: string): Promise<void> {
+  await rql(`KV DELETE ${kvRef(collection, key)}`);
+}
+
+export async function kvCount(collection: string): Promise<number> {
+  const r = await rql(`LIST KV ${collection}`);
+  return r.ok ? r.records.length : 0;
+}
+
+/** Every entry of a KV collection (`LIST KV`). Values are parsed back from their JSON. */
 export async function kvList<T>(
   collection: string
 ): Promise<Array<{ key: string; value: T }>> {
-  const r = await request("GET", `/collections/${collection}/scan`);
-  if (r.status >= 300) return [];
-  const j = JSON.parse(r.body) as { items?: ScanItem[] };
+  const r = await rql(`LIST KV ${collection}`);
+  if (!r.ok) return [];
   const out: Array<{ key: string; value: T }> = [];
-  for (const it of j.items ?? []) {
-    const k = it.data?.named?.key;
-    const v = it.data?.named?.value;
-    if (k == null || v == null) continue;
+  for (const rec of r.records) {
+    const k = rec.key;
+    const v = rec.value;
+    if (typeof k !== "string" || typeof v !== "string") continue;
     try {
       out.push({ key: k, value: JSON.parse(v) as T });
     } catch {
