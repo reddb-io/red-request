@@ -1,6 +1,9 @@
 import {
   mergeScopes,
   storedEnvironmentSchema,
+  INTROSPECTION_QUERY,
+  parseSchema,
+  type GqlSchema,
   newRequest,
   curlToRequest,
   openapiToCollection,
@@ -32,7 +35,6 @@ import {
   type RunnerResult,
 } from "@red-request/core";
 import { parse as parseYaml } from "yaml";
-import { INTROSPECTION_QUERY, parseSchema, type GqlSchema } from "./graphql";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import {

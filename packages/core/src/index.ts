@@ -15,3 +15,4 @@ export * from "./import-insomnia.js";
 export * from "./export-postman.js";
 export * from "./export-insomnia.js";
 export * from "./proxy.js";
+export * from "./graphql.js";
