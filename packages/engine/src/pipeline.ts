@@ -8,18 +8,40 @@ import {
 } from "@red-request/core";
 import { dispatch } from "./recker.js";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
-import { runWhois, runDns, runTcp, runTls, runUdp, runPing } from "./protocols.js";
+import {
+  runWhois,
+  runDns,
+  runTcp,
+  runTls,
+  runUdp,
+  runPing,
+} from "./protocols.js";
 
 /** Dispatch a non-HTTP kind to its protocol handler. */
 function dispatchProtocol(def: RequestDefinition): Promise<ResponseResult> {
   const n = def.net;
   switch (def.kind) {
     case "tcp":
-      return runTcp(n.host, n.port, n.payload, n.timeoutMs);
+      return runTcp(n.host, n.port, n.payload, n.timeoutMs, n.payloadMode);
     case "tls":
-      return runTls(n.host, n.port, n.payload, n.sni, def.insecure, n.timeoutMs);
+      return runTls(
+        n.host,
+        n.port,
+        n.payload,
+        n.sni,
+        def.insecure,
+        n.timeoutMs,
+        n.payloadMode
+      );
     case "udp":
-      return runUdp(n.host, n.port, n.payload, n.waitResponse, n.timeoutMs);
+      return runUdp(
+        n.host,
+        n.port,
+        n.payload,
+        n.waitResponse,
+        n.timeoutMs,
+        n.payloadMode
+      );
     case "ping":
       return runPing(n.host, n.port, n.count, n.timeoutMs);
     case "whois":
