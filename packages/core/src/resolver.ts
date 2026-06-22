@@ -4,7 +4,9 @@ import type { AuthConfig } from "./auth.js";
 /** A flat name→value map. */
 export type VariableScope = Record<string, string>;
 
-const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*\}\}/g;
+// Matches both flat variable tokens (`{{var}}`, group 1) and namespaced
+// function-call tokens (`{{ns.fn()}}`, group 2 captures the parentheses).
+const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*(\(\s*\))?\s*\}\}/g;
 const MAX_PASSES = 5;
 
 // ---------------------------------------------------------------------------
@@ -107,6 +109,61 @@ export function resolveDynamic(name: string): string | undefined {
   return DYNAMIC_VARS[name]?.gen();
 }
 
+// ---------------------------------------------------------------------------
+// Function-call interpolation — namespaced `{{ns.fn()}}` tokens dispatched
+// through a registry and generated fresh on every resolve (never stored). This
+// slice ships the zero-argument `rand.*` catalog; the argument grammar and
+// parameterized functions land in a later slice.
+// ---------------------------------------------------------------------------
+
+/**
+ * namespace.name → (generator, human description). Exposed for downstream use
+ * (autocomplete/highlighting will consume the catalog). Every entry here is
+ * zero-arg and called with empty `()`.
+ */
+export const TEMPLATE_FUNCTIONS: Record<
+  string,
+  { gen: () => string; desc: string }
+> = {
+  "rand.uuid": { gen: uuid, desc: "random UUID v4" },
+  "rand.guid": { gen: uuid, desc: "random UUID v4 (alias)" },
+  "rand.email": {
+    gen: () =>
+      `${pick(FIRST).toLowerCase()}.${pick(LAST).toLowerCase()}${randInt(1, 999)}@example.com`,
+    desc: "random email",
+  },
+  "rand.username": {
+    gen: () =>
+      `${pick(FIRST).toLowerCase()}${pick(LAST).toLowerCase()}${randInt(1, 999)}`,
+    desc: "random username",
+  },
+  "rand.firstName": { gen: () => pick(FIRST), desc: "random first name" },
+  "rand.lastName": { gen: () => pick(LAST), desc: "random last name" },
+  "rand.fullName": {
+    gen: () => `${pick(FIRST)} ${pick(LAST)}`,
+    desc: "random full name",
+  },
+  "rand.word": { gen: () => pick(WORDS), desc: "random word" },
+  "rand.bool": {
+    gen: () => (Math.random() < 0.5 ? "true" : "false"),
+    desc: "true / false",
+  },
+  "rand.ip": {
+    gen: () =>
+      `${randInt(1, 255)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 255)}`,
+    desc: "random IPv4",
+  },
+  "rand.hexColor": {
+    gen: () => "#" + randInt(0, 0xffffff).toString(16).padStart(6, "0"),
+    desc: "random hex colour",
+  },
+};
+
+/** Resolve a `{{ns.fn()}}` function token, or undefined if the function is unknown. */
+export function resolveFunction(name: string): string | undefined {
+  return TEMPLATE_FUNCTIONS[name]?.gen();
+}
+
 /**
  * Merge cascading scopes into one lookup. Earlier scopes win, so callers pass them in
  * precedence order: request → folder → collection → environment → secret.
@@ -140,23 +197,37 @@ export function resolveTemplate(
   let value = template;
   for (let pass = 0; pass < MAX_PASSES; pass++) {
     let changed = false;
-    value = value.replace(PLACEHOLDER, (match, name: string) => {
-      if (Object.prototype.hasOwnProperty.call(lookup, name)) {
-        changed = true;
-        return lookup[name] ?? "";
+    value = value.replace(
+      PLACEHOLDER,
+      (match, name: string, call: string | undefined) => {
+        // A trailing `()` marks a function-call token; dispatch through the registry.
+        if (call !== undefined) {
+          const fn = resolveFunction(name);
+          if (fn !== undefined) {
+            changed = true;
+            return fn;
+          }
+          return match;
+        }
+        if (Object.prototype.hasOwnProperty.call(lookup, name)) {
+          changed = true;
+          return lookup[name] ?? "";
+        }
+        const dyn = resolveDynamic(name);
+        if (dyn !== undefined) {
+          changed = true;
+          return dyn;
+        }
+        return match;
       }
-      const dyn = resolveDynamic(name);
-      if (dyn !== undefined) {
-        changed = true;
-        return dyn;
-      }
-      return match;
-    });
+    );
     if (!changed) break;
   }
-  // Whatever placeholders remain are genuinely unknown (dynamic ones are already gone).
+  // Whatever placeholders remain are genuinely unknown (resolved dynamic/function
+  // tokens are already gone). Report function tokens with their `()` so they read
+  // distinctly from unknown variables.
   for (const m of value.matchAll(PLACEHOLDER)) {
-    if (m[1]) unresolved.add(m[1]);
+    if (m[1]) unresolved.add(m[2] !== undefined ? `${m[1]}()` : m[1]);
   }
   return { value, unresolved: [...unresolved] };
 }
