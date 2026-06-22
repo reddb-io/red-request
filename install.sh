@@ -4,19 +4,15 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 #   curl -fsSL .../install.sh | bash -s -- --version v0.1.0
+#   curl -fsSL .../install.sh | bash -s -- --appimage      # single-file AppImage instead
 #
-# What it does:
-#   • detects your OS/architecture
-#   • resolves the latest release (or --version <tag>)
-#   • downloads the single-file app binary  (Linux: AppImage · Windows: .exe · macOS: .dmg)
-#   • verifies its sha256 against the release checksums.txt
-#   • drops it on your PATH at ~/.local/bin/red-request  (+ an `rr` shortcut)
-#   • if a copy is already installed, auto-upgrades in place (and no-ops when current)
+# Linux installs the **.deb** by default — it links the system's WebKitGTK/glibc, so the
+# bundled engine/red sidecars start cleanly (the AppImage, built on an older glibc, can
+# segfault those sidecars on newer hosts). Needs apt/sudo. Pass --appimage for the portable
+# single-file build (no sudo, but see the glibc caveat above).
 #
-# Linux is fully self-service (AppImage = one file, no apt, no sudo, no deps to resolve).
-# macOS/Windows ship GUI installers; the script verifies + hands you the file to open.
-#
-# Remove everything with the matching uninstall.sh.
+# Either way the asset's sha256 is verified against the release checksums.txt. macOS/Windows
+# ship GUI installers; the script verifies + hands you the file to open. Remove with uninstall.sh.
 set -euo pipefail
 
 REPO="reddb-io/red-request"
@@ -28,11 +24,14 @@ DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 VERSION=""
 FORCE=0
 MODIFY_PATH=1
+LINUX_FORMAT="deb" # deb (default) | appimage
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version) VERSION="${2:-}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:?}"; shift 2 ;;
+    --appimage) LINUX_FORMAT="appimage"; shift ;;
+    --deb) LINUX_FORMAT="deb"; shift ;;
     --force) FORCE=1; shift ;;
     --no-modify-path) MODIFY_PATH=0; shift ;;
     -h|--help)
@@ -41,9 +40,11 @@ Red Request installer
 
 Usage: install.sh [OPTIONS]
   --version <vX.Y.Z>     Install/upgrade to a specific release (default: latest)
-  --install-dir <path>   Where to put the binary (default: ~/.local/bin)
+  --appimage             Linux: install the single-file AppImage to ~/.local/bin (no sudo)
+  --deb                  Linux: install the .deb via apt (default; needs sudo)
+  --install-dir <path>   AppImage only — where to put the binary (default: ~/.local/bin)
   --force                Reinstall even if already on the latest version
-  --no-modify-path       Don't touch your shell rc; just print the PATH hint
+  --no-modify-path       AppImage only — don't touch your shell rc; just print the PATH hint
   -h, --help             This help
 
 Env: RED_REQUEST_INSTALL_DIR overrides --install-dir.
@@ -76,10 +77,10 @@ detect_platform() {
   esac
 }
 
-# Filename of the single-file asset for this platform (must match release.yml).
+# Filename of the asset for this platform (must match release.yml's staged names).
 asset_name() {
   case "$OS" in
-    linux)   printf '%s-linux-%s.AppImage' "$BIN_NAME" "$ARCH" ;;
+    linux)   [[ "$LINUX_FORMAT" == "appimage" ]] && printf '%s-linux-%s.AppImage' "$BIN_NAME" "$ARCH" || printf '%s-linux-%s.deb' "$BIN_NAME" "$ARCH" ;;
     darwin)  printf '%s-darwin-%s.dmg' "$BIN_NAME" "$ARCH" ;;
     windows) printf '%s-windows-%s-setup.exe' "$BIN_NAME" "$ARCH" ;;
   esac
@@ -133,7 +134,50 @@ verify_sha256() { # file checksums_text asset_name
   ok "sha256 verified"
 }
 
-# ── path wiring ────────────────────────────────────────────────────────────
+# Download $asset for $tag into $dir and verify it. Sets $DL to the file path.
+fetch_verified() { # tag asset dir
+  local tag="$1" asset="$2" dir="$3" url ck_text
+  url="$(asset_url "$tag" "$asset")"
+  say "downloading $asset"
+  download "$url" "$dir/$asset" || err "download failed — is $asset published in $tag? ($url)"
+  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout 2>/dev/null || true)"
+  if [[ -n "$ck_text" ]]; then verify_sha256 "$dir/$asset" "$ck_text" "$asset"
+  else warn "no checksums.txt in $tag — skipping verify"; fi
+  DL="$dir/$asset"
+}
+
+# ── linux: .deb via apt (default) ──────────────────────────────────────────
+deb_installed_version() { dpkg-query -W -f='${Version}' "$BIN_NAME" 2>/dev/null || printf ''; }
+
+install_deb() {
+  have dpkg || err "no dpkg on this system — re-run with --appimage for the portable build"
+  local tag asset cur tmp sudo=""
+  tag="$(resolve_tag)" || err "could not resolve the latest release tag"
+  asset="$(asset_name)"
+  cur="$(deb_installed_version)"
+
+  if [[ -n "$cur" && "v$cur" == "$tag" && "$FORCE" != "1" ]]; then
+    ok "Red Request $cur (.deb) is already the latest — nothing to do. (--force to reinstall)"
+    return 0
+  fi
+
+  say "${cur:+upgrading $cur → }${tag} (.deb · $OS/$ARCH)"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
+  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
+  fetch_verified "$tag" "$asset" "$tmp"
+
+  [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
+  say "installing via apt (you may be prompted for your password)…"
+  if have apt-get; then
+    $sudo apt-get install -y ${FORCE:+--reinstall --allow-downgrades} "$DL"
+  else
+    $sudo dpkg -i "$DL" || { $sudo apt-get -f install -y; $sudo dpkg -i "$DL"; }
+  fi
+  ok "${cur:+upgraded to }Red Request $tag installed (.deb)"
+  say "launch it from your app menu, or run:  $BIN_NAME"
+}
+
+# ── path wiring (AppImage only) ─────────────────────────────────────────────
 on_path() { case ":$PATH:" in *":$INSTALL_DIR:"*) return 0 ;; *) return 1 ;; esac; }
 
 rc_file() {
@@ -160,9 +204,7 @@ ensure_path() {
   ok "added $INSTALL_DIR to PATH in $rc — open a new shell or: source $rc"
 }
 
-# ── desktop entry (best-effort, Linux only) ────────────────────────────────
 write_desktop_entry() {
-  [[ "$OS" == "linux" ]] || return 0
   mkdir -p "$DESKTOP_DIR" 2>/dev/null || return 0
   cat > "$DESKTOP_DIR/red-request.desktop" <<EOF || return 0
 [Desktop Entry]
@@ -176,36 +218,28 @@ EOF
   have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
 }
 
-installed_version() { [[ -f "$DATA_DIR/version" ]] && cat "$DATA_DIR/version" || printf ''; }
+appimage_installed_version() { [[ -f "$DATA_DIR/version" ]] && cat "$DATA_DIR/version" || printf ''; }
 
-# ── linux: the full magic path ─────────────────────────────────────────────
-install_linux() {
-  local tag cur asset url ck_text tmp
+# ── linux: AppImage single-file (opt-in via --appimage) ─────────────────────
+install_appimage() {
+  local tag cur asset tmp
   tag="$(resolve_tag)" || err "could not resolve the latest release tag"
   asset="$(asset_name)"
-  cur="$(installed_version)"
+  cur="$(appimage_installed_version)"
 
   if [[ -n "$cur" && "$cur" == "$tag" && "$FORCE" != "1" ]]; then
-    ok "Red Request $cur is already the latest — nothing to do. (--force to reinstall)"
+    ok "Red Request $cur (AppImage) is already the latest — nothing to do. (--force to reinstall)"
     return 0
   fi
 
-  if [[ -n "$cur" ]]; then say "upgrading $cur → $tag ($OS/$ARCH)"; else say "installing $tag ($OS/$ARCH)"; fi
-  url="$(asset_url "$tag" "$asset")"
+  if [[ -n "$cur" ]]; then say "upgrading $cur → $tag (AppImage · $OS/$ARCH)"; else say "installing $tag (AppImage · $OS/$ARCH)"; fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
-
-  say "downloading $asset"
-  download "$url" "$tmp/$asset" || err "download failed — is $asset published in $tag? ($url)"
-
-  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout 2>/dev/null || true)"
-  if [[ -n "$ck_text" ]]; then verify_sha256 "$tmp/$asset" "$ck_text" "$asset"
-  else warn "no checksums.txt in $tag — skipping verify"; fi
+  fetch_verified "$tag" "$asset" "$tmp"
 
   mkdir -p "$INSTALL_DIR" "$DATA_DIR"
-  chmod +x "$tmp/$asset"
-  # replace via temp name so an in-use binary is swapped, not truncated.
-  mv -f "$tmp/$asset" "$INSTALL_DIR/$BIN_NAME.new"
+  chmod +x "$DL"
+  mv -f "$DL" "$INSTALL_DIR/$BIN_NAME.new"
   mv -f "$INSTALL_DIR/$BIN_NAME.new" "$INSTALL_DIR/$BIN_NAME"
   ln -sf "$BIN_NAME" "$INSTALL_DIR/$SHORTCUT"
   printf '%s\n' "$tag" > "$DATA_DIR/version"
@@ -232,7 +266,7 @@ install_gui() {
 main() {
   detect_platform
   case "$OS" in
-    linux)          install_linux ;;
+    linux)          [[ "$LINUX_FORMAT" == "appimage" ]] && install_appimage || install_deb ;;
     darwin|windows) install_gui ;;
   esac
 }
