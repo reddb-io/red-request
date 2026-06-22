@@ -426,6 +426,17 @@ class Workspace {
     this.tests = [];
     this.logs = [];
     this.scriptError = null;
+    const body = this.activeReq.body;
+    if (body.type === "graphql" && body.variables?.trim()) {
+      try {
+        JSON.parse(body.variables);
+      } catch {
+        this.errorMsg =
+          "GraphQL variables must be valid JSON — fix the Variables tab before sending";
+        this.sending = false;
+        return;
+      }
+    }
     try {
       const variables = await this.buildVariables();
       const request = await this.applyOAuth2(
