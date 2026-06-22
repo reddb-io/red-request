@@ -86,19 +86,19 @@ single `brand.config.json`. Ship it as _your_ product without forking a line of 
 
 ## Make it yours — white-label
 
-Everything that says "Red Request" comes from one file. Say you're at **Stone** and want a
-green build named **Stone API** to hand to your team:
+Everything that says "Red Request" comes from one file. Say you're at **Google** and want a
+blue build named **Google API** to hand to your team:
 
 ```jsonc
 // brand/brand.config.json
 {
-  "productName": "Stone API",
-  "binaryName": "stone-api",
-  "identifier": "br.com.stone.api",
-  "accentColor": "#00A868", // everything actionable turns green
-  "monogram": "S", // the badge in the sidebar/launcher
-  "iconPath": "brand/assets/stone-1024.png", // square PNG → app/installer icon
-  "deepLinkScheme": "stoneapi",
+  "productName": "Google API",
+  "binaryName": "google-api",
+  "identifier": "com.google.api",
+  "accentColor": "#4285F4", // everything actionable turns blue
+  "monogram": "G", // the badge in the sidebar/launcher
+  "iconPath": "brand/assets/google-1024.png", // square PNG → app/installer icon
+  "deepLinkScheme": "googleapi",
   "bgTokens": {
     "bg-0": "#0b0b0d",
     "bg-1": "#141417",
