@@ -19,6 +19,29 @@
   let showRunner = $state(false);
   let showCode = $state(false);
   let showSchema = $state(false);
+  let gqlTab = $state<"query" | "variables">("query");
+
+  const gqlVarsError = $derived.by(() => {
+    if (ws.activeReq?.body.type !== "graphql") return null;
+    const v = ws.activeReq.body.variables;
+    if (!v || !v.trim() || v.trim() === "{}") return null;
+    try { JSON.parse(v); return null; } catch { return "Invalid JSON"; }
+  });
+
+  function prettifyVars() {
+    const req = ws.activeReq;
+    if (!req) return;
+    try {
+      req.body.variables = JSON.stringify(JSON.parse(req.body.variables ?? "{}"), null, 2);
+    } catch { /* not valid JSON — leave untouched */ }
+  }
+
+  // Ensure variables field is initialised for loaded graphql requests.
+  $effect(() => {
+    if (ws.activeReq?.body.type === "graphql") {
+      ws.activeReq.body.variables ??= "{}";
+    }
+  });
 
   const methods = httpMethodSchema.options;
   const kinds = requestKindSchema.options;
@@ -49,9 +72,7 @@
   const bodyTypes = ["none", "json", "raw", "form", "xml", "graphql"] as const;
 
   // Pretty-print the body (JSON / GraphQL payloads); leaves content as-is if it doesn't parse.
-  const canPrettify = $derived(
-    ws.activeReq?.body.type === "json" || ws.activeReq?.body.type === "graphql"
-  );
+  const canPrettify = $derived(ws.activeReq?.body.type === "json");
   function prettify() {
     const req = ws.activeReq;
     if (!req) return;
@@ -412,33 +433,46 @@
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
           {:else if ws.activeReq.body.type === "graphql"}
-            <div class="flex items-center justify-between">
-              <h4 class="label">Query</h4>
-              <Button variant="outline" size="xs" onclick={() => (showSchema = true)}
-                title="Fetch the GraphQL schema (introspection)">Schema</Button
-              >
+            <div class="flex items-center gap-2 border-b border-border pb-1">
+              <div class="flex gap-1">
+                <button onclick={() => (gqlTab = "query")} class="tab" class:is-active={gqlTab === "query"}>Query</button>
+                <button onclick={() => (gqlTab = "variables")} class="tab" class:is-active={gqlTab === "variables"}>
+                  Variables{#if gqlVarsError}<span class="ml-1 text-red-400">!</span>{/if}
+                </button>
+              </div>
+              <Button variant="outline" size="xs" onclick={() => (showSchema = true)} class="ml-auto"
+                title="Fetch the GraphQL schema (introspection)">Schema</Button>
             </div>
-            <VarField
-              bind:value={ws.activeReq.body.content}
-              known={ws.knownVars}
-              values={ws.varTitles}
-              multiline
-              lineNumbers
-              rows={9}
-              ariaLabel="GraphQL query"
-              placeholder={"query {\n  viewer { id name }\n}"}
-            />
-            <h4 class="label mt-1">Variables (JSON)</h4>
-            <VarField
-              bind:value={ws.activeReq.body.variables}
-              known={ws.knownVars}
-              values={ws.varTitles}
-              multiline
-              lineNumbers
-              rows={4}
-              ariaLabel="GraphQL variables"
-              placeholder={'{ "id": 1 }'}
-            />
+            {#if gqlTab === "query"}
+              <VarField
+                bind:value={ws.activeReq.body.content}
+                known={ws.knownVars}
+                values={ws.varTitles}
+                multiline
+                lineNumbers
+                rows={13}
+                ariaLabel="GraphQL query"
+                placeholder={"query {\n  viewer { id name }\n}"}
+              />
+            {:else}
+              <div class="flex items-center justify-between">
+                <p class="hint">JSON object sent alongside the query.</p>
+                <Button variant="outline" size="xs" onclick={prettifyVars}>Prettify</Button>
+              </div>
+              <VarField
+                bind:value={ws.activeReq.body.variables}
+                known={ws.knownVars}
+                values={ws.varTitles}
+                multiline
+                lineNumbers
+                rows={12}
+                ariaLabel="GraphQL variables"
+                placeholder={'{\n  "id": 1\n}'}
+              />
+              {#if gqlVarsError}
+                <p class="mt-1 text-xs text-red-400">{gqlVarsError}</p>
+              {/if}
+            {/if}
           {:else if ws.activeReq.body.type !== "none"}
             <VarField
               bind:value={ws.activeReq.body.content}
