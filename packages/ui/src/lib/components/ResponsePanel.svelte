@@ -5,10 +5,11 @@
   import { Input } from "./ui/input/index.js";
   import JsonTree from "./JsonTree.svelte";
   import HexViewer from "./HexViewer.svelte";
+  import TlsPanel from "./TlsPanel.svelte";
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
-  let tab = $state<"body" | "headers" | "timings" | "tests">("body");
+  let tab = $state<"body" | "headers" | "timings" | "tls" | "tests">("body");
   let bodyQuery = $state("");
   let saved = $state(false);
 
@@ -324,6 +325,16 @@
           class:is-active={tab === t}>{t}</button
         >
       {/each}
+      <button
+        onclick={() => (tab = "tls")}
+        class="tab"
+        class:is-active={tab === "tls"}
+        title="TLS / encryption details"
+      >
+        {#if r.meta?.tls}
+          <span class="mr-1 text-emerald-400">&#x25CF;</span>
+        {/if}tls</button
+      >
       {#if hasScripts}
         <button
           onclick={() => (tab = "tests")}
@@ -518,6 +529,8 @@
             </div>
           {/if}
         </div>
+      {:else if tab === "tls"}
+        <TlsPanel response={r} />
       {:else}
         <div class="flex flex-col gap-3 text-xs">
           {#if ws.scriptError}
