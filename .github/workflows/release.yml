@@ -21,6 +21,9 @@ env:
   REDDB_VERSION: v1.11.0
   # Run AppImage tooling (linuxdeploy) without FUSE, which CI runners lack.
   APPIMAGE_EXTRACT_AND_RUN: "1"
+  # linuxdeploy's strip pass chokes on some shared objects under the no-FUSE extract path
+  # and aborts the whole AppImage bundle ("failed to run linuxdeploy"); skip it.
+  NO_STRIP: "1"
 
 jobs:
   build:
@@ -121,6 +124,23 @@ jobs:
           git clone --depth 1 --branch "$REDDB_VERSION" https://github.com/reddb-io/reddb.git "$RUNNER_TEMP/reddb"
           REDDB_SRC="$RUNNER_TEMP/reddb" pnpm reddb:sync
 
+      # linuxdeploy runs `ldd` on every bundled ELF, including the externalBin sidecars
+      # (`red` from reddb, `red-request-engine` from Bun --compile). Those are effectively
+      # static/packed, so `ldd` exits 1 ("not a dynamic executable") and linuxdeploy aborts
+      # the whole AppImage ("Failed to run ldd: exited with code 1"). Shim ldd to print real
+      # output but never fail, so the sidecars are bundled as-is and the AppImage completes.
+      - name: Make ldd tolerant of static sidecars (AppImage)
+        if: runner.os == 'Linux'
+        run: |
+          shim="$HOME/.ldd-shim"
+          mkdir -p "$shim"
+          cat > "$shim/ldd" <<'SH'
+          #!/usr/bin/env bash
+          /usr/bin/ldd "$@"; exit 0
+          SH
+          chmod +x "$shim/ldd"
+          echo "$shim" >> "$GITHUB_PATH"
+
       - name: Build + publish bundles
         uses: tauri-apps/tauri-action@v0
         env:
@@ -169,7 +189,7 @@ jobs:
             macOS)
               stage "$BR/dmg/*.dmg"           "red-request-darwin-aarch64.dmg" ;;
             Windows)
-              stage "$BR"/nsis/*-setup.exe    "red-request-windows-x86_64-setup.exe" ;;
+              stage "$BR/nsis/*-setup.exe"    "red-request-windows-x86_64-setup.exe" ;;
           esac
           ls -la "$OUT"
 
