@@ -123,7 +123,12 @@ class Workspace {
     "idle"
   );
   wsMessages = $state<
-    { dir: "in" | "out" | "sys"; data: string; ts: number }[]
+    {
+      dir: "in" | "out" | "sys";
+      data: string;
+      ts: number;
+      status?: "sent" | "error";
+    }[]
   >([]);
   private wsConnId: string | null = null;
   private wsUnlisten: UnlistenFn | null = null;
@@ -905,10 +910,19 @@ class Workspace {
     );
   }
 
-  private pushWs(dir: "in" | "out" | "sys", data: string): void {
+  private pushWs(
+    dir: "in" | "out" | "sys",
+    data: string,
+    status?: "sent" | "error"
+  ): void {
     this.wsMessages = [
       ...this.wsMessages.slice(-499),
-      { dir, data, ts: Date.now() },
+      {
+        dir,
+        data,
+        ts: Date.now(),
+        ...(status !== undefined ? { status } : {}),
+      },
     ];
   }
 
@@ -925,7 +939,13 @@ class Workspace {
         this.pushWs("sys", `● connected ${d.url ?? ""}`.trim());
         break;
       case "message":
-        this.pushWs(d.dir === "out" ? "out" : "in", String(d.data ?? ""));
+        this.pushWs(
+          d.dir === "out" ? "out" : "in",
+          String(d.data ?? ""),
+          d.dir === "out"
+            ? (d.status as "sent" | "error" | undefined)
+            : undefined
+        );
         break;
       case "close":
         this.wsStatus = "closed";

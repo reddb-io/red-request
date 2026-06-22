@@ -66,12 +66,25 @@
           <span class="shrink-0 text-fg-faint">{fmtTime(m.ts)}</span>
           <span
             class="shrink-0 {m.dir === 'out'
-              ? 'text-[var(--color-brand)]'
+              ? m.status === 'error'
+                ? 'text-red-400'
+                : 'text-[var(--color-brand)]'
               : m.dir === 'in'
                 ? 'text-emerald-400'
                 : 'text-fg-faint'}"
             >{m.dir === "out" ? "▲" : m.dir === "in" ? "▼" : "·"}</span
           >
+          {#if m.dir === "out"}
+            <span
+              class="shrink-0 {m.status === 'error'
+                ? 'text-red-400'
+                : m.status === 'sent'
+                  ? 'text-fg-faint'
+                  : 'text-fg-faint'}"
+              title={m.status === "sent" ? "delivered" : m.status === "error" ? "send failed" : ""}
+              >{m.status === "sent" ? "✓" : m.status === "error" ? "✗" : ""}</span
+            >
+          {/if}
           <span
             class="break-all whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
             >{m.data}</span

@@ -46,10 +46,18 @@ export function wsSend(
   data: string
 ): { ok: boolean; error?: string } {
   const ws = conns.get(id);
-  if (!ws || ws.readyState !== 1) return { ok: false, error: "not connected" };
-  ws.send(data);
-  emit(id, "message", { dir: "out", data });
-  return { ok: true };
+  if (!ws || ws.readyState !== 1) {
+    emit(id, "message", { dir: "out", data, status: "error" });
+    return { ok: false, error: "not connected" };
+  }
+  try {
+    ws.send(data);
+    emit(id, "message", { dir: "out", data, status: "sent" });
+    return { ok: true };
+  } catch (e: any) {
+    emit(id, "message", { dir: "out", data, status: "error" });
+    return { ok: false, error: e?.message ?? "send failed" };
+  }
 }
 
 export function wsClose(id: string): { ok: boolean } {
