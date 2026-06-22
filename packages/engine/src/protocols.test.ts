@@ -279,3 +279,62 @@ describe("runTcp hex mode", () => {
     expect(r.error?.message).toMatch(/invalid hex/);
   });
 });
+
+describe("runUdp multicast", () => {
+  // 239.x.x.x is the administratively-scoped (organisation-local) multicast range —
+  // safe for a loopback test that never leaves the host.
+  const GROUP = "239.255.42.99";
+
+  it("sends to a multicast group and collects a response", async () => {
+    // A group member bound to the group port that echoes datagrams back to the sender.
+    const member = dgram.createSocket({ type: "udp4", reuseAddr: true });
+    member.on("message", (msg, rinfo) => {
+      member.send(
+        Buffer.concat([Buffer.from("mcast:"), msg]),
+        rinfo.port,
+        rinfo.address
+      );
+    });
+    const groupPort = await new Promise<number>((res) => {
+      member.bind(0, () => {
+        member.addMembership(GROUP);
+        member.setMulticastLoopback(true);
+        res((member.address() as AddressInfo).port);
+      });
+    });
+
+    try {
+      const r = await runUdp(
+        "239.255.42.99",
+        groupPort,
+        "ping",
+        true,
+        2000,
+        "text",
+        {
+          ttl: 1,
+        }
+      );
+      expect(r.ok).toBe(true);
+      expect(r.bodyText).toContain("mcast:ping");
+    } finally {
+      await new Promise<void>((res) => member.close(() => res()));
+    }
+  });
+
+  it("reports no response when the group is silent (send still succeeds)", async () => {
+    const r = await runUdp(
+      "239.255.42.123",
+      45999,
+      "hello",
+      true,
+      400,
+      "text",
+      {
+        ttl: 1,
+      }
+    );
+    expect(r.ok).toBe(true);
+    expect(r.bodyText).toContain("no response");
+  });
+});
