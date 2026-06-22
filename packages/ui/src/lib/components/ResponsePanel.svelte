@@ -2,8 +2,66 @@
   import { ws } from "../store.svelte";
   import type { ResponseResult } from "@red-request/core";
   import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
+  import JsonTree from "./JsonTree.svelte";
+  import { save } from "@tauri-apps/plugin-dialog";
+  import * as fs from "../fs";
 
   let tab = $state<"body" | "headers" | "timings" | "tests">("body");
+  let bodyQuery = $state("");
+  let saved = $state(false);
+
+  function extFor(ct: string): string {
+    if (ct.includes("json")) return "json";
+    if (ct.includes("html")) return "html";
+    if (ct.includes("xml")) return "xml";
+    if (ct.includes("csv")) return "csv";
+    if (ct.includes("javascript")) return "js";
+    return "txt";
+  }
+  async function saveToFile() {
+    if (!r) return;
+    try {
+      const path = await save({ defaultPath: `response.${extFor(r.contentType ?? "")}` });
+      if (!path) return;
+      await fs.writeText(path, prettyBody);
+      saved = true;
+      setTimeout(() => (saved = false), 1200);
+    } catch {
+      /* user cancelled or fs error */
+    }
+  }
+
+  // Body search: matching lines (with their real line number), and a per-line split for
+  // highlighting. Empty query → the fast full <pre> render below.
+  const matches = $derived.by(() => {
+    const q = bodyQuery.trim().toLowerCase();
+    if (!q) return null;
+    return bodyLines
+      .map((line, i) => ({ n: i + 1, line }))
+      .filter((x) => x.line.toLowerCase().includes(q));
+  });
+  const matchCount = $derived.by(() => {
+    const q = bodyQuery.trim();
+    if (!q || !matches) return 0;
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    return matches.reduce((c, m) => c + (m.line.match(re)?.length ?? 0), 0);
+  });
+  function splitLine(line: string): { text: string; hit: boolean }[] {
+    const q = bodyQuery.trim();
+    if (!q) return [{ text: line, hit: false }];
+    const out: { text: string; hit: boolean }[] = [];
+    const lc = line.toLowerCase();
+    const ql = q.toLowerCase();
+    let i = 0;
+    for (let j = lc.indexOf(ql); j !== -1; j = lc.indexOf(ql, i)) {
+      if (j > i) out.push({ text: line.slice(i, j), hit: false });
+      out.push({ text: line.slice(j, j + q.length), hit: true });
+      i = j + q.length;
+    }
+    if (i < line.length) out.push({ text: line.slice(i), hit: false });
+    return out;
+  }
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -18,7 +76,12 @@
     }
   }
 
-  const r = $derived(ws.response);
+  const r = $derived(ws.exampleView ?? ws.response);
+  let exName = $state("");
+  async function doSaveExample() {
+    await ws.saveExample(exName);
+    exName = "";
+  }
   const failed = $derived(ws.tests.filter((t) => !t.passed).length);
   const hasScripts = $derived(
     ws.tests.length > 0 || ws.logs.length > 0 || ws.scriptError !== null
@@ -46,6 +109,47 @@
   });
   const bodyLines = $derived(prettyBody.split("\n"));
 
+  // Rich preview for HTML / image responses (toggle to source for HTML).
+  let preview = $state(true);
+  const ct = $derived(r?.contentType ?? "");
+  const isHtml = $derived(ct.includes("html"));
+  const isImage = $derived(ct.startsWith("image/") && !!r?.bodyBase64);
+  const imageSrc = $derived(isImage ? `data:${ct};base64,${r!.bodyBase64}` : "");
+
+  // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
+  // next request can use {{name}} — chaining without writing a post-response script.
+  const json = $derived.by<unknown>(() => {
+    if (!r) return null;
+    try {
+      return JSON.parse(r.bodyText);
+    } catch {
+      return null;
+    }
+  });
+  function getPath(obj: unknown, path: string): unknown {
+    const keys = path
+      .replace(/\[(\d+)\]/g, ".$1")
+      .split(".")
+      .filter(Boolean);
+    let cur: unknown = obj;
+    for (const k of keys) cur = (cur as Record<string, unknown>)?.[k];
+    return cur;
+  }
+  let jsonView = $state<"raw" | "tree">("raw");
+  let xPath = $state("");
+  let xVar = $state("");
+  let xSaved = $state(false);
+  const xValue = $derived(xPath.trim() ? getPath(json, xPath.trim()) : undefined);
+  async function extract() {
+    if (!xVar.trim() || xValue === undefined) return;
+    await ws.setVariable(
+      xVar.trim(),
+      typeof xValue === "object" ? JSON.stringify(xValue) : String(xValue)
+    );
+    xSaved = true;
+    setTimeout(() => (xSaved = false), 1200);
+  }
+
   function fmtSize(n: number): string {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -55,6 +159,8 @@
   // --- timing waterfall ---
   type Timings = NonNullable<ResponseResult["timings"]>;
   const PHASES = [
+    { key: "proxyConnect", label: "Proxy", color: "#fb923c" },
+    { key: "proxyTls", label: "Proxy TLS", color: "#f97316" },
     { key: "dns", label: "DNS", color: "#60a5fa" },
     { key: "tcp", label: "TCP", color: "#a78bfa" },
     { key: "tls", label: "TLS", color: "#fbbf24" },
@@ -146,7 +252,49 @@
         class="ml-auto"
         title="Copy response body">{copied ? "Copied ✓" : "Copy"}</Button
       >
+      {#if prettyBody}
+        <Button onclick={saveToFile} variant="outline" size="xs" title="Save response body to a file"
+          >{saved ? "Saved ✓" : "Save"}</Button
+        >
+      {/if}
+      {#if ws.response && !ws.exampleView}
+        <Button
+          onclick={doSaveExample}
+          variant="outline"
+          size="xs"
+          title="Save this response as an example on the request">+ Example</Button
+        >
+      {/if}
     </div>
+    {#if ws.exampleView}
+      <div
+        class="flex items-center gap-2 border-b border-border bg-[var(--color-bg-1)] px-3 py-1 text-xs text-fg-muted"
+      >
+        <span class="text-[var(--color-brand)]">● viewing saved example</span>
+        <button class="ml-auto underline hover:text-fg" onclick={() => ws.viewExample(null)}
+          >back to live</button
+        >
+      </div>
+    {/if}
+    {#if ws.activeReq?.examples?.length}
+      <div class="flex flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
+        <span class="hint mr-1">examples:</span>
+        {#each ws.activeReq.examples as ex (ex.id)}
+          <span
+            class="group/ex inline-flex items-center gap-1 rounded border border-border bg-[var(--color-bg-2)] px-1.5 py-0.5 text-xs"
+          >
+            <button class="hover:text-[var(--color-brand)]" onclick={() => ws.viewExample(ex)}
+              title={`${ex.status} · ${ex.name}`}>{ex.name}</button
+            >
+            <button
+              class="text-fg-faint opacity-0 group-hover/ex:opacity-100 hover:text-red-400"
+              title="delete example"
+              onclick={() => ws.deleteExample(ex.id)}>✕</button
+            >
+          </span>
+        {/each}
+      </div>
+    {/if}
 
     <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
       {#each ["body", "headers", "timings"] as const as t (t)}
@@ -183,15 +331,104 @@
             {/each}
           </div>
         {/if}
-        <div class="flex text-xs">
-          <div
-            class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
-            aria-hidden="true"
-          >
-            {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+        {#if isHtml}
+          <div class="mb-2 flex gap-1">
+            <button class="seg" class:is-active={preview} onclick={() => (preview = true)}
+              >preview</button
+            >
+            <button class="seg" class:is-active={!preview} onclick={() => (preview = false)}
+              >source</button
+            >
           </div>
-          <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
-        </div>
+        {/if}
+        {#if isImage}
+          <div class="grid place-items-center p-4">
+            <img
+              src={imageSrc}
+              alt="response"
+              class="max-h-[60vh] max-w-full rounded border border-border"
+            />
+          </div>
+        {:else if isHtml && preview}
+          <iframe
+            srcdoc={r.bodyText}
+            sandbox=""
+            title="HTML preview"
+            class="h-[60vh] w-full rounded border border-border bg-white"
+          ></iframe>
+        {:else}
+          {#if prettyBody}
+            <div class="mb-2 flex items-center gap-2">
+              {#if json}
+                <div class="flex gap-1">
+                  <button class="seg" class:is-active={jsonView === "raw"} onclick={() => (jsonView = "raw")}
+                    >raw</button
+                  >
+                  <button class="seg" class:is-active={jsonView === "tree"} onclick={() => (jsonView = "tree")}
+                    >tree</button
+                  >
+                </div>
+              {/if}
+              {#if jsonView === "raw"}
+                <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
+                {#if bodyQuery.trim()}
+                  <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+          {#if json}
+          <div class="mb-2 flex items-center gap-2">
+            <Input bind:value={xPath} placeholder="path e.g. data.token" class="mono h-6 flex-1" />
+            <span class="text-fg-faint">→</span>
+            <Input bind:value={xVar} placeholder="var name" class="mono h-6 w-32" />
+            <Button
+              onclick={extract}
+              variant="outline"
+              size="xs"
+              disabled={!xVar.trim() || xValue === undefined}
+              title="Save the value at that path as a variable for chaining"
+              >{xSaved ? "Saved ✓" : "Save var"}</Button
+            >
+            {#if xPath.trim()}
+              <span class="hint max-w-[28%] shrink-0 truncate" title={String(xValue)}>
+                {xValue === undefined ? "no match" : `= ${String(xValue)}`}
+              </span>
+            {/if}
+          </div>
+        {/if}
+        {#if json && jsonView === "tree"}
+          <div class="overflow-auto pl-1 text-xs leading-5">
+            <JsonTree data={json} onpick={(p) => (xPath = p)} />
+          </div>
+        {:else}
+        {#if matches}
+          {#if matches.length === 0}
+            <div class="hint p-4 text-center">No matches.</div>
+          {:else}
+            <div class="flex text-xs">
+              <div
+                class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+                aria-hidden="true"
+              >
+                {#each matches as m (m.n)}<div class="leading-5">{m.n}</div>{/each}
+              </div>
+              <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
+            </div>
+          {/if}
+        {:else}
+          <div class="flex text-xs">
+            <div
+              class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+              aria-hidden="true"
+            >
+              {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+            </div>
+            <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
+          </div>
+          {/if}
+        {/if}
+        {/if}
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
           <tbody>

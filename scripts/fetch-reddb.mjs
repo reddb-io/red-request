@@ -86,17 +86,22 @@ const base = `https://github.com/${REPO}/releases/download/${tag}`;
 console.log(`Fetching RedDB ${name} from ${REPO}@${tag} …`);
 const bin = await download(`${base}/${name}`);
 
-// Verify the published .sha256 sidecar when present (best-effort).
+// Verify the published .sha256 sidecar when present (best-effort). Pull the hash out by
+// regex so we don't care about the format: `<hash>  file` (sha256sum), `SHA256(file)= <hash>`
+// (BSD/openssl), or a bare PowerShell Get-FileHash digest all work.
 try {
   const sumText = (await download(`${base}/${name}.sha256`)).toString("utf8");
-  const expected = sumText.trim().split(/\s+/)[0];
+  const m = sumText.match(/[0-9a-fA-F]{64}/);
+  const expected = m ? m[0].toLowerCase() : "";
   const actual = hash("sha256").update(bin).digest("hex");
   if (expected && expected !== actual) {
     throw new Error(
       `checksum mismatch for ${name}: expected ${expected}, got ${actual}`
     );
   }
-  if (expected) console.log(`  ✔ sha256 verified`);
+  console.log(
+    expected ? "  ✔ sha256 verified" : "  (no parseable checksum — skipped)"
+  );
 } catch (e) {
   if (String(e).includes("checksum mismatch")) throw e;
   console.log(`  (no .sha256 sidecar — skipping verification)`);

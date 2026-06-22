@@ -58,6 +58,9 @@ export type Scripts = z.infer<typeof scriptsSchema>;
 /** Request protocol. `http` is the default; the rest use `net` config below. */
 export const requestKindSchema = z.enum([
   "http",
+  "ws",
+  "sse",
+  "grpc",
   "tcp",
   "udp",
   "ping",
@@ -91,6 +94,29 @@ export const netConfigSchema = z.object({
 });
 export type NetConfig = z.infer<typeof netConfigSchema>;
 
+/** A saved response snapshot attached to a request (for docs / quick reference / mocking). */
+export const savedExampleSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.number().default(0),
+  statusText: z.string().default(""),
+  contentType: z.string().optional(),
+  bodyText: z.string().default(""),
+  savedAt: z.number().default(0),
+});
+export type SavedExample = z.infer<typeof savedExampleSchema>;
+
+/** gRPC config (kind === "grpc"). The server address lives in `url` (host:port). */
+export const grpcConfigSchema = z.object({
+  proto: z.string().default(""),
+  service: z.string().default(""),
+  method: z.string().default(""),
+  message: z.string().default("{}"),
+  plaintext: z.boolean().default(true),
+  metadata: z.array(kvSchema).default([]),
+});
+export type GrpcConfig = z.infer<typeof grpcConfigSchema>;
+
 /**
  * A single request — serialized one-per-file under `requests/<slug>.yaml`.
  * Mirrors the shape recker's RequestOptions expects, kept transport-agnostic and
@@ -121,7 +147,27 @@ export const requestDefinitionSchema = z.object({
   auth: authConfigSchema.default({ type: "inherit" }),
   scripts: scriptsSchema.default({ preRequest: "", postResponse: "" }),
   timeout: z.number().int().positive().optional(),
+  /** Network behaviour (HTTP). */
+  followRedirects: z.boolean().default(true),
+  maxRedirects: z.number().int().min(0).max(50).default(5),
+  /** Skip TLS certificate verification (self-signed / dev endpoints). */
+  insecure: z.boolean().default(false),
+  /** Route through an HTTP/HTTPS/SOCKS proxy (e.g. http://127.0.0.1:8080). */
+  proxy: z.string().optional(),
+  /** id of a collection profile (User-Agent + headers + proxy) to apply at send-time. */
+  profileId: z.string().default(""),
   retry: retrySchema.optional(),
+  /** gRPC config — only when kind is `grpc`. */
+  grpc: grpcConfigSchema.default({
+    proto: "",
+    service: "",
+    method: "",
+    message: "{}",
+    plaintext: true,
+    metadata: [],
+  }),
+  /** Saved response snapshots (docs / mocking) — versioned with the request. */
+  examples: z.array(savedExampleSchema).default([]),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
   presetName: z.string().optional(),
 });

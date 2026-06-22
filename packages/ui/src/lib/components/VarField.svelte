@@ -5,7 +5,8 @@
   import { tick } from "svelte";
 
   type Props = {
-    value: string;
+    // optional so callers can bind an optional field (e.g. graphql variables); "" when unset.
+    value?: string;
     known?: string[];
     /** name → hover tooltip text for {{vars}}. */
     values?: Record<string, string>;

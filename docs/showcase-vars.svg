@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360" fill="none" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+  <style>
+    .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  </style>
+  <rect width="900" height="360" rx="14" fill="#0b0b0d"/>
+  <rect x="0.5" y="0.5" width="899" height="359" rx="13.5" fill="none" stroke="#26262d"/>
+
+  <!-- window dots -->
+  <circle cx="26" cy="26" r="5" fill="#26262d"/>
+  <circle cx="44" cy="26" r="5" fill="#26262d"/>
+  <circle cx="62" cy="26" r="5" fill="#26262d"/>
+  <text x="450" y="30" text-anchor="middle" class="mono" font-size="12" fill="#52525b">GET anything · Red Request</text>
+
+  <!-- method + url bar -->
+  <g transform="translate(28,64)">
+    <rect width="700" height="40" rx="9" fill="#1c1c21" stroke="#ff2056" stroke-opacity="0.6"/>
+    <text x="18" y="25" class="mono" font-size="15" font-weight="800" fill="#34d399">GET</text>
+    <line x1="62" y1="10" x2="62" y2="30" stroke="#26262d"/>
+    <text x="78" y="25" class="mono" font-size="15" fill="#e4e4e7">https://</text>
+    <!-- {{host}} resolved → green -->
+    <rect x="146" y="9" width="64" height="22" rx="5" fill="#10b981" fill-opacity="0.16"/>
+    <text x="153" y="25" class="mono" font-size="15" fill="#6ee7b7">{{host}}</text>
+    <text x="214" y="25" class="mono" font-size="15" fill="#e4e4e7">/users/</text>
+    <!-- :id path param → accent -->
+    <rect x="282" y="9" width="34" height="22" rx="5" fill="#ff2056" fill-opacity="0.16"/>
+    <text x="289" y="25" class="mono" font-size="15" fill="#ff708f">:id</text>
+    <!-- caret -->
+    <rect x="320" y="11" width="2" height="18" fill="#ff2056"/>
+  </g>
+  <g transform="translate(740,64)">
+    <rect width="132" height="40" rx="9" fill="#ff2056"/>
+    <text x="66" y="25" text-anchor="middle" font-size="14" font-weight="700" fill="#0b0b0d">Send  ⌘↵</text>
+  </g>
+
+  <!-- caption line -->
+  <text x="28" y="132" class="mono" font-size="12" fill="#52525b">typing a token opens an autocomplete of every variable in scope</text>
+
+  <!-- autocomplete dropdown -->
+  <g transform="translate(146,144)">
+    <rect width="250" height="172" rx="10" fill="#141417" stroke="#26262d"/>
+    <text x="14" y="26" font-size="10" font-weight="700" letter-spacing="1" fill="#52525b">VARIABLES</text>
+    <!-- highlighted item -->
+    <rect x="6" y="34" width="238" height="30" rx="6" fill="#1c1c21"/>
+    <text x="16" y="54" class="mono" font-size="13" fill="#6ee7b7">⬩</text>
+    <text x="34" y="54" class="mono" font-size="13" fill="#f4f4f5">host</text>
+    <text x="232" y="54" text-anchor="end" class="mono" font-size="11" fill="#52525b">httpbingo.org</text>
+
+    <text x="16" y="86" class="mono" font-size="13" fill="#6ee7b7">⬩</text>
+    <text x="34" y="86" class="mono" font-size="13" fill="#a1a1aa">token</text>
+    <text x="232" y="86" text-anchor="end" class="mono" font-size="11" fill="#52525b">🔒 secret</text>
+
+    <text x="16" y="118" class="mono" font-size="13" fill="#6ee7b7">⬩</text>
+    <text x="34" y="118" class="mono" font-size="13" fill="#a1a1aa">userId</text>
+    <text x="232" y="118" text-anchor="end" class="mono" font-size="11" fill="#52525b">42</text>
+
+    <text x="16" y="150" class="mono" font-size="13" fill="#6ee7b7">⬩</text>
+    <text x="34" y="150" class="mono" font-size="13" fill="#a1a1aa">baseUrl</text>
+    <text x="232" y="150" text-anchor="end" class="mono" font-size="11" fill="#52525b">https://api…</text>
+  </g>
+
+  <!-- legend -->
+  <g transform="translate(470,170)" font-size="13">
+    <rect width="18" height="18" rx="5" fill="#10b981" fill-opacity="0.16"/>
+    <text x="26" y="14" fill="#a1a1aa">resolves in scope</text>
+    <rect y="34" width="18" height="18" rx="5" fill="#ef4444" fill-opacity="0.16"/>
+    <text x="26" y="48" fill="#a1a1aa">undefined — flagged red</text>
+    <rect y="68" width="18" height="18" rx="5" fill="#ff2056" fill-opacity="0.16"/>
+    <text x="26" y="82" fill="#a1a1aa">:path param — typed in the Params tab</text>
+    <text y="118" class="mono" font-size="12" fill="#52525b">resolved at send-time, even inside :path segments</text>
+  </g>
+</svg>

@@ -11,18 +11,23 @@ concurrency:
 jobs:
   changesets:
     name: Version Packages
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     # Skip the version-bump commit itself (authored by the bot) to avoid a loop.
     if: github.actor != 'github-actions[bot]'
+    # Disable lefthook: the action's version-bump git commit would otherwise fire the
+    # pre-commit hook (pnpm check), which fails here because core isn't built in this job.
+    env:
+      LEFTHOOK: "0"
     permissions:
       contents: write
       pull-requests: write
+      actions: write # so the publish step can dispatch release.yml (no PAT needed)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.33.3
 
@@ -45,14 +50,15 @@ jobs:
           # `release:version` runs `changeset version` then propagates the new version
           # into tauri.conf.json via scripts/sync-desktop-version.mjs.
           version: pnpm release:version
-          # Runs only once every pending changeset is consumed (Version PR merged):
-          # tags v<version>, whose push triggers release.yml (which builds + releases).
+          # Runs once every pending changeset is consumed (Version PR merged):
+          # tags v<version> AND dispatches release.yml (which builds + releases).
           publish: bash scripts/changesets-tag-release.sh
           commit: "chore(release): version packages"
           title: "chore(release): version packages"
           # release.yml owns the GitHub Release (built bundles); don't let the action make one.
           createGithubReleases: false
         env:
-          # A PAT lets the tag pushed here re-trigger release.yml (a GITHUB_TOKEN push won't).
-          # Falls back to GITHUB_TOKEN if RELEASE_PAT isn't set (then tag release.yml manually).
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # No PAT needed — the publish script pushes the tag, then triggers release.yml via
+          # `gh workflow run` (workflow_dispatch), which GITHUB_TOKEN is allowed to do.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

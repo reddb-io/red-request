@@ -67,8 +67,9 @@
           ws.duplicateRequest(ws.activeReq!.id)
         )}
       {/if}
-      {@render action("Dashboard", "view", () => (ws.view = "dashboard"))}
+      {@render action("Home", "view", () => (ws.view = "home"))}
       {@render action("Requests", "view", () => (ws.view = "requests"))}
+      {@render action("Settings", "view", () => (ws.view = "settings"))}
       {@render action("Switch project…", "selector", () => ws.backToSelector())}
     </Command.Group>
   </Command.List>

@@ -12,12 +12,13 @@
   "scripts": {
     "dev": "pnpm --filter @red-request/ui dev",
     "desktop:dev": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm --filter @red-request/engine build && pnpm --filter @red-request/desktop tauri dev",
-    "desktop:build": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
+    "desktop:build": "pnpm brand:sync && pnpm brand:icons && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
     "engine:build": "node scripts/build-engine.mjs",
     "reddb:sync": "node scripts/sync-reddb.mjs",
     "reddb:fetch": "node scripts/fetch-reddb.mjs",
     "reddb:migration-demo": "node scripts/reddb-migration-demo.mjs",
     "brand:sync": "node scripts/sync-brand.mjs",
+    "brand:icons": "node scripts/brand-icons.mjs",
     "build": "pnpm -r build",
     "check": "pnpm -r check",
     "test": "pnpm -r test",
@@ -25,13 +26,13 @@
     "changeset": "changeset",
     "release:version": "changeset version && node scripts/sync-desktop-version.mjs",
     "release:publish": "pnpm -r build && changeset publish",
-    "prepare": "husky"
+    "prepare": "lefthook install",
+    "rr:run": "node packages/cli/dist/cli.js"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
-    "husky": "^9.1.7",
-    "lint-staged": "^17.0.7",
+    "lefthook": "^2.1.9",
     "prettier": "^3.8.3",
-    "typescript": "^5.7.2"
+    "typescript": "^6.0.3"
   }
 }

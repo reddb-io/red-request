@@ -1,6 +1,8 @@
 use base64::engine::general_purpose::STANDARD as B64;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -81,7 +83,10 @@ fn ensure_under_root(app: &tauri::AppHandle, path: &str) -> Result<std::path::Pa
     };
     // Normalize by rejecting any `..` component rather than canonicalizing (which
     // fails for not-yet-created files on write).
-    if candidate.components().any(|c| c == std::path::Component::ParentDir) {
+    if candidate
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
         return Err("path traversal is not allowed".to_string());
     }
     if !candidate.starts_with(&root) {
@@ -145,6 +150,40 @@ fn fs_remove(app: tauri::AppHandle, path: String) -> Result<(), String> {
         std::fs::remove_file(&target).map_err(|e| e.to_string())
     } else {
         Ok(())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileMeta {
+    exists: bool,
+    size: u64,
+    modified_ms: u64,
+}
+
+/// Size + last-modified for an arbitrary path (e.g. the project's app.rdb). Read-only
+/// metadata, so it isn't sandboxed to the collections root.
+#[tauri::command]
+fn file_meta(path: String) -> FileMeta {
+    match std::fs::metadata(&path) {
+        Ok(m) => {
+            let modified_ms = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            FileMeta {
+                exists: true,
+                size: m.len(),
+                modified_ms,
+            }
+        }
+        Err(_) => FileMeta {
+            exists: false,
+            size: 0,
+            modified_ms: 0,
+        },
     }
 }
 
@@ -216,7 +255,10 @@ fn handle_engine_line(app: &tauri::AppHandle, line: &str) {
                     .unwrap_or("engine error")
                     .to_string())
             } else {
-                Ok(value.get("result").cloned().unwrap_or(serde_json::Value::Null))
+                Ok(value
+                    .get("result")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null))
             };
             let _ = tx.send(payload);
         }
@@ -293,10 +335,14 @@ fn master_key() -> Result<[u8; 32], String> {
                 .map_err(|_| "master key has wrong length".to_string())
         }
         Err(keyring::Error::NoEntry) => {
-            use rand::RngCore;
+            use rand::TryRngCore;
             let mut key = [0u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut key);
-            entry.set_password(&B64.encode(key)).map_err(|e| e.to_string())?;
+            rand::rngs::OsRng
+                .try_fill_bytes(&mut key)
+                .map_err(|e| e.to_string())?;
+            entry
+                .set_password(&B64.encode(key))
+                .map_err(|e| e.to_string())?;
             Ok(key)
         }
         Err(e) => Err(e.to_string()),
@@ -306,10 +352,12 @@ fn master_key() -> Result<[u8; 32], String> {
 fn seal_with_key(key: &[u8; 32], plaintext: &str) -> Result<Sealed, String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Key, Nonce};
-    use rand::RngCore;
+    use rand::TryRngCore;
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let mut nb = [0u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut nb);
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut nb)
+        .map_err(|e| e.to_string())?;
     let nonce = Nonce::from_slice(&nb);
     let ct = cipher
         .encrypt(nonce, plaintext.as_bytes())
@@ -399,9 +447,12 @@ fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
     let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
     let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
     let arg_launched = *s.arg_launched.lock().map_err(|e| e.to_string())?;
-    let name = project_dir
-        .as_ref()
-        .and_then(|d| recent_list().into_iter().find(|r| &r.dir == d).map(|r| r.name));
+    let name = project_dir.as_ref().and_then(|d| {
+        recent_list()
+            .into_iter()
+            .find(|r| &r.dir == d)
+            .map(|r| r.name)
+    });
     Ok(ProjectInfo {
         is_project: project_dir.is_some(),
         db_path,
@@ -548,10 +599,7 @@ fn delete_project_data(dir: String) -> Result<(), String> {
 /// Switch the embedded reddb to another project (or the global store with `dir = None`)
 /// at runtime: stop the current sidecar, repoint the path, respawn, return the new info.
 #[tauri::command]
-async fn open_project(
-    app: tauri::AppHandle,
-    dir: Option<String>,
-) -> Result<ProjectInfo, String> {
+async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<ProjectInfo, String> {
     let (db_path, project_dir) = match dir.as_deref() {
         Some(d) => {
             let abs = std::fs::canonicalize(d).unwrap_or_else(|_| std::path::PathBuf::from(d));
@@ -612,6 +660,40 @@ fn find_red_binary() -> Option<String> {
         }
     }
     None
+}
+
+/// The app's own version (from Cargo/tauri.conf), e.g. "0.1.1".
+#[tauri::command]
+fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// The embedded RedDB version, by running the bundled `red --version` one-shot.
+/// Works on the project selector (no live sidecar needed). Returns just the number,
+/// e.g. "1.11.0" from "reddb 1.11.0".
+#[tauri::command]
+async fn reddb_version(app: tauri::AppHandle) -> Result<String, String> {
+    let shell = app.shell();
+    let output = match shell.sidecar("red") {
+        Ok(cmd) => cmd.args(["--version"]).output().await,
+        Err(_) => {
+            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
+            shell.command(bin).args(["--version"]).output().await
+        }
+    }
+    .map_err(|e| format!("failed to run red --version: {e}"))?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let ver = text
+        .trim()
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .to_string();
+    if ver.is_empty() {
+        Err("could not parse reddb version".to_string())
+    } else {
+        Ok(ver)
+    }
 }
 
 async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
@@ -824,6 +906,210 @@ mod tests {
     }
 }
 
+// ---------------------------------------------------------------------------
+// OAuth2 / OIDC authorization_code — the native half (PKCE, browser, callback).
+// The webview asks for an authorization code; we generate PKCE + state, open the
+// system browser, and capture the redirect via a loopback HTTP server (default)
+// or the redrequest:// deep link. Token exchange + refresh happen in the engine.
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct OauthState {
+    /// A login awaiting its deep-link redirect (when redirect == "deeplink").
+    pending: Mutex<Option<oneshot::Sender<String>>>,
+}
+
+#[derive(Deserialize)]
+struct KvParam {
+    name: String,
+    value: String,
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OauthAuthorizeArgs {
+    authorize_url: String,
+    client_id: String,
+    scope: Option<String>,
+    audience: Option<String>,
+    redirect: String, // "loopback" | "deeplink"
+    use_pkce: bool,
+    extra_params: Vec<KvParam>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OauthAuthorizeResult {
+    code: String,
+    code_verifier: Option<String>,
+    redirect_uri: String,
+    state: String,
+}
+
+fn rand_b64url(n: usize) -> String {
+    use rand::TryRngCore;
+    let mut bytes = vec![0u8; n];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG unavailable");
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn build_authorize_url(
+    args: &OauthAuthorizeArgs,
+    redirect_uri: &str,
+    state: &str,
+    challenge: Option<&str>,
+) -> Result<String, String> {
+    let mut pairs: Vec<(String, String)> = vec![
+        ("response_type".into(), "code".into()),
+        ("client_id".into(), args.client_id.clone()),
+        ("redirect_uri".into(), redirect_uri.to_string()),
+        ("state".into(), state.to_string()),
+    ];
+    if let Some(s) = args.scope.as_ref().filter(|s| !s.is_empty()) {
+        pairs.push(("scope".into(), s.clone()));
+    }
+    if let Some(a) = args.audience.as_ref().filter(|a| !a.is_empty()) {
+        pairs.push(("audience".into(), a.clone()));
+    }
+    if let Some(c) = challenge {
+        pairs.push(("code_challenge".into(), c.to_string()));
+        pairs.push(("code_challenge_method".into(), "S256".into()));
+    }
+    for kv in &args.extra_params {
+        if kv.enabled && !kv.name.is_empty() {
+            pairs.push((kv.name.clone(), kv.value.clone()));
+        }
+    }
+    reqwest::Url::parse_with_params(&args.authorize_url, &pairs)
+        .map(|u| u.to_string())
+        .map_err(|e| format!("bad authorize url: {e}"))
+}
+
+/// Pull (code, state) out of a redirect URL, or surface the IdP's error.
+fn extract_code(url: &reqwest::Url) -> Result<(String, String), String> {
+    let (mut code, mut state, mut err, mut err_desc) = (None, None, None, None);
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "code" => code = Some(v.into_owned()),
+            "state" => state = Some(v.into_owned()),
+            "error" => err = Some(v.into_owned()),
+            "error_description" => err_desc = Some(v.into_owned()),
+            _ => {}
+        }
+    }
+    if let Some(e) = err {
+        return Err(format!("authorization failed: {}", err_desc.unwrap_or(e)));
+    }
+    match (code, state) {
+        (Some(c), Some(s)) => Ok((c, s)),
+        _ => Err("redirect missing code/state".to_string()),
+    }
+}
+
+#[tauri::command]
+async fn oauth_authorize(
+    app: tauri::AppHandle,
+    args: OauthAuthorizeArgs,
+) -> Result<OauthAuthorizeResult, String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let state = rand_b64url(16);
+    let (verifier, challenge) = if args.use_pkce {
+        let v = rand_b64url(32);
+        let c = URL_SAFE_NO_PAD.encode(Sha256::digest(v.as_bytes()));
+        (Some(v), Some(c))
+    } else {
+        (None, None)
+    };
+    let timeout = std::time::Duration::from_secs(180);
+
+    // Deep-link redirect: wait for redrequest://oauth/callback via on_open_url.
+    if args.redirect == "deeplink" {
+        let redirect_uri = "redrequest://oauth/callback".to_string();
+        let url = build_authorize_url(&args, &redirect_uri, &state, challenge.as_deref())?;
+        let (tx, rx) = oneshot::channel::<String>();
+        *app.state::<OauthState>()
+            .pending
+            .lock()
+            .map_err(|e| e.to_string())? = Some(tx);
+        app.shell()
+            .open(url, None)
+            .map_err(|e| format!("failed to open browser: {e}"))?;
+        let got = tokio::time::timeout(timeout, rx)
+            .await
+            .map_err(|_| "login timed out".to_string())?
+            .map_err(|_| "login cancelled".to_string())?;
+        let parsed = reqwest::Url::parse(&got).map_err(|e| format!("bad redirect: {e}"))?;
+        let (code, ret_state) = extract_code(&parsed)?;
+        if ret_state != state {
+            return Err("state mismatch (possible CSRF)".to_string());
+        }
+        return Ok(OauthAuthorizeResult {
+            code,
+            code_verifier: verifier,
+            redirect_uri,
+            state,
+        });
+    }
+
+    // Loopback redirect (default): ephemeral 127.0.0.1 server captures the code.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|e| format!("loopback bind failed: {e}"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let url = build_authorize_url(&args, &redirect_uri, &state, challenge.as_deref())?;
+    app.shell()
+        .open(url, None)
+        .map_err(|e| format!("failed to open browser: {e}"))?;
+
+    let (mut stream, _) = tokio::time::timeout(timeout, listener.accept())
+        .await
+        .map_err(|_| "login timed out".to_string())?
+        .map_err(|e| format!("accept failed: {e}"))?;
+
+    let mut buf = [0u8; 8192];
+    let n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
+    let req = String::from_utf8_lossy(&buf[..n]);
+    let target = req
+        .lines()
+        .next()
+        .and_then(|l| l.split_whitespace().nth(1))
+        .unwrap_or("/");
+    let parsed = reqwest::Url::parse(&format!("http://127.0.0.1{target}"))
+        .map_err(|e| format!("bad callback: {e}"))?;
+    let result = extract_code(&parsed);
+
+    let body = match &result {
+        Ok((_, s)) if *s == state => {
+            "<h2>Login complete</h2><p>You can close this tab and return to the app.</p>"
+        }
+        Ok(_) => "<h2>State mismatch</h2><p>Possible CSRF — please retry from the app.</p>",
+        Err(_) => "<h2>Login failed</h2><p>Return to the app for details.</p>",
+    };
+    let resp = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(resp.as_bytes()).await;
+    let _ = stream.shutdown().await;
+
+    let (code, ret_state) = result?;
+    if ret_state != state {
+        return Err("state mismatch (possible CSRF)".to_string());
+    }
+    Ok(OauthAuthorizeResult {
+        code,
+        code_verifier: verifier,
+        redirect_uri,
+        state,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -832,12 +1118,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(EngineState::default())
         .manage(EmbeddedDb::default())
+        .manage(OauthState::default())
         .setup(|app| {
             // Deep links (rr:// branded scheme).
             let dl_handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                let urls: Vec<String> =
-                    event.urls().into_iter().map(|u| u.to_string()).collect();
+                let urls: Vec<String> = event.urls().into_iter().map(|u| u.to_string()).collect();
+                // Complete a pending OAuth login waiting on its deep-link redirect.
+                if let Some(st) = dl_handle.try_state::<OauthState>() {
+                    if let Ok(mut pending) = st.pending.lock() {
+                        if let Some(tx) = pending.take() {
+                            if let Some(first) = urls.first() {
+                                let _ = tx.send(first.clone());
+                            }
+                        }
+                    }
+                }
                 let _ = dl_handle.emit("deep-link", urls);
             });
 
@@ -908,6 +1204,7 @@ pub fn run() {
             fs_write_text,
             fs_mkdirp,
             fs_remove,
+            file_meta,
             engine_call,
             reddb_url,
             reddb_request,
@@ -921,6 +1218,9 @@ pub fn run() {
             delete_project_data,
             secret_seal,
             secret_open,
+            app_version,
+            reddb_version,
+            oauth_authorize,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

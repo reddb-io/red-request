@@ -50,14 +50,15 @@ export interface PipelineOutcome {
 
 export async function runPipeline(
   def: RequestDefinition,
-  variables: Record<string, string>
+  variables: Record<string, string>,
+  cookieJarKey?: string
 ): Promise<PipelineOutcome> {
   const vars: Record<string, string> = { ...variables };
   const pre = await runPreRequest(def, vars);
   const { request: resolved, unresolved } = resolveRequest(def, vars);
   const response =
     resolved.kind === "http"
-      ? await dispatch(resolved)
+      ? await dispatch(resolved, cookieJarKey)
       : await dispatchProtocol(resolved);
   const post = await runPostResponse(def.scripts.postResponse, response, vars);
   return {

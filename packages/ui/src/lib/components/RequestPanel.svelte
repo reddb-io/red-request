@@ -5,14 +5,20 @@
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
   import RunnerPanel from "./RunnerPanel.svelte";
+  import CodeModal from "./CodeModal.svelte";
+  import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
+  import WebSocketPanel from "./WebSocketPanel.svelte";
+  import GrpcPanel from "./GrpcPanel.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
+  import Tooltip from "./ui/Tooltip.svelte";
   import { Button } from "./ui/button/index.js";
-  import { Input } from "./ui/input/index.js";
   import { Textarea } from "./ui/textarea/index.js";
 
   let showRunner = $state(false);
+  let showCode = $state(false);
+  let showSchema = $state(false);
 
   const methods = httpMethodSchema.options;
   const kinds = requestKindSchema.options;
@@ -27,14 +33,14 @@
   };
   type Tab =
     | "params"
-    | "path"
     | "headers"
     | "body"
     | "auth"
     | "scripts"
+    | "settings"
     | "config";
   let tab = $state<Tab>("params");
-  const httpTabs: Tab[] = ["params", "path", "headers", "body", "auth", "scripts"];
+  const httpTabs: Tab[] = ["params", "headers", "body", "auth", "scripts", "settings"];
   const netTabs: Tab[] = ["config", "scripts"];
   const tabs = $derived(ws.activeReq?.kind === "http" ? httpTabs : netTabs);
   $effect(() => {
@@ -110,6 +116,42 @@
         ariaLabel="Folder"
         class="w-auto text-xs text-fg-muted"
       />
+      {#if ws.profiles.length && (ws.activeReq.kind === "http" || ws.activeReq.kind === "grpc")}
+        {@const pid = ws.activeReq.profileId || ws.activeCollection?.collection.defaultProfileId || ""}
+        {@const fromDefault = !ws.activeReq.profileId && !!pid}
+        {@const active = pid ? ws.profiles.find((p) => p.id === pid) : null}
+        <Select
+          bind:value={ws.activeReq.profileId}
+          items={[
+            { value: "", label: "no profile" },
+            ...ws.profiles.map((p) => ({ value: p.id, label: `👤 ${p.name || "profile"}` })),
+          ]}
+          ariaLabel="User profile"
+          class="w-auto text-xs text-fg-muted"
+        />
+        {#if active?.userAgent}
+          {@const overridden = ws.activeReq.headers.some(
+            (h) => h.enabled && h.name.toLowerCase() === "user-agent"
+          )}
+          <Tooltip
+            text={fromDefault
+              ? `UA from collection default (${active.name})`
+              : `UA from profile (${active.name})`}
+            side="bottom"
+          >
+            {#snippet children(p)}
+              <span
+                {...p}
+                class="mono shrink-0 rounded bg-[var(--color-bg-2)] px-1 text-[10px] {overridden
+                  ? 'text-amber-300'
+                  : 'text-fg-muted'}"
+                title={overridden ? "overridden by request" : ""}
+                >{overridden ? "UA override" : "UA"}</span
+              >
+            {/snippet}
+          </Tooltip>
+        {/if}
+      {/if}
       <EnvBar />
     </div>
 
@@ -149,6 +191,8 @@
             />
           </div>
         </div>
+      {:else if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse" || ws.activeReq.kind === "grpc"}
+        <div class="flex-1"></div>
       {:else}
         <span
           class="mono flex h-7 flex-1 items-center truncate rounded-md border border-border bg-[var(--color-bg-2)] px-2.5 text-sm text-fg-muted"
@@ -156,14 +200,16 @@
           {ws.activeReq.net.host || "set target in Config →"}
         </span>
       {/if}
-      <Button
-        onclick={() => ws.send()}
-        disabled={ws.sending}
-        title="Send (⌘↵ / Ctrl+↵)"
-        size="xs"
-        class="shrink-0"
-        >{ws.sending ? "…" : "Send"}</Button
-      >
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
+        <Button
+          onclick={() => ws.send()}
+          disabled={ws.sending}
+          title="Send (⌘↵ / Ctrl+↵)"
+          size="xs"
+          class="shrink-0"
+          >{ws.sending ? "…" : "Send"}</Button
+        >
+      {/if}
       <Button
         onclick={() => ws.save()}
         variant="outline"
@@ -171,15 +217,35 @@
         class="shrink-0"
         >Save</Button
       >
-      <Button
-        onclick={() => (showRunner = true)}
-        variant="outline"
-        size="xs"
-        class="shrink-0"
-        title="Run loops: repeat, data-driven, or flow">Run…</Button
-      >
+      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
+        <Button
+          onclick={() => (showRunner = true)}
+          variant="outline"
+          size="xs"
+          class="shrink-0"
+          title="Run loops: repeat, data-driven, or flow">Run…</Button
+        >
+      {/if}
+      {#if ws.activeReq.kind === "http"}
+        <Button
+          onclick={() => (showCode = true)}
+          variant="outline"
+          size="xs"
+          class="shrink-0"
+          title="Generate code (curl, fetch, python…)">Code</Button
+        >
+      {/if}
     </div>
 
+    {#if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
+      <div class="min-h-0 flex-1 p-3">
+        <WebSocketPanel />
+      </div>
+    {:else if ws.activeReq.kind === "grpc"}
+      <div class="min-h-0 flex-1 p-3">
+        <GrpcPanel />
+      </div>
+    {:else}
     <div class="flex gap-1 border-b border-border px-3 text-sm">
       {#each tabs as t (t)}
         <button
@@ -187,30 +253,55 @@
           class="tab"
           class:is-active={tab === t}
         >
-          {t}{#if t === "path" && detected.length}<span class="ml-1 text-xs text-fg-subtle">{detected.length}</span>{/if}
+          {t}{#if t === "params" && detected.length}<span class="ml-1 text-xs text-fg-subtle" title="path params">:{detected.length}</span>{/if}
         </button>
       {/each}
     </div>
 
     <div class="flex-1 overflow-auto p-3">
       {#if tab === "params"}
-        <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
-      {:else if tab === "path"}
-        {#if detected.length === 0}
-          <p class="text-sm text-fg-faint">
-            No path params. Add <code class="mono text-[var(--color-brand)]">:name</code> to the URL
-            (e.g. <code class="mono">/users/:id</code>).
-          </p>
-        {:else}
-          <div class="flex flex-col gap-2">
-            {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
-              <label class="flex items-center gap-2 text-sm">
-                <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
-                <Input bind:value={p.value} placeholder="value" class="h-7 flex-1" />
-              </label>
-            {/each}
-          </div>
-        {/if}
+        <div class="flex flex-col gap-5">
+          <section>
+            <h4 class="label mb-1.5">Query</h4>
+            <p class="hint mb-2">
+              Appended to the URL as <code class="mono">?key=value</code>. Values may use
+              <code class="mono">{"{{vars}}"}</code>.
+            </p>
+            <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
+          </section>
+
+          <section>
+            <h4 class="label mb-1.5">Path</h4>
+            {#if detected.length === 0}
+              <p class="hint">
+                Add <code class="mono text-[var(--color-brand)]">:name</code> to the URL (e.g.
+                <code class="mono">/users/:id</code>) to set path params here.
+              </p>
+            {:else}
+              <p class="hint mb-2">
+                Values for the <code class="mono">:name</code> segments — a literal or a
+                <code class="mono">{"{{var}}"}</code> (e.g. an id saved in your environment).
+              </p>
+              <div class="flex flex-col gap-2">
+                {#each ws.activeReq.pathParams.filter((p) => detected.includes(p.name)) as p (p.name)}
+                  <label class="flex items-center gap-2 text-sm">
+                    <span class="mono w-32 shrink-0 text-[var(--color-brand)]">:{p.name}</span>
+                    <div class="flex-1">
+                      <VarField
+                        bind:value={p.value}
+                        known={ws.knownVars}
+                        values={ws.varTitles}
+                        dense
+                        ariaLabel={`value for :${p.name}`}
+                        placeholder={"value or {{var}}"}
+                      />
+                    </div>
+                  </label>
+                {/each}
+              </div>
+            {/if}
+          </section>
+        </div>
       {:else if tab === "headers"}
         <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
       {:else if tab === "auth"}
@@ -234,6 +325,72 @@
               placeholder={"rr.test('200 OK', () => rr.expect(rr.res.status).toBe(200))\nrr.setVar('token', rr.res.json.token)"} />
           </div>
         </div>
+      {:else if tab === "settings"}
+        {@const inputCls =
+          "h-7 w-28 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)]"}
+        <div class="flex max-w-md flex-col gap-3 text-sm">
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Timeout <span class="hint">ms</span></span>
+            <input
+              type="number"
+              min="0"
+              value={ws.activeReq.timeout ?? ""}
+              placeholder="none"
+              class={inputCls}
+              oninput={(e) => {
+                const v = e.currentTarget.value;
+                ws.activeReq!.timeout = v ? Math.max(0, Number(v)) : undefined;
+              }}
+            />
+          </label>
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Follow redirects</span>
+            <input
+              type="checkbox"
+              bind:checked={ws.activeReq.followRedirects}
+              class="accent-[var(--color-brand)]"
+            />
+          </label>
+          {#if ws.activeReq.followRedirects}
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-fg-muted">Max redirects</span>
+              <input
+                type="number"
+                min="0"
+                max="50"
+                value={ws.activeReq.maxRedirects}
+                class={inputCls}
+                oninput={(e) => {
+                  const v = e.currentTarget.value;
+                  ws.activeReq!.maxRedirects = v ? Math.min(50, Number(v)) : 0;
+                }}
+              />
+            </label>
+          {/if}
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted"
+              >Skip TLS verification <span class="hint">self-signed / dev</span></span
+            >
+            <input
+              type="checkbox"
+              bind:checked={ws.activeReq.insecure}
+              class="accent-[var(--color-brand)]"
+            />
+          </label>
+          <label class="flex items-center justify-between gap-3">
+            <span class="text-fg-muted">Proxy <span class="hint">http/https/socks URL</span></span>
+            <input
+              type="text"
+              value={ws.activeReq.proxy ?? ""}
+              placeholder="http://127.0.0.1:8080"
+              class="mono h-7 w-56 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
+              oninput={(e) => {
+                const v = e.currentTarget.value.trim();
+                ws.activeReq!.proxy = v || undefined;
+              }}
+            />
+          </label>
+        </div>
       {:else if tab === "config"}
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
       {:else}
@@ -254,6 +411,34 @@
           </div>
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
+          {:else if ws.activeReq.body.type === "graphql"}
+            <div class="flex items-center justify-between">
+              <h4 class="label">Query</h4>
+              <Button variant="outline" size="xs" onclick={() => (showSchema = true)}
+                title="Fetch the GraphQL schema (introspection)">Schema</Button
+              >
+            </div>
+            <VarField
+              bind:value={ws.activeReq.body.content}
+              known={ws.knownVars}
+              values={ws.varTitles}
+              multiline
+              lineNumbers
+              rows={9}
+              ariaLabel="GraphQL query"
+              placeholder={"query {\n  viewer { id name }\n}"}
+            />
+            <h4 class="label mt-1">Variables (JSON)</h4>
+            <VarField
+              bind:value={ws.activeReq.body.variables}
+              known={ws.knownVars}
+              values={ws.varTitles}
+              multiline
+              lineNumbers
+              rows={4}
+              ariaLabel="GraphQL variables"
+              placeholder={'{ "id": 1 }'}
+            />
           {:else if ws.activeReq.body.type !== "none"}
             <VarField
               bind:value={ws.activeReq.body.content}
@@ -269,8 +454,15 @@
         </div>
       {/if}
     </div>
+    {/if}
   </section>
 
+  {#if showCode}
+    <CodeModal onClose={() => (showCode = false)} />
+  {/if}
+  {#if showSchema}
+    <GraphQlSchema onClose={() => (showSchema = false)} />
+  {/if}
   {#if showRunner}
     <RunnerPanel onClose={() => (showRunner = false)} />
   {/if}

@@ -8,13 +8,17 @@
 
   let text = $state("");
   let busy = $state(false);
+  let error = $state("");
 
   async function doImport() {
     if (!text.trim()) return;
     busy = true;
+    error = "";
     try {
-      await ws.importCurl(text);
+      await ws.importText(text);
       onClose();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
     } finally {
       busy = false;
     }
@@ -23,7 +27,7 @@
 
 <Modal {onClose} class="flex w-[600px] max-w-[92vw] flex-col rounded-xl">
   <div class="flex items-center justify-between border-b border-border px-4 py-2">
-    <h2 class="text-sm font-semibold text-fg">Import from cURL</h2>
+    <h2 class="text-sm font-semibold text-fg">Import</h2>
     <Button onclick={onClose} variant="ghost" size="icon-xs" aria-label="close">✕</Button>
   </div>
   <div class="p-3">
@@ -32,11 +36,14 @@
       bind:value={text}
       rows={9}
       autofocus
-      placeholder={"Paste a curl command (browser → Copy as cURL)…"}
+      placeholder={"Paste a cURL command, OpenAPI/Swagger, a Postman collection, or a HAR file…"}
       class="mono text-xs"
     />
+    {#if error}<div class="mt-2 text-xs text-red-400">{error}</div>{/if}
     <div class="mt-3 flex items-center justify-between">
-      <span class="hint">Parses method, URL, headers, body and basic auth.</span>
+      <span class="hint"
+        >cURL → a request · OpenAPI · Postman · HAR → a whole collection (auto-detected).</span
+      >
       <div class="flex gap-2">
         <Button onclick={onClose} variant="outline" size="xs">Cancel</Button>
         <Button

@@ -87,11 +87,9 @@
   }
 </script>
 
-<section class="flex h-full flex-col overflow-auto bg-[var(--color-bg-0)] p-5">
+<section class="flex flex-col">
   <div class="mb-4 flex items-center justify-between">
-    <h1 class="text-base font-semibold text-fg">
-      {col?.collection.name ?? "Dashboard"}
-    </h1>
+    <h2 class="label">Dashboard{col ? ` · ${col.collection.name}` : ""}</h2>
     <Button
       onclick={load}
       variant="outline"

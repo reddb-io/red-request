@@ -11,8 +11,42 @@ export const httpSendParamsSchema = z.object({
    * secret). The engine resolves `{{var}}` placeholders with this before dispatching.
    */
   variables: z.record(z.string(), z.string()).default({}),
+  /** When set, persist/apply cookies under this jar key (collection id). */
+  cookieJarKey: z.string().optional(),
 });
 export type HttpSendParams = z.infer<typeof httpSendParamsSchema>;
+
+export const cookiesClearParamsSchema = z.object({ key: z.string() });
+export type CookiesClearParams = z.infer<typeof cookiesClearParamsSchema>;
+
+// --- gRPC -------------------------------------------------------------------
+export const grpcMethodsParamsSchema = z.object({ proto: z.string() });
+export type GrpcMethodsParams = z.infer<typeof grpcMethodsParamsSchema>;
+
+export const grpcMethodSchema = z.object({
+  name: z.string(),
+  requestStream: z.boolean(),
+  responseStream: z.boolean(),
+  requestType: z.string().optional(),
+  skeleton: z.string().default("{}"),
+});
+export const grpcServiceSchema = z.object({
+  name: z.string(),
+  methods: z.array(grpcMethodSchema),
+});
+export type GrpcMethod = z.infer<typeof grpcMethodSchema>;
+export type GrpcService = z.infer<typeof grpcServiceSchema>;
+export const grpcMethodsResultSchema = z.object({
+  services: z.array(grpcServiceSchema).default([]),
+  error: z.string().optional(),
+});
+export type GrpcMethodsResult = z.infer<typeof grpcMethodsResultSchema>;
+
+export const grpcCallParamsSchema = z.object({
+  request: requestDefinitionSchema,
+  variables: z.record(z.string(), z.string()).default({}),
+});
+export type GrpcCallParams = z.infer<typeof grpcCallParamsSchema>;
 
 export const scriptTestSchema = z.object({
   name: z.string(),
@@ -41,16 +75,47 @@ export const httpSendResultSchema = z.object({
 });
 export type HttpSendResult = z.infer<typeof httpSendResultSchema>;
 
+// --- websocket (streaming over engine://stream notifications) --------------
+
+export const wsOpenParamsSchema = z.object({
+  /** Client-chosen connection id; stream events carry it back so the UI can correlate. */
+  id: z.string(),
+  request: requestDefinitionSchema,
+  variables: z.record(z.string(), z.string()).default({}),
+});
+export type WsOpenParams = z.infer<typeof wsOpenParamsSchema>;
+
+export const wsSendParamsSchema = z.object({
+  id: z.string(),
+  data: z.string(),
+});
+export type WsSendParams = z.infer<typeof wsSendParamsSchema>;
+
+export const wsCloseParamsSchema = z.object({ id: z.string() });
+export type WsCloseParams = z.infer<typeof wsCloseParamsSchema>;
+
 export const oauth2TokenParamsSchema = z.object({
   grantType: z
-    .enum(["client_credentials", "password"])
+    .enum([
+      "client_credentials",
+      "password",
+      "authorization_code",
+      "refresh_token",
+    ])
     .default("client_credentials"),
   tokenUrl: z.string(),
   clientId: z.string(),
-  clientSecret: z.string(),
+  clientSecret: z.string().default(""),
   scope: z.string().optional(),
+  audience: z.string().optional(),
   username: z.string().optional(),
   password: z.string().optional(),
+  // authorization_code exchange
+  code: z.string().optional(),
+  codeVerifier: z.string().optional(),
+  redirectUri: z.string().optional(),
+  // refresh_token grant
+  refreshToken: z.string().optional(),
 });
 export type Oauth2TokenParams = z.infer<typeof oauth2TokenParamsSchema>;
 
@@ -58,8 +123,25 @@ export const oauth2TokenResultSchema = z.object({
   accessToken: z.string(),
   tokenType: z.string().default("Bearer"),
   expiresIn: z.number().optional(),
+  refreshToken: z.string().optional(),
+  idToken: z.string().optional(),
+  scope: z.string().optional(),
 });
 export type Oauth2TokenResult = z.infer<typeof oauth2TokenResultSchema>;
+
+/** OIDC discovery: fetch `<issuer>/.well-known/openid-configuration`. */
+export const oidcDiscoverParamsSchema = z.object({ issuer: z.string() });
+export type OidcDiscoverParams = z.infer<typeof oidcDiscoverParamsSchema>;
+
+export const oidcDiscoverResultSchema = z.object({
+  issuer: z.string().optional(),
+  authorizationEndpoint: z.string().optional(),
+  tokenEndpoint: z.string().optional(),
+  userinfoEndpoint: z.string().optional(),
+  jwksUri: z.string().optional(),
+  scopesSupported: z.array(z.string()).optional(),
+});
+export type OidcDiscoverResult = z.infer<typeof oidcDiscoverResultSchema>;
 
 // --- runner / loops ---------------------------------------------------------
 

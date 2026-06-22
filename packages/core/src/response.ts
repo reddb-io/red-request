@@ -1,8 +1,13 @@
 import { z } from "zod";
 
 /**
- * Timing breakdown — fields confirmed against recker@1.0.103's response.timings:
- * { queuing, dns, tcp, tls, firstByte, content, total } (milliseconds).
+ * Timing breakdown (cumulative ms from start, matching recker's shape).
+ * Base fields match recker@1.0.103. The proxy/* fields are filled by the
+ * engine's proxy-dispatch path (see packages/engine/src/proxy-dispatch.ts):
+ *   • proxyConnect — TCP dial to the proxy
+ *   • proxyTls    — TLS handshake with the proxy (HTTPS proxy CONNECT-tunnel)
+ *   • originConnect — extra connect/tls to the origin through the proxy
+ * For non-proxied requests these stay undefined.
  */
 export const timingsSchema = z.object({
   queuing: z.number().optional(),
@@ -12,6 +17,9 @@ export const timingsSchema = z.object({
   firstByte: z.number().optional(),
   content: z.number().optional(),
   total: z.number().optional(),
+  proxyConnect: z.number().optional(),
+  proxyTls: z.number().optional(),
+  originConnect: z.number().optional(),
 });
 export type Timings = z.infer<typeof timingsSchema>;
 

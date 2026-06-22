@@ -17,10 +17,12 @@
 # Idempotent: if the tag already exists locally or on origin we exit 0.
 set -euo pipefail
 
-VERSION="$(node -e 'process.stdout.write(require("./package.json").version)')"
+# Canonical version = the fixed core/engine/ui group that changesets bumps (the root
+# package.json is private and NOT bumped). sync-desktop-version.mjs uses the same source.
+VERSION="$(node -e 'process.stdout.write(require("./packages/core/package.json").version)')"
 
 if [[ -z "$VERSION" ]]; then
-  echo "changesets-tag-release: package.json has no version" >&2
+  echo "changesets-tag-release: packages/core/package.json has no version" >&2
   exit 1
 fi
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]]; then
@@ -38,8 +40,18 @@ fi
 
 if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
   echo "changesets-tag-release: tag $TAG already on origin — skipping push"
-  exit 0
+else
+  git push origin "refs/tags/$TAG"
+  echo "changesets-tag-release: pushed $TAG"
 fi
 
-git push origin "refs/tags/$TAG"
-echo "changesets-tag-release: pushed $TAG — release.yml will take over"
+# Trigger release.yml. A tag pushed with GITHUB_TOKEN does NOT trigger workflows, so we
+# dispatch it explicitly via workflow_dispatch — which GITHUB_TOKEN *is* allowed to do
+# (with `actions: write`). No RELEASE_PAT required. Locally (no gh/token) we just stop here;
+# a human-pushed tag triggers release.yml on its own.
+if command -v gh >/dev/null 2>&1 && [[ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
+  echo "changesets-tag-release: dispatching release.yml for $TAG"
+  gh workflow run release.yml --ref main -f tag="$TAG"
+else
+  echo "changesets-tag-release: gh/token unavailable — release.yml will run on the tag push"
+fi

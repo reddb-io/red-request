@@ -1,0 +1,11 @@
+# Git hooks via lefthook (https://github.com/evilmartians/lefthook).
+# Replaces husky + lint-staged: lefthook formats staged files natively and re-stages them.
+pre-commit:
+  parallel: false
+  commands:
+    format:
+      glob: "*"
+      run: pnpm exec prettier --ignore-unknown --write {staged_files}
+      stage_fixed: true
+    typecheck:
+      run: pnpm run check

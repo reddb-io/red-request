@@ -5,6 +5,7 @@
   "identifier": "io.reddb.request",
   "tagline": "Open-source API client, powered by recker.",
   "accentColor": "#ff2056",
+  "monogram": "R",
   "bgTokens": {
     "bg-0": "#0b0b0d",
     "bg-1": "#141417",
@@ -12,6 +13,7 @@
     "bg-3": "#26262d"
   },
   "logoPath": "brand/assets/logo.svg",
+  "iconPath": "",
   "deepLinkScheme": "redrequest",
   "repoUrl": "https://github.com/reddb-io/red-request",
   "supportUrl": "https://github.com/reddb-io/red-request/issues"

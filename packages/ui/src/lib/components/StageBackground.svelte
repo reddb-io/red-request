@@ -120,15 +120,5 @@
   });
 </script>
 
+<!-- .stage lives in app.css (global) — see note there about Tailwind v4 + Svelte styles. -->
 <canvas bind:this={canvas} class="stage" aria-hidden="true"></canvas>
-
-<style>
-  .stage {
-    position: absolute;
-    inset: 0;
-    display: block;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-  }
-</style>

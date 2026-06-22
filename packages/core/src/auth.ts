@@ -39,12 +39,34 @@ export const authConfigSchema = z.discriminatedUnion("type", [
     grantType: z
       .enum(["client_credentials", "authorization_code", "password"])
       .default("client_credentials"),
+    /** OIDC: when set, authorize/token endpoints are discovered from
+     *  `<issuer>/.well-known/openid-configuration`. */
+    issuer: z.string().default(""),
+    /** Interactive (authorization_code) authorize endpoint. */
+    authorizeUrl: z.string().default(""),
     tokenUrl: z.string().default(""),
     clientId: z.string().default(""),
+    /** Optional — a public client using PKCE needs none. */
     clientSecret: z.string().default(""),
-    scope: z.string().optional(),
-    username: z.string().optional(),
-    password: z.string().optional(),
+    scope: z.string().default(""),
+    audience: z.string().default(""),
+    /** PKCE (S256) — on by default; required for public clients. */
+    usePkce: z.boolean().default(true),
+    /** Where the IdP redirects after login (authorization_code). */
+    redirect: z.enum(["loopback", "deeplink"]).default("loopback"),
+    /** password grant */
+    username: z.string().default(""),
+    password: z.string().default(""),
+    /** Extra query params appended to the authorize URL (e.g. prompt, login_hint). */
+    extraParams: z
+      .array(
+        z.object({
+          name: z.string(),
+          value: z.string().default(""),
+          enabled: z.boolean().default(true),
+        })
+      )
+      .default([]),
   }),
   z.object({
     type: z.literal("awsSigV4"),

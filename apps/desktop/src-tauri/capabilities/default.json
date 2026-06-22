@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "Default window capabilities. The engine sidecar is spawned from Rust, so no shell ACL is needed; the webview only calls app commands.",
   "windows": ["main"],
-  "permissions": ["core:default", "deep-link:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
+    "deep-link:default",
+    "dialog:default"
+  ]
 }

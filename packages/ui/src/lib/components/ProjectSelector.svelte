@@ -4,6 +4,7 @@
   import { ws } from "../store.svelte";
   import { brand } from "../brand.generated";
   import { recentList, recentPin, type RecentProject } from "../project";
+  import { appVersion, reddbVersion } from "../rpc";
   import StageBackground from "./StageBackground.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
   import { Button } from "./ui/button/index.js";
@@ -12,9 +13,13 @@
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
   let query = $state("");
+  let appVer = $state<string | null>(null);
+  let reddbVer = $state<string | null>(null);
 
   onMount(async () => {
     recents = await recentList().catch(() => []);
+    appVer = await appVersion().catch(() => null);
+    reddbVer = await reddbVersion().catch(() => null);
   });
 
   // Pinned first, then most-recently-used.
@@ -59,14 +64,14 @@
   }
 </script>
 
-<div class="relative h-screen overflow-hidden bg-[var(--color-bg-0)]">
+<div class="relative h-full overflow-hidden bg-[var(--color-bg-0)]">
   <StageBackground />
   <div class="relative z-10 grid h-full place-items-center px-6">
     <div class="w-[640px]">
     <div class="mb-5 flex items-center gap-2.5">
       <span
         class="grid h-7 w-7 place-items-center rounded-md bg-[var(--color-brand)] text-sm font-bold text-black"
-        >R</span
+        >{brand.monogram}</span
       >
       <div class="leading-tight">
         <h1 class="text-base font-semibold text-fg-strong">{brand.productName}</h1>
@@ -157,9 +162,15 @@
       </div>
     {/if}
 
-    {#if busy}
-      <p class="mt-3 text-center text-xs text-fg-subtle">Opening…</p>
-    {/if}
     </div>
+  </div>
+
+  <!-- Version footer -->
+  <div
+    class="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center gap-2 px-4 py-2.5 text-[11px] text-fg-faint"
+  >
+    <span class="mono">{brand.binaryName} v{appVer ?? "…"}</span>
+    <span class="text-fg-faint/50">·</span>
+    <span class="mono">reddb v{reddbVer ?? "…"}</span>
   </div>
 </div>

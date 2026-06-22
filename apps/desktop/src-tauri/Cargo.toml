@@ -1,6 +1,6 @@
 [package]
 name = "red-request"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open-source white-label API client (recker-powered)"
 authors = ["RedDB.io"]
 edition = "2021"
@@ -39,8 +39,9 @@ keyring = { version = "3", features = [
   "linux-native-sync-persistent",
 ] }
 aes-gcm = "0.10"
-rand = "0.8"
+rand = "0.9"
 base64 = "0.22"
+sha2 = "0.10"
 
 [features]
 default = ["custom-protocol"]

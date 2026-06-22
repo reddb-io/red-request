@@ -23,11 +23,10 @@ patch("apps/desktop/src-tauri/tauri.conf.json", (s) => {
   c.version = version;
   return JSON.stringify(c, null, 2) + "\n";
 });
-patch("apps/desktop/package.json", (s) => {
-  const c = JSON.parse(s);
-  c.version = version;
-  return JSON.stringify(c, null, 2) + "\n";
-});
+// NOTE: deliberately do NOT bump apps/desktop/package.json — it's `ignore`d by changesets,
+// and bumping it mid-`changeset version` makes changesets/action treat it as a released
+// package and read its (nonexistent) CHANGELOG.md → ENOENT. The real app version lives in
+// tauri.conf.json + Cargo.toml.
 patch("apps/desktop/src-tauri/Cargo.toml", (s) =>
   s.replace(/^version = ".*"$/m, `version = "${version}"`)
 );

@@ -17,6 +17,10 @@ export const collectionFileSchema = z.object({
   order: z.array(z.string()).default([]),
   /** Folder names for grouping requests (incl. empty folders). */
   folders: z.array(z.string()).default([]),
+  /** Persist Set-Cookie across this collection's requests (browser-like session). */
+  cookieJar: z.boolean().default(false),
+  /** Default project profile applied to requests that don't pick one (empty = none). */
+  defaultProfileId: z.string().default(""),
 });
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
 
