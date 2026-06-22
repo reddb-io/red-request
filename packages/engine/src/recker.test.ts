@@ -115,4 +115,44 @@ describe("dispatch", () => {
     expect(r.ok).toBe(false);
     expect(r.error?.message).toBeTruthy();
   });
+
+  it("sends GraphQL query and variables as a single JSON payload", async () => {
+    const r = await dispatch(
+      req({
+        method: "POST",
+        url: `${base}/graphql`,
+        body: {
+          type: "graphql",
+          content: "query Viewer($id: ID!) { viewer(id: $id) { name } }",
+          variables: '{"id":"u-1"}',
+          fields: [],
+        },
+      })
+    );
+    expect(r.status).toBe(200);
+    const echoed = JSON.parse(r.bodyText);
+    const payload = JSON.parse(echoed.body);
+    expect(payload.query).toBe(
+      "query Viewer($id: ID!) { viewer(id: $id) { name } }"
+    );
+    expect(payload.variables).toEqual({ id: "u-1" });
+    expect(echoed.headers["content-type"]).toContain("application/json");
+  });
+
+  it("sends GraphQL with empty variables object when variables field is absent", async () => {
+    const r = await dispatch(
+      req({
+        method: "POST",
+        url: `${base}/graphql`,
+        body: {
+          type: "graphql",
+          content: "query { viewer { id } }",
+          fields: [],
+        },
+      })
+    );
+    expect(r.status).toBe(200);
+    const payload = JSON.parse(JSON.parse(r.bodyText).body);
+    expect(payload.variables).toEqual({});
+  });
 });
