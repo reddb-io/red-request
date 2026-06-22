@@ -10,6 +10,33 @@ import type { ResponseResult } from "@red-request/core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * Parse a hex string into a Buffer. Whitespace between pairs is ignored so the
+ * user can write "de ad be ef" or "deadbeef". Throws on invalid input.
+ */
+export function parseHexPayload(hex: string): Buffer {
+  const clean = hex.replace(/\s+/g, "");
+  if (clean.length === 0) return Buffer.alloc(0);
+  if (!/^[0-9a-fA-F]+$/.test(clean) || clean.length % 2 !== 0) {
+    throw new Error(
+      "invalid hex payload: must be an even number of hex digits (0-9 a-f)"
+    );
+  }
+  return Buffer.from(clean, "hex");
+}
+
+function resolvePayload(
+  payload: string,
+  mode: "text" | "hex" | undefined
+): Buffer | Error {
+  if (mode !== "hex") return Buffer.from(payload, "utf8");
+  try {
+    return parseHexPayload(payload);
+  } catch (e) {
+    return e instanceof Error ? e : new Error(String(e));
+  }
+}
+
 /** A datagram is "binary" if it carries control bytes other than the common text whitespace
  *  (tab, LF, CR). Such payloads are surfaced as base64 so the UI can render them as hex. */
 function isBinary(buf: Buffer): boolean {
@@ -113,9 +140,14 @@ export function runTcp(
   host: string,
   port: number,
   payload: string,
-  timeoutMs: number
+  timeoutMs: number,
+  payloadMode?: "text" | "hex"
 ): Promise<ResponseResult> {
   const t0 = performance.now();
+  const payloadBuf = resolvePayload(payload, payloadMode);
+  if (payloadBuf instanceof Error) {
+    return Promise.resolve(fail(payloadBuf.message, 0));
+  }
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let connectMs = 0;
@@ -135,7 +167,7 @@ export function runTcp(
     );
     sock.once("connect", () => {
       connectMs = performance.now() - t0;
-      if (!payload) {
+      if (!payloadBuf.length) {
         finish(
           ok(`connected to ${host}:${port}`, connectMs, {
             timings: { tcp: connectMs, total: connectMs },
@@ -143,7 +175,7 @@ export function runTcp(
         );
         return;
       }
-      sock.write(payload);
+      sock.write(payloadBuf);
       // brief read window for the response
       setTimeout(
         () => {
@@ -180,9 +212,14 @@ export function runTls(
   payload: string,
   sni: string,
   insecure: boolean,
-  timeoutMs: number
+  timeoutMs: number,
+  payloadMode?: "text" | "hex"
 ): Promise<ResponseResult> {
   const t0 = performance.now();
+  const payloadBuf = resolvePayload(payload, payloadMode);
+  if (payloadBuf instanceof Error) {
+    return Promise.resolve(fail(payloadBuf.message, 0));
+  }
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let connectMs = 0;
@@ -245,7 +282,7 @@ export function runTls(
             : null,
       };
 
-      if (!payload) {
+      if (!payloadBuf.length) {
         finish(
           ok(`TLS connected to ${host}:${port}`, connectMs, {
             timings: { tls: connectMs, total: connectMs },
@@ -255,7 +292,7 @@ export function runTls(
         return;
       }
 
-      sock.write(payload);
+      sock.write(payloadBuf);
       setTimeout(
         () => {
           const recv = Buffer.concat(chunks).toString("utf8");
@@ -360,9 +397,14 @@ export function runUdp(
   port: number,
   payload: string,
   waitResponse: boolean,
-  timeoutMs: number
+  timeoutMs: number,
+  payloadMode?: "text" | "hex"
 ): Promise<ResponseResult> {
   const t0 = performance.now();
+  const payloadBuf = resolvePayload(payload, payloadMode);
+  if (payloadBuf instanceof Error) {
+    return Promise.resolve(fail(payloadBuf.message, 0));
+  }
   return new Promise((resolve) => {
     const sock = dgram.createSocket("udp4");
     let settled = false;
@@ -376,7 +418,7 @@ export function runUdp(
       }
       resolve(res);
     };
-    const buf = Buffer.from(payload, "utf8");
+    const buf = payloadBuf;
     const timer = waitResponse
       ? setTimeout(
           () =>
