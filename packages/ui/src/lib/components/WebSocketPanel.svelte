@@ -4,6 +4,7 @@
   import { ws } from "../store.svelte";
   import { Button } from "./ui/button/index.js";
   import VarField from "./VarField.svelte";
+  import HexViewer from "./HexViewer.svelte";
   import { RotateCcw } from "@lucide/svelte";
 
   let draft = $state("");
@@ -93,10 +94,16 @@
               >{m.status === "sent" ? "✓" : m.status === "error" ? "✗" : ""}</span
             >
           {/if}
-          <span
-            class="break-all min-w-0 flex-1 whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
-            >{m.data}</span
-          >
+          {#if m.isBinary}
+            <div class="min-w-0 flex-1 max-h-32 overflow-auto rounded border border-border p-1">
+              <HexViewer base64={m.data} />
+            </div>
+          {:else}
+            <span
+              class="break-all min-w-0 flex-1 whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
+              >{m.data}</span
+            >
+          {/if}
           {#if m.dir === "in" && m.correlationId}
             <span
               class="shrink-0 text-fg-faint"
