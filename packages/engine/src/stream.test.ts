@@ -101,6 +101,55 @@ describe("wsOpen + wsSend notifications", () => {
     wsClose(id);
   });
 
+  it("replays a frame by re-sending its exact payload", async () => {
+    const id = "test-ws-replay";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${wsPort}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for open")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) => m.stream === id && m.event === "open"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    const payload = '{"type":"ping"}';
+    wsSend(id, payload);
+    wsSend(id, payload); // replay: same payload re-sent
+    cap.stop();
+
+    const outFrames = parseNotifications(cap.lines()).filter(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "out" &&
+        (m.data as any).data === payload
+    );
+    expect(outFrames).toHaveLength(2);
+    expect(outFrames.every((f) => (f.data as any).status === "sent")).toBe(
+      true
+    );
+
+    wsClose(id);
+  });
+
   it("emits status=error when not connected", () => {
     const id = "test-ws-disconnected";
 

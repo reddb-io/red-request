@@ -4,6 +4,7 @@
   import { ws } from "../store.svelte";
   import { Button } from "./ui/button/index.js";
   import VarField from "./VarField.svelte";
+  import { RotateCcw } from "@lucide/svelte";
 
   let draft = $state("");
   const connected = $derived(ws.wsStatus === "open");
@@ -19,6 +20,9 @@
     const d = draft;
     draft = "";
     await ws.wsSendMessage(d);
+  }
+  async function replay(data: string) {
+    await ws.wsSendMessage(data);
   }
 
   const dot: Record<string, string> = {
@@ -62,7 +66,7 @@
       </div>
     {:else}
       {#each ws.wsMessages as m, i (i)}
-        <div class="flex gap-2 py-0.5">
+        <div class="group flex gap-2 py-0.5">
           <span class="shrink-0 text-fg-faint">{fmtTime(m.ts)}</span>
           <span
             class="shrink-0 {m.dir === 'out'
@@ -86,9 +90,17 @@
             >
           {/if}
           <span
-            class="break-all whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
+            class="break-all min-w-0 flex-1 whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
             >{m.data}</span
           >
+          {#if m.dir === "out"}
+            <button
+              onclick={() => replay(m.data)}
+              disabled={!connected}
+              title="Re-send this frame"
+              class="shrink-0 invisible rounded p-0.5 text-fg-faint opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 hover:text-[var(--color-brand)] disabled:pointer-events-none disabled:opacity-30"
+            ><RotateCcw size={11} /></button>
+          {/if}
         </div>
       {/each}
     {/if}
