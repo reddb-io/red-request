@@ -3,59 +3,13 @@
   import Tooltip from "./ui/Tooltip.svelte";
   import Menu from "./ui/Menu.svelte";
   import ImportModal from "./ui/ImportModal.svelte";
-  import ProxiesModal from "./ProxiesModal.svelte";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import { Badge } from "./ui/badge/index.js";
 
   let showImport = $state(false);
-  let showProxies = $state(false);
-  import { brand } from "../brand.generated";
   import { projectLabel } from "../project";
-  import * as yamlio from "../yaml-io";
   import type { LoadedCollection } from "@red-request/core";
-  import { confirm } from "@tauri-apps/plugin-dialog";
-
-  let status = $state("");
-
-  // project settings (cog menu): inline rename + destructive delete
-  let renamingProject = $state(false);
-  let projRenameValue = $state("");
-  function startRenameProject() {
-    projRenameValue = projectLabel(ws.project);
-    renamingProject = true;
-  }
-  async function commitRenameProject() {
-    if (renamingProject) await ws.renameProject(projRenameValue);
-    renamingProject = false;
-  }
-  async function confirmDeleteProjectData() {
-    const ok = await confirm(
-      "Permanently delete all requests, collections and history for this project? This removes its .red/request data and cannot be undone (the rest of the folder is left untouched).",
-      { title: "Delete project data", kind: "warning" }
-    );
-    if (ok) await ws.deleteProjectData();
-  }
-
-  async function doExport() {
-    try {
-      const path = await yamlio.exportAll(
-        $state.snapshot(ws.collections) as LoadedCollection[]
-      );
-      status = `Exported → ${path}`;
-    } catch (e) {
-      status = `Export failed: ${e instanceof Error ? e.message : e}`;
-    }
-  }
-  async function doImport() {
-    try {
-      const n = await yamlio.importAll();
-      await ws.reload();
-      status = `Imported ${n} collection(s)`;
-    } catch (e) {
-      status = `Import failed: ${e instanceof Error ? e.message : e}`;
-    }
-  }
 
   const methodColor: Record<string, string> = {
     GET: "text-emerald-400",
@@ -110,14 +64,47 @@
     renamingColId = null;
   }
 
-  // drag-and-drop requests between folders (within the active collection)
+  // drag-and-drop: reorder requests and move them across folders (within a collection).
+  // `dropTarget` is the live insertion point — the folder and the sibling id to land
+  // *before* (null → end of that folder). `dropFolderHeader`/`dropRootHeader` light up
+  // a header when you hover it to drop "into" that container at its end.
   let draggingId = $state<string | null>(null);
-  let dropKey = $state<string | null>(null);
-  function dropInto(colId: string, folder: string) {
-    if (draggingId && ws.activeColId === colId) void ws.moveRequest(draggingId, folder);
+  let dropTarget = $state<{ folder: string; beforeId: string | null } | null>(null);
+  let dropFolderHeader = $state<string | null>(null);
+  let dropRootHeader = $state<string | null>(null);
+
+  function resetDrag() {
     draggingId = null;
-    dropKey = null;
+    dropTarget = null;
+    dropFolderHeader = null;
+    dropRootHeader = null;
   }
+
+  // Top half of a row → insert before it; bottom half → insert after (before `nextId`,
+  // or end of folder when `nextId` is null).
+  function onRowDragOver(e: DragEvent, folder: string, reqId: string, nextId: string | null) {
+    if (!draggingId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const before = e.clientY - rect.top < rect.height / 2;
+    dropFolderHeader = null;
+    dropRootHeader = null;
+    dropTarget = { folder, beforeId: before ? reqId : nextId };
+  }
+
+  function commitDrop() {
+    if (draggingId && dropTarget) {
+      void ws.reorderRequest(draggingId, dropTarget.folder, dropTarget.beforeId);
+    }
+    resetDrag();
+  }
+
+  const lineBefore = (folder: string, reqId: string) =>
+    !!dropTarget && dropTarget.folder === folder && dropTarget.beforeId === reqId;
+  const lineEnd = (folder: string) =>
+    !!dropTarget && dropTarget.folder === folder && dropTarget.beforeId === null;
 
   function toggle(key: string) {
     if (collapsed.has(key)) collapsed.delete(key);
@@ -147,104 +134,68 @@
     folderName = "";
     addingFolderFor = null;
   }
+
+  // Create an empty collection and drop straight into its inline name field.
+  async function newCollection() {
+    const id = await ws.addCollection();
+    renamingColId = id;
+    colRenameValue = "New Collection";
+  }
 </script>
 
 <aside
   class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-[var(--color-bg-1)]"
 >
   <div class="flex items-center gap-2 px-4 py-3">
-    <span
-      class="grid h-6 w-6 place-items-center rounded bg-[var(--color-brand)] text-sm font-bold text-black"
-      >{brand.monogram}</span
-    >
     <div class="flex min-w-0 flex-1 flex-col leading-tight">
-      <span class="text-sm font-semibold">{brand.productName}</span>
-      {#if ws.project?.is_project && renamingProject}
-        <!-- svelte-ignore a11y_autofocus -->
-        <Input
-          bind:value={projRenameValue}
-          autofocus
-          onblur={commitRenameProject}
-          onkeydown={(e) => {
-            if (e.key === "Enter") commitRenameProject();
-            if (e.key === "Escape") renamingProject = false;
-          }}
-          class="mt-0.5 h-6 text-xs"
-        />
-      {:else if ws.project}
-        <Tooltip text="Switch project — {ws.project.db_path}" side="bottom">
-          {#snippet children(p)}
-            <button
-              {...p}
-              onclick={() => ws.backToSelector()}
-              class="mono flex items-center gap-1 truncate text-xs text-fg-subtle hover:text-fg"
-            >
-              {projectLabel(ws.project)}
-              <span class="text-fg-faint">⇄</span>
-            </button>
-          {/snippet}
-        </Tooltip>
-      {/if}
-    </div>
-    {#if ws.project?.is_project}
-      <Menu
-        items={[
-          { label: "Rename…", onSelect: startRenameProject },
-          { label: "Remove from recents", onSelect: () => ws.forgetProject() },
-          {
-            label: "Delete project data…",
-            onSelect: confirmDeleteProjectData,
-            destructive: true,
-          },
-        ]}
-      >
-        {#snippet trigger(p)}
-          <Button
-            {...p}
-            variant="ghost"
-            size="icon-xs"
-            aria-label="project settings"
-            class="shrink-0">⚙</Button
-          >
-        {/snippet}
-      </Menu>
-    {/if}
-    <Tooltip text="Proxies & profiles" side="bottom">
-      {#snippet children(p)}
-        <Button
-          {...p}
-          onclick={() => (showProxies = true)}
-          variant="ghost"
-          size="icon-xs"
-          aria-label="proxies and profiles"
-          class="shrink-0">🌐</Button
+      {#if ws.project}
+        <span class="truncate text-sm font-semibold text-fg-strong" title={ws.project.db_path}
+          >{projectLabel(ws.project)}</span
         >
+      {/if}
+      <span class="text-[10px] font-medium tracking-wide text-fg-faint uppercase">Collections</span>
+    </div>
+    <Tooltip text="New collection" side="bottom">
+      {#snippet children(p)}
+        <Button {...p} onclick={newCollection} variant="outline" size="xs">+ Collection</Button>
       {/snippet}
     </Tooltip>
   </div>
 
-  <div class="flex gap-1 px-2 pb-2">
-    {#each ["requests", "dashboard"] as const as v (v)}
-      <button onclick={() => (ws.view = v)} class="seg" class:is-active={ws.view === v}
-        >{v}</button
-      >
-    {/each}
-  </div>
-
-  {#snippet reqRow(col: LoadedCollection, req: LoadedCollection["requests"][number], indent: boolean)}
+  {#snippet reqRow(
+    col: LoadedCollection,
+    req: LoadedCollection["requests"][number],
+    indent: boolean,
+    folder: string,
+    nextId: string | null,
+    isLast: boolean,
+  )}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="group/req relative"
       class:opacity-40={draggingId === req.id}
-      draggable="true"
-      ondragstart={() => (draggingId = req.id)}
-      ondragend={() => {
-        draggingId = null;
-        dropKey = null;
+      ondragover={(e) => onRowDragOver(e, folder, req.id, nextId)}
+      ondrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        commitDrop();
       }}
     >
+      {#if lineBefore(folder, req.id)}
+        <div class="drop-line" style="top: -1px"></div>
+      {/if}
+      {#if isLast && lineEnd(folder)}
+        <div class="drop-line" style="bottom: -1px"></div>
+      {/if}
       <button
         onclick={() => ws.selectRequest(col.id, req.id)}
+        draggable={renamingId !== req.id}
+        ondragstart={(e) => {
+          draggingId = req.id;
+          e.dataTransfer?.setData("text/plain", req.id);
+          if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+        }}
+        ondragend={resetDrag}
         class="row pr-6 {indent ? 'pl-6' : 'pl-2'}"
         class:is-active={ws.activeReq?.id === req.id && ws.activeColId === col.id}
       >
@@ -312,17 +263,19 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="group/col flex items-center justify-between rounded px-2 py-1"
-          class:ring-1={dropKey === `${col.id}::root`}
-          class:ring-[var(--color-brand)]={dropKey === `${col.id}::root`}
+          class:ring-1={dropRootHeader === col.id}
+          class:ring-[var(--color-brand)]={dropRootHeader === col.id}
           ondragover={(e) => {
-            if (!draggingId) return;
+            if (!draggingId || ws.activeColId !== col.id) return;
             e.preventDefault();
-            dropKey = `${col.id}::root`;
+            dropFolderHeader = null;
+            dropRootHeader = col.id;
+            dropTarget = { folder: "", beforeId: null };
           }}
-          ondragleave={() => (dropKey = null)}
+          ondragleave={() => (dropRootHeader = null)}
           ondrop={(e) => {
             e.preventDefault();
-            dropInto(col.id, "");
+            commitDrop();
           }}
         >
           {#if renamingColId === col.id}
@@ -338,9 +291,28 @@
               class="h-6"
             />
           {:else}
-            <span class="label truncate">
-              {col.collection.name}
-            </span>
+            <button
+              onclick={() => toggle(col.id)}
+              class="flex min-w-0 flex-1 items-center gap-1 text-left"
+              title="Collapse / expand collection"
+            >
+              <span class="shrink-0 text-fg-subtle">{collapsed.has(col.id) ? "▸" : "▾"}</span>
+              <span class="label truncate">{col.collection.name}</span>
+              {#if col.collection.defaultProfileId}
+                {@const dp = ws.profiles.find((p) => p.id === col.collection.defaultProfileId)}
+                {#if dp}
+                  <Tooltip text="Default profile: {dp.name || 'profile'}" side="bottom">
+                    {#snippet children(p)}
+                      <span
+                        {...p}
+                        class="mono ml-1 shrink-0 rounded bg-[var(--color-bg-2)] px-1 text-[10px] text-fg-muted"
+                        >🪪</span
+                      >
+                    {/snippet}
+                  </Tooltip>
+                {/if}
+              {/if}
+            </button>
           {/if}
           <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
@@ -388,6 +360,7 @@
           </span>
         </div>
 
+        {#if !collapsed.has(col.id)}
         {#if addingFolderFor === col.id}
           <Input
             bind:value={folderName}
@@ -400,8 +373,8 @@
           />
         {/if}
 
-        {#each g.root as req (req.id)}
-          {@render reqRow(col, req, false)}
+        {#each g.root as req, i (req.id)}
+          {@render reqRow(col, req, false, "", g.root[i + 1]?.id ?? null, i === g.root.length - 1)}
         {/each}
 
         {#each g.folders as f (f.name)}
@@ -409,17 +382,21 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="group/folder relative mt-0.5 flex items-center rounded"
-            class:ring-1={dropKey === key}
-            class:ring-[var(--color-brand)]={dropKey === key}
+            class:ring-1={dropFolderHeader === key}
+            class:ring-[var(--color-brand)]={dropFolderHeader === key}
             ondragover={(e) => {
               if (!draggingId) return;
               e.preventDefault();
-              dropKey = key;
+              e.stopPropagation();
+              dropRootHeader = null;
+              dropFolderHeader = key;
+              dropTarget = { folder: f.name, beforeId: null };
             }}
-            ondragleave={() => (dropKey = null)}
+            ondragleave={() => (dropFolderHeader = null)}
             ondrop={(e) => {
               e.preventDefault();
-              dropInto(col.id, f.name);
+              e.stopPropagation();
+              commitDrop();
             }}
           >
             <button
@@ -444,44 +421,43 @@
             </span>
           </div>
           {#if !collapsed.has(key)}
-            {#each f.requests as req (req.id)}
-              {@render reqRow(col, req, true)}
+            {#each f.requests as req, i (req.id)}
+              {@render reqRow(col, req, true, f.name, f.requests[i + 1]?.id ?? null, i === f.requests.length - 1)}
             {/each}
             {#if f.requests.length === 0}
-              <div class="hint py-1 pl-6">empty</div>
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="relative py-1 pl-6"
+                ondragover={(e) => {
+                  if (!draggingId) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  dropFolderHeader = null;
+                  dropRootHeader = null;
+                  dropTarget = { folder: f.name, beforeId: null };
+                }}
+                ondrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  commitDrop();
+                }}
+              >
+                {#if lineEnd(f.name)}
+                  <div class="drop-line" style="top: 2px"></div>
+                {/if}
+                <span class="hint">empty</span>
+              </div>
             {/if}
           {/if}
         {/each}
+        {/if}
       </div>
     {/each}
-  </div>
-
-  <div class="border-t border-border p-2">
-    <div class="flex gap-1">
-      <Button
-        onclick={doExport}
-        variant="outline"
-        size="xs"
-        class="flex-1"
-        title="Write a git-friendly YAML tree (no secret values)">Export YAML</Button
-      >
-      <Button
-        onclick={doImport}
-        variant="outline"
-        size="xs"
-        class="flex-1"
-        title="Read the YAML tree back into the store">Import</Button
-      >
-    </div>
-    {#if status}
-      <div class="hint mt-1 truncate text-fg-subtle" title={status}>{status}</div>
-    {/if}
   </div>
 </aside>
 
 {#if showImport}
   <ImportModal onClose={() => (showImport = false)} />
 {/if}
-{#if showProxies}
-  <ProxiesModal onClose={() => (showProxies = false)} />
-{/if}
+
+<!-- .drop-line styles live in app.css (global) — see note there about Tailwind v4 + Svelte. -->

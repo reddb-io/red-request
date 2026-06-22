@@ -108,6 +108,17 @@ interface ScanItem {
  * `/scan` returns the same rows (`items[].data.named.{key,value}`) and keeps the model `kv`.
  * (In 0.1.5 `/scan` was broken — fixed in 1.11.0, the version we now bundle.)
  */
+export async function kvCount(collection: string): Promise<number> {
+  const r = await request("GET", `/collections/${collection}/scan`);
+  if (r.status >= 300) return 0;
+  try {
+    const j = JSON.parse(r.body) as { items?: ScanItem[] };
+    return j.items?.length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function kvList<T>(
   collection: string
 ): Promise<Array<{ key: string; value: T }>> {

@@ -51,6 +51,11 @@ function syncBrandTs() {
     `export const brand = ${JSON.stringify(
       {
         productName: brand.productName,
+        // Lowercase technical name (e.g. "red-request") — used where it pairs with
+        // other lowercase tokens like the engine/reddb name. Falls back to a slug.
+        binaryName:
+          brand.binaryName ||
+          brand.productName.toLowerCase().replace(/\s+/g, "-"),
         // Accent badge mark: explicit `monogram`, else the productName's initial.
         monogram: (brand.monogram || brand.productName[0] || "").toUpperCase(),
         identifier: brand.identifier,

@@ -2,9 +2,12 @@
 //
 //   rr_collections   key=<colId>            → CollectionFile
 //   rr_requests      key=<colId>.<reqId>    → RequestDefinition
-//   rr_environments  key=<colId>.<envSlug>  → StoredEnvironment (sealed secrets)
+//   rr_environments  key=<envSlug>          → StoredEnvironment (project-level, sealed secrets)
+//   rr_settings      key="globals"          → Record<string,string> (project-level base vars)
 //
 // Keys use `.` as separator; collection/request ids and env slugs are URL-safe slugs.
+// Environments and global vars are project-level (shared by every collection); a one-time
+// migration in loadEnvironments() collapses any legacy per-collection `<colId>.<slug>` keys.
 import {
   collectionFileSchema,
   requestDefinitionSchema,
@@ -26,8 +29,47 @@ export const REQ = "rr_requests";
 export const ENV = "rr_environments";
 export const HIST = "rr_history";
 export const SETTINGS = "rr_settings";
+export const OAUTH = "rr_oauth_tokens";
 
 const MAX_HISTORY_PER_REQ = 50;
+
+/** Cached OAuth2/OIDC token set, keyed by a connection id (hash of tokenUrl|clientId|
+ *  scope|grantType). Token strings are sealed (AES-GCM) before they land here; the
+ *  metadata (expiry/scope) stays in clear so the UI can show status without unsealing. */
+export interface StoredOauthToken {
+  accessSealed: { iv: string; ct: string };
+  refreshSealed?: { iv: string; ct: string };
+  idSealed?: { iv: string; ct: string };
+  expiresAt: number; // epoch ms (0 = unknown/never)
+  scope?: string;
+  tokenType: string;
+  obtainedAt: number;
+}
+
+/** Record counts per KV collection + total — for the Settings → Data store summary. */
+export async function recordCounts(): Promise<{
+  total: number;
+  byKind: { label: string; count: number }[];
+}> {
+  const kinds: { label: string; name: string }[] = [
+    { label: "collections", name: COL },
+    { label: "requests", name: REQ },
+    { label: "environments", name: ENV },
+    { label: "history", name: HIST },
+    { label: "settings", name: SETTINGS },
+    { label: "oauth tokens", name: OAUTH },
+  ];
+  const counts = await Promise.all(kinds.map((k) => db.kvCount(k.name)));
+  const byKind = kinds.map((k, i) => ({ label: k.label, count: counts[i]! }));
+  return { total: counts.reduce((s, n) => s + n, 0), byKind };
+}
+
+export const loadOauthToken = (connId: string) =>
+  db.kvGet<StoredOauthToken>(OAUTH, connId).catch(() => null);
+export const saveOauthToken = (connId: string, token: StoredOauthToken) =>
+  db.kvPut(OAUTH, connId, token);
+export const deleteOauthToken = (connId: string) =>
+  db.kvDelete(OAUTH, connId).catch(() => {});
 
 export function slugify(name: string): string {
   return (
@@ -40,7 +82,6 @@ export function slugify(name: string): string {
 }
 
 const reqKey = (colId: string, reqId: string) => `${colId}.${reqId}`;
-const envKey = (colId: string, name: string) => `${colId}.${slugify(name)}`;
 const ownedBy = (colId: string, key: string) => key.startsWith(`${colId}.`);
 
 export async function ensureStore(): Promise<void> {
@@ -49,6 +90,7 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(ENV);
   await db.ensureKvCollection(HIST);
   await db.ensureKvCollection(SETTINGS);
+  await db.ensureKvCollection(OAUTH);
 }
 
 const NETWORK_KEY = "network";
@@ -83,10 +125,9 @@ export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
-  const [cols, reqs, envs] = await Promise.all([
+  const [cols, reqs] = await Promise.all([
     db.kvList<CollectionFile>(COL),
     db.kvList<RequestDefinition>(REQ),
-    db.kvList<StoredEnvironment>(ENV),
   ]);
 
   return cols.map(({ key: colId, value }) => {
@@ -99,12 +140,40 @@ export async function loadAll(): Promise<LoadedCollection[]> {
         const ib = collection.order.indexOf(b.id);
         return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
       });
-    const environments = envs
-      .filter((e) => ownedBy(colId, e.key))
-      .map((e) => storedEnvironmentSchema.parse(e.value));
-    return { id: colId, collection, requests, environments };
+    // Environments are project-level now (loaded via loadEnvironments).
+    return { id: colId, collection, requests, environments: [] };
   });
 }
+
+/** Load the project-level environments. Self-migrates any legacy per-collection
+ *  keys (`<colId>.<slug>`) to project keys (`<slug>`), deduping by name. */
+export async function loadEnvironments(): Promise<StoredEnvironment[]> {
+  const all = await db.kvList<StoredEnvironment>(ENV);
+  const legacy = all.filter((e) => e.key.includes("."));
+  if (legacy.length > 0) {
+    const byName = new Map<string, StoredEnvironment>();
+    for (const e of all) {
+      const env = storedEnvironmentSchema.parse(e.value);
+      byName.set(env.name, env); // later collections win on a name clash
+    }
+    for (const e of legacy) await db.kvDelete(ENV, e.key);
+    for (const env of byName.values())
+      await db.kvPut(ENV, slugify(env.name), env);
+    return [...byName.values()];
+  }
+  return all.map((e) => storedEnvironmentSchema.parse(e.value));
+}
+
+const GLOBALS_KEY = "globals";
+/** Project-level base variables (formerly per-collection `vars`). Null = never set. */
+export async function loadGlobals(): Promise<Record<string, string> | null> {
+  const raw = await db
+    .kvGet<Record<string, string>>(SETTINGS, GLOBALS_KEY)
+    .catch(() => null);
+  return raw ?? null;
+}
+export const saveGlobals = (vars: Record<string, string>) =>
+  db.kvPut(SETTINGS, GLOBALS_KEY, vars);
 
 export const saveCollectionMeta = (colId: string, c: CollectionFile) =>
   db.kvPut(COL, colId, c);
@@ -115,26 +184,23 @@ export const saveRequest = (colId: string, req: RequestDefinition) =>
 export const deleteRequest = (colId: string, reqId: string) =>
   db.kvDelete(REQ, reqKey(colId, reqId));
 
-export const saveEnvironment = (colId: string, env: StoredEnvironment) =>
-  db.kvPut(ENV, envKey(colId, env.name), env);
+export const saveEnvironment = (env: StoredEnvironment) =>
+  db.kvPut(ENV, slugify(env.name), env);
 
-export const deleteEnvironment = (colId: string, name: string) =>
-  db.kvDelete(ENV, envKey(colId, name));
+export const deleteEnvironment = (name: string) =>
+  db.kvDelete(ENV, slugify(name));
 
-/** Delete a whole collection: its meta + every owned request, environment and history row. */
+/** Delete a whole collection: its meta + every owned request and history row.
+ *  Environments are project-level now, so they are not touched. */
 export async function deleteCollection(colId: string): Promise<void> {
-  const [reqs, envs, hist] = await Promise.all([
+  const [reqs, hist] = await Promise.all([
     db.kvList<RequestDefinition>(REQ),
-    db.kvList<StoredEnvironment>(ENV),
     db.kvList<HistoryEntry>(HIST),
   ]);
   await Promise.all([
     ...reqs
       .filter((r) => ownedBy(colId, r.key))
       .map((r) => db.kvDelete(REQ, r.key)),
-    ...envs
-      .filter((e) => ownedBy(colId, e.key))
-      .map((e) => db.kvDelete(ENV, e.key)),
     ...hist
       .filter((h) => h.value.collectionId === colId)
       .map((h) => db.kvDelete(HIST, h.key)),
@@ -193,7 +259,6 @@ export async function ensureSample(): Promise<void> {
     },
   });
   await saveEnvironment(
-    colId,
     storedEnvironmentSchema.parse({
       name: "dev",
       vars: { host: "httpbingo.org" },

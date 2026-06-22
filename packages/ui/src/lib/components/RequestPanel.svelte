@@ -12,6 +12,7 @@
   import GrpcPanel from "./GrpcPanel.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
+  import Tooltip from "./ui/Tooltip.svelte";
   import { Button } from "./ui/button/index.js";
   import { Textarea } from "./ui/textarea/index.js";
 
@@ -116,6 +117,9 @@
         class="w-auto text-xs text-fg-muted"
       />
       {#if ws.profiles.length && (ws.activeReq.kind === "http" || ws.activeReq.kind === "grpc")}
+        {@const pid = ws.activeReq.profileId || ws.activeCollection?.collection.defaultProfileId || ""}
+        {@const fromDefault = !ws.activeReq.profileId && !!pid}
+        {@const active = pid ? ws.profiles.find((p) => p.id === pid) : null}
         <Select
           bind:value={ws.activeReq.profileId}
           items={[
@@ -125,6 +129,28 @@
           ariaLabel="User profile"
           class="w-auto text-xs text-fg-muted"
         />
+        {#if active?.userAgent}
+          {@const overridden = ws.activeReq.headers.some(
+            (h) => h.enabled && h.name.toLowerCase() === "user-agent"
+          )}
+          <Tooltip
+            text={fromDefault
+              ? `UA from collection default (${active.name})`
+              : `UA from profile (${active.name})`}
+            side="bottom"
+          >
+            {#snippet children(p)}
+              <span
+                {...p}
+                class="mono shrink-0 rounded bg-[var(--color-bg-2)] px-1 text-[10px] {overridden
+                  ? 'text-amber-300'
+                  : 'text-fg-muted'}"
+                title={overridden ? "overridden by request" : ""}
+                >{overridden ? "UA override" : "UA"}</span
+              >
+            {/snippet}
+          </Tooltip>
+        {/if}
       {/if}
       <EnvBar />
     </div>

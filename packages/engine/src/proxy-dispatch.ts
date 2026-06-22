@@ -14,12 +14,17 @@ import tls from "node:tls";
 import { Buffer } from "node:buffer";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksClient } from "socks";
+// Aliases kept after the import so the probe helper below can pick http vs https
+// without re-importing (require() is unavailable in the engine's ESM bundle).
+const httpMod = http;
+const httpsMod = https;
 import type {
   RequestDefinition,
   ResponseResult,
   Kv,
   AuthConfig,
   Timings,
+  ProxyProbeResult,
 } from "@red-request/core";
 import { cookieHeader, storeSetCookies } from "./cookies.js";
 
@@ -132,6 +137,120 @@ export function proxiedDispatch(
   if (scheme.startsWith("socks"))
     return socksDispatch(def, proxyUrl, def.url, 0, jarKey);
   return doRequest(def, proxyUrl, def.url, 0, jarKey);
+}
+
+/**
+ * Lightweight reachability check for a proxy — opens the handshake (TCP for plain,
+ * CONNECT for http/https, the full SocksClient.createConnection for socks5/5h) and
+ * tears the socket down without sending any bytes to the destination. Used by the
+ * Proxies modal's per-row "Test" button so users can verify credentials/host before
+ * wiring a profile.
+ *
+ * Resolves with `ok=false` + an `error` string on any failure (DNS, TCP, auth, …)
+ * — never throws — so the UI can render a clean status pill.
+ */
+export async function probeProxy(
+  proxyUrl: string,
+  timeoutMs = 8_000
+): Promise<ProxyProbeResult> {
+  const started = Date.now();
+  let u: URL;
+  try {
+    u = new URL(proxyUrl);
+  } catch {
+    return {
+      ok: false,
+      ms: 0,
+      via: "tcp",
+      error: `invalid proxy: ${proxyUrl}`,
+    };
+  }
+  const scheme = u.protocol.replace(/:$/, "");
+  if (scheme.startsWith("socks")) return probeSocks(u, timeoutMs, started);
+  if (scheme === "http" || scheme === "https")
+    return probeHttpConnect(u, timeoutMs, started);
+  return {
+    ok: false,
+    ms: 0,
+    via: "tcp",
+    error: `unsupported proxy scheme: ${scheme}`,
+  };
+}
+
+function probeHttpConnect(
+  u: URL,
+  timeoutMs: number,
+  started: number
+): Promise<ProxyProbeResult> {
+  const targetHost = u.hostname || "example.com";
+  const targetPort = 443; // any TLS port works for the CONNECT; we never complete the handshake.
+  return new Promise<ProxyProbeResult>((resolve) => {
+    const mod = u.protocol === "https:" ? httpsMod : httpMod;
+    const req = mod.request({
+      host: u.hostname,
+      port: u.port || (u.protocol === "https:" ? 443 : 80),
+      method: "CONNECT",
+      path: `${targetHost}:${targetPort}`,
+      headers: { Host: `${targetHost}:${targetPort}` },
+      timeout: timeoutMs,
+    });
+    req.on("connect", () => {
+      req.destroy();
+      resolve({ ok: true, ms: Date.now() - started, via: "connect" });
+    });
+    req.on("error", (e: Error) =>
+      resolve({
+        ok: false,
+        ms: Date.now() - started,
+        via: "connect",
+        error: e.message,
+      })
+    );
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({
+        ok: false,
+        ms: Date.now() - started,
+        via: "connect",
+        error: "connect timed out",
+      });
+    });
+    req.end();
+  });
+}
+
+async function probeSocks(
+  u: URL,
+  timeoutMs: number,
+  started: number
+): Promise<ProxyProbeResult> {
+  try {
+    const port = Number(u.port) || 1080;
+    // SocksClient does the full greeting+auth+CONNECT handshake. We aim at the proxy
+    // itself (host:port) so it doesn't matter whether the destination exists — only
+    // that the proxy is alive and authenticates us correctly.
+    const { socket } = await SocksClient.createConnection({
+      proxy: {
+        host: u.hostname,
+        port,
+        type: 5,
+        userId: u.username ? decodeURIComponent(u.username) : undefined,
+        password: u.password ? decodeURIComponent(u.password) : undefined,
+      },
+      command: "connect",
+      destination: { host: u.hostname, port },
+      timeout: timeoutMs,
+    });
+    socket.destroy();
+    return { ok: true, ms: Date.now() - started, via: "socks" };
+  } catch (e) {
+    return {
+      ok: false,
+      ms: Date.now() - started,
+      via: "socks",
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
 }
 
 function agentFor(proxyUrl: string): http.Agent {

@@ -12,16 +12,23 @@ import {
   storedEnvironmentSchema,
   environmentToFile,
   type LoadedCollection,
+  type StoredEnvironment,
 } from "@red-request/core";
 import * as fs from "./fs";
 import * as repo from "./repo";
 
 const EXPORTS = "_exports";
+// Project-level environments + globals live in a reserved sibling of the collections
+// (the `_` prefix keeps it out of the per-collection import loop).
+const PROJECT = "_project";
 const join = (...p: string[]) => p.join("/");
 
-/** Write every collection to `<collections_root>/_exports/`. Returns that folder path. */
+/** Write every collection plus the project-level environments (incl. the reserved
+ *  "Globals" base env) to `<collections_root>/_exports/`. Returns that folder path.
+ *  Secret values are never written — only their names (via environmentToFile). */
 export async function exportAll(
-  collections: LoadedCollection[]
+  collections: LoadedCollection[],
+  environments: StoredEnvironment[] = []
 ): Promise<string> {
   const root = await fs.collectionsRoot();
   const outRoot = join(root, EXPORTS);
@@ -36,14 +43,14 @@ export async function exportAll(
         stringify(req)
       );
     }
-    for (const env of col.environments) {
-      await fs.mkdirp(join(dir, "environments"));
-      // environmentToFile strips secret values, keeping only names.
-      await fs.writeText(
-        join(dir, "environments", `${repo.slugify(env.name)}.yaml`),
-        stringify(environmentToFile(env))
-      );
-    }
+  }
+  const projDir = join(outRoot, PROJECT);
+  await fs.mkdirp(join(projDir, "environments"));
+  for (const env of environments) {
+    await fs.writeText(
+      join(projDir, "environments", `${repo.slugify(env.name)}.yaml`),
+      stringify(environmentToFile(env))
+    );
   }
   return outRoot;
 }
@@ -54,7 +61,7 @@ export async function importAll(): Promise<number> {
   const outRoot = join(root, EXPORTS);
   let imported = 0;
   for (const colDir of await fs.listDir(outRoot)) {
-    if (!colDir.is_dir) continue;
+    if (!colDir.is_dir || colDir.name === PROJECT) continue;
     const colId = colDir.name;
     const entries = await fs.listDir(colDir.path);
     const collFile = entries.find((e) => e.name === "collection.yaml");
@@ -76,9 +83,8 @@ export async function importAll(): Promise<number> {
       const file = environmentFileSchema.parse(
         parse(await fs.readText(e.path))
       );
-      // Re-hydrate as a stored env with empty secrets (values must be re-entered).
+      // Re-hydrate as a project-level stored env with empty secrets (re-enter values).
       await repo.saveEnvironment(
-        colId,
         storedEnvironmentSchema.parse({
           name: file.name,
           vars: file.vars,
@@ -87,6 +93,23 @@ export async function importAll(): Promise<number> {
       );
     }
     imported++;
+  }
+
+  // Project-level environments (incl. the "Globals" base env) under `_project`.
+  const projDir = join(outRoot, PROJECT);
+  for (const e of await fs
+    .listDir(join(projDir, "environments"))
+    .catch(() => [])) {
+    if (!e.name.endsWith(".yaml")) continue;
+    const file = environmentFileSchema.parse(parse(await fs.readText(e.path)));
+    // Re-hydrate with empty secrets (values aren't in YAML — re-enter them).
+    await repo.saveEnvironment(
+      storedEnvironmentSchema.parse({
+        name: file.name,
+        vars: file.vars,
+        secrets: {},
+      })
+    );
   }
   return imported;
 }

@@ -4,6 +4,7 @@ import {
   ENGINE_METHODS,
   httpSendParamsSchema,
   oauth2TokenParamsSchema,
+  oidcDiscoverParamsSchema,
   runnerParamsSchema,
   wsOpenParamsSchema,
   wsSendParamsSchema,
@@ -11,20 +12,24 @@ import {
   cookiesClearParamsSchema,
   grpcMethodsParamsSchema,
   grpcCallParamsSchema,
+  proxyProbeParamsSchema,
   resolveRequest,
   resolveTemplate,
   type HttpSendResult,
   type GrpcMethodsResult,
   type Oauth2TokenResult,
+  type OidcDiscoverResult,
   type RunnerResult,
+  type ProxyProbeResult,
 } from "@red-request/core";
 import reckerPkg from "recker/package.json" with { type: "json" };
-import { dispatch, oauth2Token } from "./recker.js";
+import { dispatch, oauth2Token, oidcDiscover } from "./recker.js";
 import { runPipeline } from "./pipeline.js";
 import { runLoop } from "./runner.js";
 import { wsOpen, wsSend, wsClose, sseOpen, sseClose } from "./stream.js";
 import { clearJar } from "./cookies.js";
 import { grpcListMethods, grpcCall } from "./grpc.js";
+import { probeProxy } from "./proxy-dispatch.js";
 
 export type Handler = (params: unknown) => Promise<unknown>;
 
@@ -130,9 +135,19 @@ export const handlers: Record<string, Handler> = {
     return oauth2Token(params);
   },
 
+  [ENGINE_METHODS.oidcDiscover]: async (raw): Promise<OidcDiscoverResult> => {
+    const params = oidcDiscoverParamsSchema.parse(raw);
+    return oidcDiscover(params);
+  },
+
   [ENGINE_METHODS.metaReckerVersion]: async (): Promise<{
     version: string;
   }> => {
     return { version: (reckerPkg as { version: string }).version };
+  },
+
+  [ENGINE_METHODS.proxyProbe]: async (raw): Promise<ProxyProbeResult> => {
+    const { proxyUrl, timeoutMs } = proxyProbeParamsSchema.parse(raw);
+    return probeProxy(proxyUrl, timeoutMs);
   },
 };

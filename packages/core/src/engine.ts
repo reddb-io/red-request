@@ -96,14 +96,26 @@ export type WsCloseParams = z.infer<typeof wsCloseParamsSchema>;
 
 export const oauth2TokenParamsSchema = z.object({
   grantType: z
-    .enum(["client_credentials", "password"])
+    .enum([
+      "client_credentials",
+      "password",
+      "authorization_code",
+      "refresh_token",
+    ])
     .default("client_credentials"),
   tokenUrl: z.string(),
   clientId: z.string(),
-  clientSecret: z.string(),
+  clientSecret: z.string().default(""),
   scope: z.string().optional(),
+  audience: z.string().optional(),
   username: z.string().optional(),
   password: z.string().optional(),
+  // authorization_code exchange
+  code: z.string().optional(),
+  codeVerifier: z.string().optional(),
+  redirectUri: z.string().optional(),
+  // refresh_token grant
+  refreshToken: z.string().optional(),
 });
 export type Oauth2TokenParams = z.infer<typeof oauth2TokenParamsSchema>;
 
@@ -111,8 +123,25 @@ export const oauth2TokenResultSchema = z.object({
   accessToken: z.string(),
   tokenType: z.string().default("Bearer"),
   expiresIn: z.number().optional(),
+  refreshToken: z.string().optional(),
+  idToken: z.string().optional(),
+  scope: z.string().optional(),
 });
 export type Oauth2TokenResult = z.infer<typeof oauth2TokenResultSchema>;
+
+/** OIDC discovery: fetch `<issuer>/.well-known/openid-configuration`. */
+export const oidcDiscoverParamsSchema = z.object({ issuer: z.string() });
+export type OidcDiscoverParams = z.infer<typeof oidcDiscoverParamsSchema>;
+
+export const oidcDiscoverResultSchema = z.object({
+  issuer: z.string().optional(),
+  authorizationEndpoint: z.string().optional(),
+  tokenEndpoint: z.string().optional(),
+  userinfoEndpoint: z.string().optional(),
+  jwksUri: z.string().optional(),
+  scopesSupported: z.array(z.string()).optional(),
+});
+export type OidcDiscoverResult = z.infer<typeof oidcDiscoverResultSchema>;
 
 // --- runner / loops ---------------------------------------------------------
 

@@ -263,25 +263,49 @@ export async function dispatch(
   }
 }
 
-/** OAuth2 client-credentials / password grant → access token (form-encoded POST). */
+/** OAuth2 token endpoint (form-encoded POST). Supports client_credentials, password,
+ *  authorization_code (PKCE) and refresh_token grants. Returns the full token set. */
 export async function oauth2Token(params: {
-  grantType: "client_credentials" | "password";
+  grantType:
+    | "client_credentials"
+    | "password"
+    | "authorization_code"
+    | "refresh_token";
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
   scope?: string;
+  audience?: string;
   username?: string;
   password?: string;
-}): Promise<{ accessToken: string; tokenType: string; expiresIn?: number }> {
+  code?: string;
+  codeVerifier?: string;
+  redirectUri?: string;
+  refreshToken?: string;
+}): Promise<{
+  accessToken: string;
+  tokenType: string;
+  expiresIn?: number;
+  refreshToken?: string;
+  idToken?: string;
+  scope?: string;
+}> {
   const form: Record<string, string> = {
     grant_type: params.grantType,
     client_id: params.clientId,
-    client_secret: params.clientSecret,
   };
+  if (params.clientSecret) form.client_secret = params.clientSecret;
   if (params.scope) form.scope = params.scope;
+  if (params.audience) form.audience = params.audience;
   if (params.grantType === "password") {
     form.username = params.username ?? "";
     form.password = params.password ?? "";
+  } else if (params.grantType === "authorization_code") {
+    form.code = params.code ?? "";
+    if (params.redirectUri) form.redirect_uri = params.redirectUri;
+    if (params.codeVerifier) form.code_verifier = params.codeVerifier;
+  } else if (params.grantType === "refresh_token") {
+    form.refresh_token = params.refreshToken ?? "";
   }
   const client = createClient({}) as unknown as AnyClient;
   const post = client.post as ReckerCall;
@@ -290,19 +314,71 @@ export async function oauth2Token(params: {
     throwHttpErrors: false,
   });
   const text = await res.blob().then((b) => b.text());
-  const json = JSON.parse(text) as {
+  let json: {
     access_token?: string;
     token_type?: string;
     expires_in?: number;
+    refresh_token?: string;
+    id_token?: string;
+    scope?: string;
+    error?: string;
+    error_description?: string;
   };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`token endpoint returned non-JSON (status ${res.status})`);
+  }
   if (!json.access_token) {
-    throw new Error(
-      `token endpoint returned no access_token (status ${res.status})`
-    );
+    const detail =
+      json.error_description || json.error || `status ${res.status}`;
+    throw new Error(`token endpoint returned no access_token (${detail})`);
   }
   return {
     accessToken: json.access_token,
     tokenType: json.token_type ?? "Bearer",
     expiresIn: json.expires_in,
+    refreshToken: json.refresh_token,
+    idToken: json.id_token,
+    scope: json.scope,
+  };
+}
+
+/** Fetch an OIDC provider's `.well-known/openid-configuration` and map the endpoints. */
+export async function oidcDiscover(params: { issuer: string }): Promise<{
+  issuer?: string;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  userinfoEndpoint?: string;
+  jwksUri?: string;
+  scopesSupported?: string[];
+}> {
+  const base = params.issuer.replace(/\/+$/, "");
+  const url = `${base}/.well-known/openid-configuration`;
+  const client = createClient({}) as unknown as AnyClient;
+  const get = client.get as ReckerCall;
+  const res = await get.call(client, url, { throwHttpErrors: false });
+  const text = await res.blob().then((b) => b.text());
+  let doc: Record<string, unknown>;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `discovery endpoint returned non-JSON (status ${res.status})`
+    );
+  }
+  const s = (k: string) =>
+    typeof doc[k] === "string" ? (doc[k] as string) : undefined;
+  if (!s("token_endpoint"))
+    throw new Error(`no token_endpoint at ${url} (status ${res.status})`);
+  return {
+    issuer: s("issuer"),
+    authorizationEndpoint: s("authorization_endpoint"),
+    tokenEndpoint: s("token_endpoint"),
+    userinfoEndpoint: s("userinfo_endpoint"),
+    jwksUri: s("jwks_uri"),
+    scopesSupported: Array.isArray(doc.scopes_supported)
+      ? (doc.scopes_supported as string[])
+      : undefined,
   };
 }

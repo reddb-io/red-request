@@ -41,6 +41,7 @@ keyring = { version = "3", features = [
 aes-gcm = "0.10"
 rand = "0.8"
 base64 = "0.22"
+sha2 = "0.10"
 
 [features]
 default = ["custom-protocol"]
