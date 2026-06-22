@@ -172,6 +172,134 @@ describe("wsOpen + wsSend notifications", () => {
   });
 });
 
+describe("binary frame handling", () => {
+  it("emits isBinary=true and base64-encoded data for binary frames", async () => {
+    const binBytes = Buffer.from([0x00, 0x01, 0x02, 0x03, 0xff]);
+    const wss3 = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => wss3.once("listening", r));
+    const port3 = (wss3.address() as AddressInfo).port;
+    wss3.on("connection", (sock) => {
+      sock.send(binBytes);
+    });
+
+    const id = "test-ws-binary";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${port3}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for binary frame")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) =>
+              m.stream === id &&
+              m.event === "message" &&
+              (m.data as any).dir === "in" &&
+              (m.data as any).isBinary === true
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    wsClose(id);
+    await new Promise<void>((r) => wss3.close(() => r()));
+
+    const msgs = parseNotifications(cap.lines());
+    const binaryFrame = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "in" &&
+        (m.data as any).isBinary === true
+    );
+    expect(binaryFrame).toBeDefined();
+    const decoded = Buffer.from(
+      (binaryFrame!.data as any).data as string,
+      "base64"
+    );
+    expect(decoded).toEqual(binBytes);
+  });
+
+  it("does not set isBinary for text frames", async () => {
+    const id = "test-ws-text-no-binary-flag";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${wsPort}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for open")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) => m.stream === id && m.event === "open"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    wsSend(id, "hello text");
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for echo")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) =>
+              m.stream === id &&
+              m.event === "message" &&
+              (m.data as any).dir === "in"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    wsClose(id);
+
+    const msgs = parseNotifications(cap.lines());
+    const inFrame = msgs.find(
+      (m) =>
+        m.stream === id && m.event === "message" && (m.data as any).dir === "in"
+    );
+    expect(inFrame).toBeDefined();
+    expect((inFrame!.data as any).isBinary).toBeUndefined();
+    expect((inFrame!.data as any).data).toBe("hello text");
+  });
+});
+
 describe("wsOpen frame correlation", () => {
   it("tags sent frames with frameId and echoed replies with correlationId", async () => {
     const id = "test-ws-corr-ok";
