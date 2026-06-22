@@ -149,6 +149,27 @@ fetch_verified() { # tag asset dir
 # ── linux: .deb via apt (default) ──────────────────────────────────────────
 deb_installed_version() { dpkg-query -W -f='${Version}' "$BIN_NAME" 2>/dev/null || printf ''; }
 
+# A prior `--appimage` run drops the 100 MB+ AppImage (and the `rr` shortcut)
+# into ~/.local/bin, which usually precedes /usr/bin on PATH and shadows the
+# .deb we just installed — the user keeps launching the old AppImage and its
+# bundled-glib errors (e.g. "undefined symbol: g_task_set_static_name" from the
+# system gvfs modules). Remove our own managed AppImage and re-point the short
+# alias at the system binary so /usr/bin/$BIN_NAME wins. Only touches files this
+# installer created: $DATA_DIR/version is written solely by install_appimage.
+clear_appimage_shadow() {
+  [[ -f "$DATA_DIR/version" ]] || return 0
+  local deb_bin
+  deb_bin="$(dpkg-query -L "$BIN_NAME" 2>/dev/null | grep -m1 -E "/bin/${BIN_NAME}\$" || true)"
+  say "removing prior AppImage install — it shadows the .deb on PATH"
+  rm -f "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/$SHORTCUT" "$DATA_DIR/version" "$DESKTOP_DIR/red-request.desktop"
+  rmdir "$DATA_DIR" 2>/dev/null || true
+  if [[ -n "$deb_bin" && "$deb_bin" != "$INSTALL_DIR/$BIN_NAME" ]]; then
+    ln -sf "$deb_bin" "$INSTALL_DIR/$SHORTCUT"
+    ok "re-pointed $SHORTCUT → $deb_bin"
+  fi
+  have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+}
+
 install_deb() {
   have dpkg || err "no dpkg on this system — re-run with --appimage for the portable build"
   local tag asset cur tmp sudo=""
@@ -166,6 +187,11 @@ install_deb() {
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
   fetch_verified "$tag" "$asset" "$tmp"
 
+  # apt drops privileges to the unprivileged "_apt" user to fetch the local file;
+  # mktemp -d is 0700, so _apt can't traverse it and apt warns "Download is
+  # performed unsandboxed as root … Permission denied". Widen the path it reads.
+  chmod 755 "$tmp" && chmod 644 "$DL"
+
   [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
   say "installing via apt (you may be prompted for your password)…"
   if have apt-get; then
@@ -174,6 +200,7 @@ install_deb() {
     $sudo dpkg -i "$DL" || { $sudo apt-get -f install -y; $sudo dpkg -i "$DL"; }
   fi
   ok "${cur:+upgraded to }Red Request $tag installed (.deb)"
+  clear_appimage_shadow
   say "launch it from your app menu, or run:  $BIN_NAME"
 }
 
@@ -236,6 +263,14 @@ install_appimage() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
   fetch_verified "$tag" "$asset" "$tmp"
+
+  # The .deb (system libs) is the supported Linux build; an AppImage installed
+  # alongside it lands in ~/.local/bin and usually shadows /usr/bin/$BIN_NAME on
+  # PATH, so the user ends up running the older-glibc bundle. Warn, don't block.
+  if have dpkg && [[ -n "$(deb_installed_version)" ]]; then
+    warn "the .deb is already installed; this AppImage in $INSTALL_DIR will shadow it on PATH."
+    warn "prefer the .deb (re-run without --appimage), or remove it: sudo apt remove $BIN_NAME"
+  fi
 
   mkdir -p "$INSTALL_DIR" "$DATA_DIR"
   chmod +x "$DL"

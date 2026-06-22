@@ -4,9 +4,9 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash
 #
-# Removes the single-file binary installed by install.sh (the AppImage at
-# ~/.local/bin/red-request, the `rr` shortcut, the version stamp, the desktop entry,
-# and the PATH line install.sh added). Also clears a legacy .deb install if present.
+# Removes BOTH Linux install forms in one pass: the .deb (via apt) and the AppImage
+# single-file build at ~/.local/bin/red-request, plus the `rr` shortcut, the version
+# stamp, the desktop entry, and the PATH line install.sh added.
 #
 # App data under <project>/.red/request and ~/.red/request is left untouched — delete
 # those by hand if you also want to wipe your requests/collections.
@@ -22,8 +22,13 @@ removed=0
 rm_path() { [[ -e "$1" || -L "$1" ]] && rm -rf "$1" && { echo "✓ removed $1"; removed=1; }; return 0; }
 
 # The `rr` shortcut — only if it points at our binary (don't clobber an unrelated `rr`).
-if [[ -L "$INSTALL_DIR/$SHORTCUT" && "$(readlink "$INSTALL_DIR/$SHORTCUT")" == "$BIN_NAME" ]]; then
-  rm_path "$INSTALL_DIR/$SHORTCUT"
+# Match both forms install.sh creates: the AppImage's relative `red-request` and the
+# absolute `/usr/bin/red-request` the .deb path re-points it to via clear_appimage_shadow.
+if [[ -L "$INSTALL_DIR/$SHORTCUT" ]]; then
+  rr_tgt="$(readlink "$INSTALL_DIR/$SHORTCUT")"
+  if [[ "$rr_tgt" == "$BIN_NAME" || "${rr_tgt##*/}" == "$BIN_NAME" ]]; then
+    rm_path "$INSTALL_DIR/$SHORTCUT"
+  fi
 fi
 rm_path "$INSTALL_DIR/$BIN_NAME"
 rm_path "$INSTALL_DIR/$BIN_NAME.new"     # stray temp from an interrupted upgrade
@@ -41,10 +46,10 @@ for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
   fi
 done
 
-# Legacy .deb install (older installer / the apt path).
+# The .deb install (install.sh's default Linux path) — purge so config files go too.
 if command -v dpkg >/dev/null 2>&1 && dpkg -s "$BIN_NAME" >/dev/null 2>&1; then
   sudo=""; [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
-  $sudo apt-get remove -y "$BIN_NAME" && echo "✓ removed apt package $BIN_NAME"; removed=1
+  if $sudo apt-get purge -y "$BIN_NAME"; then echo "✓ removed apt package $BIN_NAME"; removed=1; fi
 fi
 
 if [[ "$removed" == "1" ]]; then
