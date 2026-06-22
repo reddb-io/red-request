@@ -134,6 +134,8 @@ class Workspace {
       frameId?: string;
       /** Links an incoming frame back to the sent frame that provoked it. */
       correlationId?: string;
+      /** True for binary WebSocket frames; `data` is base64-encoded. */
+      isBinary?: boolean;
     }[]
   >([]);
   private wsConnId: string | null = null;
@@ -932,7 +934,8 @@ class Workspace {
     data: string,
     status?: "sent" | "error",
     frameId?: string,
-    correlationId?: string
+    correlationId?: string,
+    isBinary?: boolean
   ): void {
     this.wsMessages = [
       ...this.wsMessages.slice(-499),
@@ -943,6 +946,7 @@ class Workspace {
         ...(status !== undefined ? { status } : {}),
         ...(frameId !== undefined ? { frameId } : {}),
         ...(correlationId !== undefined ? { correlationId } : {}),
+        ...(isBinary ? { isBinary } : {}),
       },
     ];
   }
@@ -967,7 +971,8 @@ class Workspace {
             ? (d.status as "sent" | "error" | undefined)
             : undefined,
           d.frameId as string | undefined,
-          d.correlationId as string | undefined
+          d.correlationId as string | undefined,
+          d.isBinary as boolean | undefined
         );
         break;
       case "close":
