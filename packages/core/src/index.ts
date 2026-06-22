@@ -1,4 +1,5 @@
 export * from "./auth.js";
+export * from "./detect.js";
 export * from "./request.js";
 export * from "./response.js";
 export * from "./hexdump.js";
