@@ -200,6 +200,28 @@ struct EngineState {
     counter: AtomicU64,
 }
 
+/// Environment for our bundled sidecars: the host env minus the dynamic-loader vars an
+/// AppImage's AppRun injects (LD_LIBRARY_PATH, GTK/GIO module paths, …). The static `red`
+/// and the Bun-compiled engine don't need the AppImage's bundled GTK libs; inheriting them
+/// makes ld.so segfault in its symbol-version check when the host glibc is newer than the
+/// one the AppImage was built on (#47 — black screen). Applied as env_clear()+envs() so the
+/// sidecars start under the system loader. A no-op outside an AppImage (those vars are unset).
+fn sidecar_env() -> std::collections::HashMap<String, String> {
+    const STRIP: &[&str] = &[
+        "LD_LIBRARY_PATH",
+        "LD_PRELOAD",
+        "GTK_PATH",
+        "GIO_MODULE_DIR",
+        "GDK_PIXBUF_MODULE_FILE",
+        "GDK_PIXBUF_MODULEDIR",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_SYSTEM_PATH",
+    ];
+    std::env::vars()
+        .filter(|(k, _)| !STRIP.contains(&k.as_str()))
+        .collect()
+}
+
 fn spawn_engine(
     app: &tauri::AppHandle,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
@@ -222,6 +244,8 @@ fn spawn_engine(
     shell
         .sidecar("red-request-engine")
         .map_err(|e| e.to_string())?
+        .env_clear()
+        .envs(sidecar_env())
         .spawn()
         .map(|(rx, child)| (rx, child))
         .map_err(|e| format!("failed to start engine sidecar: {e}"))
@@ -770,7 +794,13 @@ async fn spawn_reddb_once(
     let sidecar = shell
         .sidecar("red")
         .ok()
-        .map(|c| c.args(args.clone()).env("RED_HTTP_TLS_DEV", "1").spawn());
+        .map(|c| {
+            c.env_clear()
+                .envs(sidecar_env())
+                .args(args.clone())
+                .env("RED_HTTP_TLS_DEV", "1")
+                .spawn()
+        });
     let (mut rx, child) = match sidecar {
         Some(Ok(pair)) => pair,
         _ => {
@@ -951,6 +981,8 @@ fn spawn_rql_session(app: &tauri::AppHandle, grpc: &str) -> Result<RqlSession, S
     let shell = app.shell();
     let (rx, child) = match shell.sidecar("red") {
         Ok(cmd) => cmd
+            .env_clear()
+            .envs(sidecar_env())
             .args(std::iter::once("connect".to_string()).chain(args.clone()))
             .spawn(),
         Err(_) => {
