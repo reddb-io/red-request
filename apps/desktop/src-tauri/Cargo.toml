@@ -39,9 +39,9 @@ keyring = { version = "3", features = [
   "linux-native-sync-persistent",
 ] }
 aes-gcm = "0.10"
-rand = "0.9"
+rand = "0.10"
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = "0.11"
 
 [features]
 default = ["custom-protocol"]
