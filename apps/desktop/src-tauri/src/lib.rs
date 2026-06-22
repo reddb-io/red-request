@@ -258,7 +258,7 @@ fn handle_engine_line(app: &tauri::AppHandle, line: &str) {
     let value: serde_json::Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[engine] unparseable line: {e}");
+            log::warn!(target: "engine", "unparseable line: {e}");
             return;
         }
     };
@@ -455,16 +455,22 @@ struct RqlSession {
 /// `<dir>/.red/request/app.rdb`; otherwise the global `~/.red/request/app.rdb`.
 /// (The `.red` dir name is the family convention; brandify later.)
 fn resolve_db_target() -> (std::path::PathBuf, Option<String>) {
+    let argv: Vec<String> = std::env::args().collect();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let arg = std::env::args().skip(1).find(|a| !a.starts_with('-'));
     if let Some(a) = arg {
-        let base = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let abs = std::fs::canonicalize(&a).unwrap_or_else(|_| base.join(&a));
+        let abs = std::fs::canonicalize(&a).unwrap_or_else(|_| cwd.join(&a));
         let dir = if abs.is_file() {
             abs.parent().map(|p| p.to_path_buf()).unwrap_or(abs.clone())
         } else {
             abs
         };
         let db = dir.join(".red").join("request").join("app.rdb");
+        log::info!(
+            target: "startup",
+            "db target: PROJECT (arg {a:?}, cwd {}) -> dir {} db {} | argv {argv:?}",
+            cwd.display(), dir.display(), db.display()
+        );
         return (db, Some(dir.to_string_lossy().to_string()));
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
@@ -472,7 +478,24 @@ fn resolve_db_target() -> (std::path::PathBuf, Option<String>) {
         .join(".red")
         .join("request")
         .join("app.rdb");
+    log::info!(
+        target: "startup",
+        "db target: GLOBAL (no dir arg, cwd {}) -> db {} | argv {argv:?}",
+        cwd.display(), db.display()
+    );
     (db, None)
+}
+
+/// Shared log directory for the app and reddb sidecar: `~/.red/request/logs`.
+/// Created on demand so the log-plugin's file target always has a home.
+fn app_log_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dir = std::path::Path::new(&home)
+        .join(".red")
+        .join("request")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 #[derive(Serialize)]
@@ -670,6 +693,17 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     };
 
     let st = app.state::<EmbeddedDb>();
+    let from = st
+        .project_dir
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| "global".to_string());
+    log::info!(
+        target: "project",
+        "open_project: {from} -> {} (db {db_path})",
+        project_dir.as_deref().unwrap_or("global")
+    );
     let _guard = st.spawn_lock.lock().await;
     if let Ok(mut c) = st.child.lock() {
         if let Some(child) = c.take() {
@@ -825,6 +859,11 @@ async fn spawn_reddb_once(
         .gen
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
         + 1;
+    log::info!(
+        target: "reddb",
+        "sidecar spawned (gen {my_gen}) for {} — http {bind} grpc {grpc}",
+        db_path.display()
+    );
     // Drain output; if the *current* sidecar dies, clear the URL so the next request
     // respawns it. A managed project switch kills the old child and spawns a new one
     // (bumping `gen`); without the generation guard the old child's async Terminated
@@ -853,16 +892,18 @@ async fn spawn_reddb_once(
                             let _ = old.child.kill();
                         }
                     }
-                    eprintln!("[reddb] sidecar terminated");
+                    log::warn!(target: "reddb", "sidecar terminated (gen {my_gen}); url cleared, next request will respawn");
                 }
                 break;
             }
         }
     });
     if let Err(e) = reddb_wait_ready(&bind).await {
+        log::error!(target: "reddb", "sidecar not ready (gen {my_gen}) on {bind}: {e}; killing it");
         let _ = child.kill();
         return Err(e);
     }
+    log::info!(target: "reddb", "sidecar ready (gen {my_gen}) — http {bind} grpc {grpc}");
     Ok((bind, grpc, child))
 }
 
@@ -877,6 +918,7 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    log::info!(target: "reddb", "start_reddb: opening {}", db_path.display());
 
     let (bind, grpc, child) = match spawn_reddb_once(&app, &db_path).await {
         Ok(triple) => triple,
@@ -905,8 +947,10 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
             std::fs::rename(&db_path, &bak).map_err(|re| {
                 format!("reddb could not open the database ({e}) and backup failed: {re}")
             })?;
-            eprintln!(
-                "[reddb] could not open {db_path:?} ({e}); backed it up to {bak:?} and started fresh"
+            log::warn!(
+                target: "reddb",
+                "could not open {} ({e}); backed it up to {} and started fresh",
+                db_path.display(), bak.display()
             );
             spawn_reddb_once(&app, &db_path).await?
         }
@@ -916,6 +960,7 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
     *state.url.lock().map_err(|e| e.to_string())? = Some(format!("http://{bind}"));
     *state.grpc.lock().map_err(|e| e.to_string())? = Some(grpc);
     *state.child.lock().map_err(|e| e.to_string())? = Some(child);
+    log::info!(target: "reddb", "start_reddb: url published http://{bind}");
     Ok(())
 }
 
@@ -1347,9 +1392,42 @@ fn reap_sidecars(app: &tauri::AppHandle) {
     }
 }
 
+/// Bridge for the webview to funnel its logs into the same sink as the backend
+/// (`~/.red/request/logs/red-request.log`). `level` is error|warn|info|debug|trace;
+/// anything else falls back to info. Lets us trace the FE↔BE flow (e.g. which
+/// screen `init()` chose) in one place instead of an invisible devtools console.
+#[tauri::command]
+fn app_log(level: String, message: String) {
+    match level.as_str() {
+        "error" => log::error!(target: "ui", "{message}"),
+        "warn" => log::warn!(target: "ui", "{message}"),
+        "debug" => log::debug!(target: "ui", "{message}"),
+        "trace" => log::trace!(target: "ui", "{message}"),
+        _ => log::info!(target: "ui", "{message}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Debug)
+                // Quiet the chatty deps; keep our own crate + targets verbose.
+                .level_for("reqwest", log::LevelFilter::Info)
+                .level_for("hyper", log::LevelFilter::Info)
+                .max_file_size(5_000_000)
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Stdout,
+                ))
+                .target(tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::Folder {
+                        path: app_log_dir(),
+                        file_name: Some("red-request".into()),
+                    },
+                ))
+                .build(),
+        )
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1410,11 +1488,19 @@ pub fn run() {
                         }
                     });
                 }
-                Err(e) => eprintln!("[engine] {e}"),
+                Err(e) => log::error!(target: "engine", "spawn failed: {e}"),
             }
 
             // Resolve which .rdb to open (project-local vs global) and record it.
             let (db_path, project_dir) = resolve_db_target();
+            log::info!(
+                target: "startup",
+                "boot: app v{} | {} mode | arg_launched={} | project_dir={:?}",
+                app.package_info().version,
+                if project_dir.is_some() { "PROJECT" } else { "GLOBAL" },
+                project_dir.is_some(),
+                project_dir
+            );
             if let Ok(mut p) = app.state::<EmbeddedDb>().db_path.lock() {
                 *p = db_path.to_string_lossy().to_string();
             }
@@ -1433,7 +1519,7 @@ pub fn run() {
             let db_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = start_reddb(db_handle).await {
-                    eprintln!("[reddb] {e}");
+                    log::error!(target: "reddb", "start_reddb failed: {e}");
                 }
             });
             Ok(())
@@ -1466,6 +1552,7 @@ pub fn run() {
             app_version,
             reddb_version,
             oauth_authorize,
+            app_log,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

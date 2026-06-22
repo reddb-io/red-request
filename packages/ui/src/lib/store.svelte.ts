@@ -67,6 +67,7 @@ import {
   projectLabel,
   type ProjectInfo,
 } from "./project";
+import { appLog } from "./log";
 import * as fs from "./fs";
 import {
   open as openDialog,
@@ -225,12 +226,21 @@ class Workspace {
       this.ready = true;
       return;
     }
-    this.project = await projectInfo().catch(() => null);
+    this.project = await projectInfo().catch((e) => {
+      appLog("error", `init: project_info failed: ${e}`);
+      return null;
+    });
+    appLog(
+      "info",
+      `init: project_info → is_project=${this.project?.is_project} arg_launched=${this.project?.arg_launched} db=${this.project?.db_path} dir=${this.project?.project_dir}`,
+    );
     // Launched via `rr <dir>` → straight into the project; otherwise show the selector.
     if (this.project?.arg_launched) {
+      appLog("info", "init: arg_launched → entering app directly");
       await this.loadStore();
       this.screen = "app";
     } else {
+      appLog("info", "init: not arg-launched → showing project selector");
       this.screen = "selector";
     }
     this.ready = true;
@@ -259,11 +269,17 @@ class Workspace {
 
     // Load in parallel with the closing animation, but defer the visible screen
     // swap until we're fully black (avoids a flash inside the shrinking circle).
+    appLog("info", `chooseProject: switching to ${dir ?? "global"}`);
     const ready = (async () => {
       this.project = await openProject(dir).catch((e) => {
         this.loadError = e instanceof Error ? e.message : String(e);
+        appLog("error", `chooseProject: open_project(${dir ?? "global"}) failed: ${this.loadError}`);
         return this.project;
       });
+      appLog(
+        "info",
+        `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`,
+      );
       await this.loadStore();
     })();
 
