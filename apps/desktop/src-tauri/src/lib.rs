@@ -409,6 +409,17 @@ struct EmbeddedDb {
     /// Serializes (re)spawn so a dead sidecar isn't replaced by several at once
     /// (multiple `red server` on one .rdb corrupts the B-tree).
     spawn_lock: tokio::sync::Mutex<()>,
+    /// A long-lived `red connect` REPL (the RQL conduit). One persistent connection
+    /// reused for every query — the async mutex also serializes calls (one in-flight).
+    rql: tokio::sync::Mutex<Option<RqlSession>>,
+}
+
+/// A persistent `red connect <grpc> --json` REPL: write an RQL line to stdin, read one
+/// response line from stdout. `buf` carries partial stdout between reads.
+struct RqlSession {
+    child: CommandChild,
+    rx: tauri::async_runtime::Receiver<CommandEvent>,
+    buf: String,
 }
 
 /// Resolve which `.rdb` to open. A path arg (`rr .` / `rr <dir>`) → project mode at
@@ -636,8 +647,16 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
             let _ = child.kill();
         }
     }
+    // Drop the RQL connection — it points at the server we're replacing; the next
+    // query respawns it against the new project's gRPC port.
+    if let Some(sess) = st.rql.lock().await.take() {
+        let _ = sess.child.kill();
+    }
     if let Ok(mut u) = st.url.lock() {
         *u = None;
+    }
+    if let Ok(mut g) = st.grpc.lock() {
+        *g = None;
     }
     if let Ok(mut p) = st.db_path.lock() {
         *p = db_path;
@@ -773,6 +792,16 @@ async fn spawn_reddb_once(
                     if let Ok(mut u) = s.url.lock() {
                         *u = None;
                     }
+                    // Clear the gRPC addr too so the next RQL call respawns the server, and
+                    // drop the now-orphaned `red connect` REPL that pointed at it.
+                    if let Ok(mut g) = s.grpc.lock() {
+                        *g = None;
+                    }
+                    if let Ok(mut sess) = s.rql.try_lock() {
+                        if let Some(old) = sess.take() {
+                            let _ = old.child.kill();
+                        }
+                    }
                 }
                 eprintln!("[reddb] sidecar terminated");
                 break;
@@ -897,54 +926,119 @@ async fn reddb_request(
     })
 }
 
-/// Run an RQL statement via `red connect` — the native RQL conduit (the same one used
-/// for remote `reds://` connections). Returns `red connect`'s raw `--json` output, e.g.
-/// `{"ok":true,"data":{"columns":[…],"records":[…]}}`. The webview interprets `ok`/`data`.
-/// Phase 1: targets the embedded server's gRPC front-door (local). Remote/auth come later.
-#[tauri::command]
-async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, String> {
-    let grpc_addr = |a: &tauri::AppHandle| -> Result<Option<String>, String> {
+/// Current gRPC front-door address, bringing the embedded server up if needed.
+async fn ensure_grpc(app: &tauri::AppHandle) -> Result<String, String> {
+    let read = |a: &tauri::AppHandle| -> Result<Option<String>, String> {
         Ok(a.state::<EmbeddedDb>()
             .grpc
             .lock()
             .map_err(|e| e.to_string())?
             .clone())
     };
-    let mut grpc = grpc_addr(&app)?;
-    if grpc.is_none() {
-        // Self-heal: bring the embedded server (and its gRPC front-door) up.
+    if read(app)?.is_none() {
         let db = app.state::<EmbeddedDb>();
         let _guard = db.spawn_lock.lock().await;
-        if grpc_addr(&app)?.is_none() {
+        if read(app)?.is_none() {
             let _ = start_reddb(app.clone()).await;
         }
-        grpc = grpc_addr(&app)?;
     }
-    let grpc = grpc.ok_or_else(|| "reddb gRPC not ready".to_string())?;
+    read(app)?.ok_or_else(|| "reddb gRPC not ready".to_string())
+}
 
-    let args = vec![
-        "connect".to_string(),
-        grpc,
-        "--query".to_string(),
-        query,
-        "--json".to_string(),
-    ];
+/// Spawn a `red connect <grpc> --json` REPL we drive over stdio.
+fn spawn_rql_session(app: &tauri::AppHandle, grpc: &str) -> Result<RqlSession, String> {
+    let args = [grpc.to_string(), "--json".to_string()];
     let shell = app.shell();
-    let output = match shell.sidecar("red") {
-        Ok(cmd) => cmd.args(args).output().await,
+    let (rx, child) = match shell.sidecar("red") {
+        Ok(cmd) => cmd
+            .args(std::iter::once("connect".to_string()).chain(args.clone()))
+            .spawn(),
         Err(_) => {
             let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
-            shell.command(bin).args(args).output().await
+            shell
+                .command(bin)
+                .args(std::iter::once("connect".to_string()).chain(args))
+                .spawn()
         }
     }
-    .map_err(|e| format!("red connect failed: {e}"))?;
-    // `red connect` reports query errors in-band via `{"ok":false,…}` and still exits 0;
-    // a non-zero exit means the client/transport itself failed.
-    let status = if output.status.success() { 200 } else { 502 };
-    Ok(HttpReply {
-        status,
-        body: String::from_utf8_lossy(&output.stdout).to_string(),
+    .map_err(|e| format!("failed to start `red connect`: {e}"))?;
+    Ok(RqlSession {
+        child,
+        rx,
+        buf: String::new(),
     })
+}
+
+/// Strip leading `red> ` prompt tokens from a REPL output line.
+fn strip_prompt(line: &str) -> &str {
+    let mut s = line.trim_start();
+    while let Some(rest) = s.strip_prefix("red> ") {
+        s = rest.trim_start();
+    }
+    s
+}
+
+/// Read one RQL response line from the session (skipping banner / prompt lines). Returns the
+/// normalized `{ok,data}`/`{ok:false,error}` envelope the webview expects.
+async fn read_rql_response(sess: &mut RqlSession) -> Result<String, String> {
+    let deadline = std::time::Duration::from_secs(30);
+    loop {
+        // Drain any complete buffered line first.
+        if let Some(nl) = sess.buf.find('\n') {
+            let raw: String = sess.buf.drain(..=nl).collect();
+            let line = strip_prompt(raw.trim_end());
+            if line.starts_with('{') {
+                return Ok(format!("{{\"ok\":true,\"data\":{line}}}"));
+            }
+            if let Some(msg) = line.strip_prefix("error:") {
+                return Ok(serde_json::json!({ "ok": false, "error": msg.trim() }).to_string());
+            }
+            continue; // banner / blank / prompt-only — skip
+        }
+        match tokio::time::timeout(deadline, sess.rx.recv()).await {
+            Ok(Some(CommandEvent::Stdout(b))) => {
+                sess.buf.push_str(&String::from_utf8_lossy(&b));
+            }
+            Ok(Some(CommandEvent::Stderr(_))) => {}
+            Ok(Some(CommandEvent::Terminated(_))) | Ok(None) => {
+                return Err("`red connect` session ended".to_string());
+            }
+            Ok(Some(_)) => {}
+            Err(_) => return Err("RQL response timed out".to_string()),
+        }
+    }
+}
+
+/// Run one RQL statement over the persistent `red connect` REPL — the native conduit shared
+/// by local and (later) remote `reds://` connections. The async mutex serializes calls so
+/// only one query is ever in flight on the single long-lived connection.
+#[tauri::command]
+async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, String> {
+    let db = app.state::<EmbeddedDb>();
+    let mut guard = db.rql.lock().await;
+
+    // Drive the query once on the live session; respawn + retry on a dead/missing session.
+    for attempt in 0..2 {
+        if guard.is_none() {
+            let grpc = ensure_grpc(&app).await?;
+            *guard = Some(spawn_rql_session(&app, &grpc)?);
+        }
+        let sess = guard.as_mut().unwrap();
+        let one_line = query.replace('\n', " ");
+        if sess.child.write(format!("{one_line}\n").as_bytes()).is_err() {
+            *guard = None; // stdin closed → respawn
+            continue;
+        }
+        match read_rql_response(sess).await {
+            Ok(body) => return Ok(HttpReply { status: 200, body }),
+            Err(e) if attempt == 0 => {
+                *guard = None; // session died mid-read → respawn once
+                let _ = e;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err("RQL session could not be established".to_string())
 }
 
 #[cfg(test)]
@@ -1300,6 +1394,12 @@ pub fn run() {
                     if let Ok(mut guard) = db.child.lock() {
                         if let Some(child) = guard.take() {
                             let _ = child.kill();
+                        }
+                    }
+                    // Best-effort reap of the long-lived `red connect` REPL.
+                    if let Ok(mut guard) = db.rql.try_lock() {
+                        if let Some(sess) = guard.take() {
+                            let _ = sess.child.kill();
                         }
                     }
                 }
