@@ -30,13 +30,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux ships .deb only: linuxdeploy/AppImage bundling fails on CI runners
-          # (FUSE/AppArmor userns), while .deb builds cleanly. ubuntu-22.04 GitHub-hosted.
+          # Linux ships BOTH the AppImage (single-file, what install.sh pulls) and the .deb
+          # (apt crowd). AppImage tooling runs without FUSE via APPIMAGE_EXTRACT_AND_RUN
+          # (set in env above). ubuntu-22.04 GitHub-hosted.
           - {
               os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
-              args: "--bundles deb",
+              args: "--bundles deb,appimage",
             }
           - {
               os: blacksmith-6vcpu-macos-15,
@@ -130,12 +131,81 @@ jobs:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Red Request ${{ github.event.inputs.tag || github.ref_name }}"
           releaseBody: |
-            Desktop builds of Red Request. Download the asset for your platform below.
+            ## Install
 
-            **Linux** — `curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash` (or grab the `.deb`).
-            **macOS** — open the `.dmg` (Apple Silicon).
-            **Windows** — run the `.msi` or the NSIS `-setup.exe`.
+            **Linux** — one line; auto-upgrades on re-run, removes cleanly with the uninstaller:
+            ```
+            curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
+            ```
+            Pulls the single-file `red-request-linux-x86_64.AppImage`, verifies its sha256 against
+            `checksums.txt`, and drops `red-request` (+ an `rr` shortcut) on your PATH. Prefer apt?
+            Grab the `.deb`.
 
-            Unsigned builds for now — macOS: right-click → Open; Windows: "More info → Run anyway".
+            **macOS** — open `red-request-darwin-aarch64.dmg` (Apple Silicon). First launch: right-click → Open.
+            **Windows** — run `red-request-windows-x86_64-setup.exe`, then "More info → Run anyway".
+
+            Every asset's sha256 is in `checksums.txt`. Unsigned builds for now.
           releaseDraft: false
           prerelease: false
+
+      # Re-publish each platform's single-file bundle under a stable, version-free name so
+      # install.sh can fetch `…/releases/latest/download/red-request-<os>-<arch>.<ext>` without
+      # parsing the API. Best-effort per file: a missing bundle warns, never fails the release.
+      - name: Stage portable assets
+        shell: bash
+        run: |
+          set -uo pipefail
+          BR="apps/desktop/src-tauri/target/release/bundle"
+          OUT="${RUNNER_TEMP}/portable"; mkdir -p "$OUT"
+          stage() { # glob dest
+            local f; f="$(ls $1 2>/dev/null | head -1 || true)"
+            if [[ -n "$f" ]]; then cp "$f" "$OUT/$2"; echo "staged $2  ← $(basename "$f")"
+            else echo "::warning::no bundle matched $1"; fi
+          }
+          case "${{ runner.os }}" in
+            Linux)
+              stage "$BR/appimage/*.AppImage" "red-request-linux-x86_64.AppImage"
+              stage "$BR/deb/*.deb"           "red-request-linux-x86_64.deb" ;;
+            macOS)
+              stage "$BR/dmg/*.dmg"           "red-request-darwin-aarch64.dmg" ;;
+            Windows)
+              stage "$BR"/nsis/*-setup.exe    "red-request-windows-x86_64-setup.exe" ;;
+          esac
+          ls -la "$OUT"
+
+      - name: Upload portable assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          shopt -s nullglob
+          files=("${RUNNER_TEMP}/portable"/*)
+          [[ ${#files[@]} -gt 0 ]] || { echo "nothing to upload"; exit 0; }
+          gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"
+
+  # One checksums.txt covering every staged single-file asset, after all builds land.
+  checksums:
+    name: checksums
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Generate + publish checksums.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          work="$(mktemp -d)"; cd "$work"
+          # Only the stable, version-free assets staged by the build jobs (tauri's native
+          # names use `red-request_<ver>_…`, so the `red-request-*` glob skips them).
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'red-request-*' --skip-existing
+          shopt -s nullglob
+          assets=(red-request-*)
+          [[ ${#assets[@]} -gt 0 ]] || { echo "no portable assets to checksum"; exit 0; }
+          sha256sum "${assets[@]}" > checksums.txt
+          echo "── checksums.txt ──"; cat checksums.txt
+          gh release upload "$TAG" checksums.txt --clobber -R "$GITHUB_REPOSITORY"

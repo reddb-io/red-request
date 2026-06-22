@@ -19,15 +19,24 @@ Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</cod
 ## Install
 
 ```bash
-# Linux — one line.
+# Linux — one line. Re-run any time to auto-upgrade.
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 ```
 
-Prefer a click? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
+On Linux this fetches the single-file **AppImage**, verifies its `sha256` against the release
+`checksums.txt`, and puts `red-request` (plus an `rr` shortcut) on your PATH at `~/.local/bin`
+— no apt, no sudo, no dependencies to resolve. Re-running upgrades in place and no-ops when
+you're already current. To remove it (binary + `rr` link + PATH line):
 
-| Linux  | macOS                  | Windows                    |
-| ------ | ---------------------- | -------------------------- |
-| `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
+```bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash
+```
+
+Prefer a click, or apt? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
+
+| Linux                  | macOS                  | Windows                    |
+| ---------------------- | ---------------------- | -------------------------- |
+| `.AppImage` · `.deb`   | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
 
 <sub>Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.</sub>
 
