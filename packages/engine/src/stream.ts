@@ -14,25 +14,36 @@ function emit(id: string, event: string, data: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ stream: id, event, data }) + "\n");
 }
 
-const conns = new Map<string, any>();
+interface ConnState {
+  ws: any;
+  frameCount: number;
+  // null until the first wsSend; incoming frames before any send are unsolicited
+  lastFrameId: string | null;
+}
+const conns = new Map<string, ConnState>();
 
 export function wsOpen(
   id: string,
   request: RequestDefinition,
   variables: VariableScope
 ): { ok: boolean } {
-  conns.get(id)?.close?.();
+  conns.get(id)?.ws?.close?.();
   const { request: resolved } = resolveRequest(request, variables);
   const WS = (globalThis as any).WebSocket;
   if (!WS) throw new Error("WebSocket is not available in this runtime");
   const ws = new WS(resolved.url);
-  conns.set(id, ws);
+  const state: ConnState = { ws, frameCount: 0, lastFrameId: null };
+  conns.set(id, state);
   ws.onopen = () => emit(id, "open", { url: resolved.url });
-  ws.onmessage = (e: any) =>
-    emit(id, "message", {
+  ws.onmessage = (e: any) => {
+    const payload: Record<string, unknown> = {
       dir: "in",
       data: typeof e.data === "string" ? e.data : "[binary frame]",
-    });
+    };
+    // Pair with the last sent frame if there is one; unsolicited frames have no correlationId.
+    if (state.lastFrameId !== null) payload.correlationId = state.lastFrameId;
+    emit(id, "message", payload);
+  };
   ws.onclose = (e: any) => {
     emit(id, "close", { code: e?.code, reason: e?.reason ?? "" });
     conns.delete(id);
@@ -45,23 +56,25 @@ export function wsSend(
   id: string,
   data: string
 ): { ok: boolean; error?: string } {
-  const ws = conns.get(id);
-  if (!ws || ws.readyState !== 1) {
+  const state = conns.get(id);
+  if (!state || state.ws.readyState !== 1) {
     emit(id, "message", { dir: "out", data, status: "error" });
     return { ok: false, error: "not connected" };
   }
+  const frameId = `f${++state.frameCount}`;
+  state.lastFrameId = frameId;
   try {
-    ws.send(data);
-    emit(id, "message", { dir: "out", data, status: "sent" });
+    state.ws.send(data);
+    emit(id, "message", { dir: "out", data, status: "sent", frameId });
     return { ok: true };
   } catch (e: any) {
-    emit(id, "message", { dir: "out", data, status: "error" });
+    emit(id, "message", { dir: "out", data, status: "error", frameId });
     return { ok: false, error: e?.message ?? "send failed" };
   }
 }
 
 export function wsClose(id: string): { ok: boolean } {
-  conns.get(id)?.close?.();
+  conns.get(id)?.ws?.close?.();
   conns.delete(id);
   return { ok: true };
 }

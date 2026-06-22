@@ -66,7 +66,11 @@
       </div>
     {:else}
       {#each ws.wsMessages as m, i (i)}
-        <div class="group flex gap-2 py-0.5">
+        <div
+          class="group flex gap-2 py-0.5 {m.dir === 'in' && m.correlationId
+            ? 'border-l-2 border-[var(--color-brand)] pl-1 opacity-90'
+            : ''}"
+        >
           <span class="shrink-0 text-fg-faint">{fmtTime(m.ts)}</span>
           <span
             class="shrink-0 {m.dir === 'out'
@@ -93,6 +97,13 @@
             class="break-all min-w-0 flex-1 whitespace-pre-wrap {m.dir === 'sys' ? 'text-fg-faint' : 'text-fg'}"
             >{m.data}</span
           >
+          {#if m.dir === "in" && m.correlationId}
+            <span
+              class="shrink-0 text-fg-faint"
+              title="Response to sent frame {m.correlationId}"
+              >↳</span
+            >
+          {/if}
           {#if m.dir === "out"}
             <button
               onclick={() => replay(m.data)}

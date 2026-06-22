@@ -171,3 +171,134 @@ describe("wsOpen + wsSend notifications", () => {
     expect((outFrame!.data as any).status).toBe("error");
   });
 });
+
+describe("wsOpen frame correlation", () => {
+  it("tags sent frames with frameId and echoed replies with correlationId", async () => {
+    const id = "test-ws-corr-ok";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${wsPort}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for open")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) => m.stream === id && m.event === "open"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    wsSend(id, "ping");
+
+    // Wait for the echo (dir=in) to arrive.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for echo")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) =>
+              m.stream === id &&
+              m.event === "message" &&
+              (m.data as any).dir === "in"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    wsClose(id);
+
+    const msgs = parseNotifications(cap.lines());
+    const sent = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "out"
+    );
+    const received = msgs.find(
+      (m) =>
+        m.stream === id && m.event === "message" && (m.data as any).dir === "in"
+    );
+
+    expect(sent).toBeDefined();
+    expect((sent!.data as any).frameId).toBe("f1");
+
+    expect(received).toBeDefined();
+    expect((received!.data as any).correlationId).toBe("f1");
+  });
+
+  it("leaves unsolicited server-initiated frames without correlationId", async () => {
+    // A server that pushes a welcome frame immediately on connect (before the client sends).
+    const wss2 = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => wss2.once("listening", r));
+    const port2 = (wss2.address() as AddressInfo).port;
+    wss2.on("connection", (sock) => {
+      sock.send("welcome");
+    });
+
+    const id = "test-ws-corr-unsolicited";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${port2}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    // Wait for the welcome frame (dir=in).
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for welcome")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) =>
+              m.stream === id &&
+              m.event === "message" &&
+              (m.data as any).dir === "in"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    wsClose(id);
+    await new Promise<void>((r) => wss2.close(() => r()));
+
+    const msgs = parseNotifications(cap.lines());
+    const welcome = msgs.find(
+      (m) =>
+        m.stream === id && m.event === "message" && (m.data as any).dir === "in"
+    );
+    expect(welcome).toBeDefined();
+    expect((welcome!.data as any).correlationId).toBeUndefined();
+  });
+});
