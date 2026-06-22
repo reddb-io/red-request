@@ -335,9 +335,11 @@ fn master_key() -> Result<[u8; 32], String> {
                 .map_err(|_| "master key has wrong length".to_string())
         }
         Err(keyring::Error::NoEntry) => {
-            use rand::RngCore;
+            use rand::TryRngCore;
             let mut key = [0u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut key);
+            rand::rngs::OsRng
+                .try_fill_bytes(&mut key)
+                .map_err(|e| e.to_string())?;
             entry
                 .set_password(&B64.encode(key))
                 .map_err(|e| e.to_string())?;
@@ -350,10 +352,12 @@ fn master_key() -> Result<[u8; 32], String> {
 fn seal_with_key(key: &[u8; 32], plaintext: &str) -> Result<Sealed, String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Key, Nonce};
-    use rand::RngCore;
+    use rand::TryRngCore;
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let mut nb = [0u8; 12];
-    rand::rngs::OsRng.fill_bytes(&mut nb);
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut nb)
+        .map_err(|e| e.to_string())?;
     let nonce = Nonce::from_slice(&nb);
     let ct = cipher
         .encrypt(nonce, plaintext.as_bytes())
@@ -939,9 +943,11 @@ struct OauthAuthorizeResult {
 }
 
 fn rand_b64url(n: usize) -> String {
-    use rand::RngCore;
+    use rand::TryRngCore;
     let mut bytes = vec![0u8; n];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut bytes)
+        .expect("OS RNG unavailable");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 
