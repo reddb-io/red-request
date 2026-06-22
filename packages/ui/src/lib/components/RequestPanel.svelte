@@ -448,6 +448,7 @@
                 bind:value={ws.activeReq.body.content}
                 known={ws.knownVars}
                 values={ws.varTitles}
+                gqlSchema={ws.activeGqlSchema}
                 multiline
                 lineNumbers
                 rows={13}
