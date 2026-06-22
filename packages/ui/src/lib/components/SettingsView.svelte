@@ -85,10 +85,12 @@
   // --- database file info (size / last update / record counts) -------------
   let dbMeta = $state<FileMeta | null>(null);
   let dbCounts = $state<{ total: number; byKind: { label: string; count: number }[] } | null>(null);
+  let dbMigrations = $state<{ applied: number; pending: number; failed: number } | null>(null);
   async function loadDbMeta() {
     const p = ws.project?.db_path;
     if (p) dbMeta = await fileMeta(p).catch(() => null);
     dbCounts = await repo.recordCounts().catch(() => null);
+    dbMigrations = await repo.migrationSummary().catch(() => null);
   }
   onMount(loadDbMeta);
   const countsTitle = $derived(
@@ -311,6 +313,23 @@
       <span class="text-xs text-fg" title={countsTitle}>
         {dbCounts ? `${dbCounts.total}` : "…"}
         {#if dbCounts}<span class="text-fg-faint">({countsTitle})</span>{/if}
+      </span>
+    </div>
+    <div class="mt-2 flex items-center gap-3">
+      <span class="w-24 shrink-0 text-xs text-fg-subtle">Migrations</span>
+      <span class="text-xs text-fg">
+        {#if dbMigrations}
+          {dbMigrations.applied} applied
+          {#if dbMigrations.pending > 0}<span class="text-amber-400"
+              >· {dbMigrations.pending} pending</span
+            >{/if}
+          {#if dbMigrations.failed > 0}<span class="text-red-400"
+              >· {dbMigrations.failed} failed</span
+            >{/if}
+          {#if dbMigrations.pending === 0 && dbMigrations.failed === 0}
+            <span class="text-emerald-400">· up to date</span>
+          {/if}
+        {:else}…{/if}
       </span>
     </div>
   </div>
