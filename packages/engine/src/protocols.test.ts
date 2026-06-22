@@ -21,13 +21,14 @@ beforeAll(async () => {
   tcpPort = (tcpServer.address() as AddressInfo).port;
 
   udpServer = dgram.createSocket("udp4");
-  udpServer.on("message", (msg, rinfo) =>
-    udpServer.send(
-      Buffer.concat([Buffer.from("echo:"), msg]),
-      rinfo.port,
-      rinfo.address
-    )
-  );
+  udpServer.on("message", (msg, rinfo) => {
+    // A "bin" request triggers a binary reply (control bytes); otherwise echo as text.
+    const reply =
+      msg.toString("utf8") === "bin"
+        ? Buffer.from([0x00, 0x01, 0xff, 0x7f, 0x41])
+        : Buffer.concat([Buffer.from("echo:"), msg]);
+    udpServer.send(reply, rinfo.port, rinfo.address);
+  });
   await new Promise<void>((r) => udpServer.bind(0, "127.0.0.1", r));
   udpPort = (udpServer.address() as AddressInfo).port;
 });
@@ -69,6 +70,16 @@ describe("runUdp", () => {
     const r = await runUdp("127.0.0.1", udpPort, "hi", true, 2000);
     expect(r.ok).toBe(true);
     expect(r.bodyText).toContain("echo:hi");
+  });
+
+  it("surfaces a binary reply as base64 for the hex viewer", async () => {
+    const r = await runUdp("127.0.0.1", udpPort, "bin", true, 2000);
+    expect(r.ok).toBe(true);
+    expect(r.contentType).toBe("application/octet-stream");
+    expect(r.bodyBase64).toBe(
+      Buffer.from([0x00, 0x01, 0xff, 0x7f, 0x41]).toString("base64")
+    );
+    expect(r.meta?.received).toBe(5);
   });
 });
 
