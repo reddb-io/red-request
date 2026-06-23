@@ -363,7 +363,14 @@ async fn engine_call(
 
     let result = match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
         Ok(Ok(result)) => result,
-        Ok(Err(_)) => Err("engine channel closed".to_string()),
+        Ok(Err(_)) => {
+            app.state::<EngineState>()
+                .pending
+                .lock()
+                .ok()
+                .map(|mut m| m.remove(&id));
+            Err("engine channel closed".to_string())
+        }
         Err(_) => {
             app.state::<EngineState>()
                 .pending

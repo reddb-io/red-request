@@ -44,7 +44,9 @@ export const DNS_RECORD_TYPES = [
 ] as const;
 
 /** A small catalog of current browser User-Agents to pick from when building a profile. */
-export const USER_AGENTS: { name: string; value: string }[] = [
+export const USER_AGENTS: ReadonlyArray<
+  Readonly<{ name: string; value: string }>
+> = [
   {
     name: "Chrome · Windows",
     value:

@@ -90,6 +90,7 @@ function bundleSummary() {
   const clientRoot = resolve(root, "packages/ui/.svelte-kit/output/client");
   const immutable = join(clientRoot, "_app/immutable");
   const manifestPath = join(clientRoot, ".vite/manifest.json");
+  const routeNodeName = process.env.RED_REQUEST_PERF_ROUTE_NODE;
   const js = walkFiles(immutable)
     .filter((path) => path.endsWith(".js"))
     .map((path) => {
@@ -105,9 +106,7 @@ function bundleSummary() {
   let routeInitial = null;
   if (existsSync(manifestPath)) {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const routeKey = Object.keys(manifest).find((key) =>
-      key.includes("nodes/2")
-    );
+    const routeKey = routeEntryKey(manifest, routeNodeName);
     if (routeKey) {
       const seen = new Set();
       const visit = (key) => {
@@ -139,6 +138,21 @@ function bundleSummary() {
   };
 }
 
+function routeEntryKey(manifest, preferredName) {
+  const entries = Object.entries(manifest);
+  if (preferredName) {
+    const preferred = entries.find(([, entry]) => entry.name === preferredName);
+    if (preferred) return preferred[0];
+  }
+  const routeEntries = entries
+    .filter(([, entry]) => /^nodes\/\d+$/.test(entry.name ?? ""))
+    .sort(
+      ([, a], [, b]) =>
+        Number(a.name.split("/")[1]) - Number(b.name.split("/")[1])
+    );
+  return routeEntries.at(-1)?.[0] ?? null;
+}
+
 async function measureUi(records) {
   records.push(
     await run("core build", "pnpm", ["--filter", "@red-request/core", "build"])
@@ -164,8 +178,9 @@ async function measureRustRelease(records) {
     },
   ];
   const out = [];
+  const runId = nowId();
   for (const variant of variants) {
-    const targetDir = resolve(outDir, `cargo-target-${variant.name}`);
+    const targetDir = resolve(outDir, `cargo-target-${runId}-${variant.name}`);
     const record = await run(
       `cargo release ${variant.name}`,
       "cargo",
