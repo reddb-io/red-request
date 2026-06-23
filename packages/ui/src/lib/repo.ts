@@ -111,23 +111,25 @@ export const saveNetwork = (settings: NetworkSettings) =>
 /** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */
 export async function saveHistory(entry: HistoryEntry): Promise<void> {
   await db.kvPut(HIST, entry.id, entry);
-  const all = await db.kvList<HistoryEntry>(HIST);
-  const mine = all
-    .map((e) => e.value)
-    .filter((e) => e.reqId === entry.reqId)
-    .sort((a, b) => b.ts - a.ts);
-  for (const old of mine.slice(MAX_HISTORY_PER_REQ)) {
+  const mine: HistoryEntry[] = [];
+  for (const { value } of await db.kvList<HistoryEntry>(HIST)) {
+    if (value.reqId === entry.reqId) mine.push(value);
+  }
+  mine.sort((a, b) => b.ts - a.ts);
+  for (let i = MAX_HISTORY_PER_REQ; i < mine.length; i++) {
+    const old = mine[i]!;
     await db.kvDelete(HIST, old.id);
   }
 }
 
 /** All history entries, newest first (optionally scoped to a collection). */
 export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
-  const all = await db.kvList<HistoryEntry>(HIST);
-  return all
-    .map((e) => historyEntrySchema.parse(e.value))
-    .filter((e) => !colId || e.collectionId === colId)
-    .sort((a, b) => b.ts - a.ts);
+  const out: HistoryEntry[] = [];
+  for (const { value } of await db.kvList<HistoryEntry>(HIST)) {
+    const entry = historyEntrySchema.parse(value);
+    if (!colId || entry.collectionId === colId) out.push(entry);
+  }
+  return out.sort((a, b) => b.ts - a.ts);
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
@@ -136,15 +138,29 @@ export async function loadAll(): Promise<LoadedCollection[]> {
     db.kvList<RequestDefinition>(REQ),
   ]);
 
+  const reqsByCollection = new Map<
+    string,
+    Array<{ key: string; value: RequestDefinition }>
+  >();
+  for (const req of reqs) {
+    const sep = req.key.indexOf(".");
+    if (sep <= 0) continue;
+    const colId = req.key.slice(0, sep);
+    const bucket = reqsByCollection.get(colId);
+    if (bucket) bucket.push(req);
+    else reqsByCollection.set(colId, [req]);
+  }
+
   return cols.map(({ key: colId, value }) => {
     const collection = collectionFileSchema.parse(value);
-    const requests = reqs
+    const orderIndex = new Map(collection.order.map((id, i) => [id, i]));
+    const requests = (reqsByCollection.get(colId) ?? [])
       .filter((r) => ownedBy(colId, r.key))
       .map((r) => requestDefinitionSchema.parse(r.value))
       .sort((a, b) => {
-        const ia = collection.order.indexOf(a.id);
-        const ib = collection.order.indexOf(b.id);
-        return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib);
+        const ia = orderIndex.get(a.id) ?? 1e9;
+        const ib = orderIndex.get(b.id) ?? 1e9;
+        return ia - ib;
       });
     // Environments are project-level now (loaded via loadEnvironments).
     return { id: colId, collection, requests, environments: [] };
