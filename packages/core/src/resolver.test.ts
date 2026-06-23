@@ -8,6 +8,7 @@ import {
   parseArgs,
   applyOffset,
   TEMPLATE_FUNCTIONS,
+  TEMPLATE_FUNCTION_CATALOG,
   TEMPLATE_FUNCTIONS_WITH_ARGS,
 } from "./resolver.js";
 import { newRequest } from "./request.js";
@@ -95,6 +96,31 @@ describe("function-call interpolation", () => {
     const r = resolveTemplate("{{rand.uuid}}", {});
     expect(r.value).toBe("{{rand.uuid}}");
     expect(r.unresolved).toEqual(["rand.uuid"]);
+  });
+
+  it("exposes UI metadata for every function suggestion", () => {
+    expect(TEMPLATE_FUNCTION_CATALOG.map((f) => f.name).sort()).toEqual(
+      [
+        ...Object.keys(TEMPLATE_FUNCTIONS),
+        ...Object.keys(TEMPLATE_FUNCTIONS_WITH_ARGS),
+      ].sort()
+    );
+    expect(TEMPLATE_FUNCTION_CATALOG).toContainEqual(
+      expect.objectContaining({
+        name: "rand.int",
+        args: ["min", "max"],
+        signature: "rand.int(min, max)",
+        desc: TEMPLATE_FUNCTIONS_WITH_ARGS["rand.int"]!.desc,
+      })
+    );
+    expect(TEMPLATE_FUNCTION_CATALOG).toContainEqual(
+      expect.objectContaining({
+        name: "datetime.now",
+        args: ["format?", "offset?"],
+        signature: "datetime.now(format?, offset?)",
+        desc: TEMPLATE_FUNCTIONS_WITH_ARGS["datetime.now"]!.desc,
+      })
+    );
   });
 });
 
