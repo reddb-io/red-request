@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, type Component } from "svelte";
   import { ws } from "$lib/store.svelte";
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
@@ -9,16 +9,56 @@
   import RequestPanel from "$lib/components/RequestPanel.svelte";
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import HomeView from "$lib/components/HomeView.svelte";
-  import SettingsView from "$lib/components/SettingsView.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
-  import CommandPalette from "$lib/components/ui/CommandPalette.svelte";
+  import { appLog } from "$lib/log";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   let cmdOpen = $state(false);
+  let lazyLoadError = $state("");
+  let SettingsViewComponent = $state<Component | null>(null);
+  let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
+    null
+  );
 
   onMount(() => {
     void ws.init();
+  });
+
+  function reportLazyLoadFailure(label: string, error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    lazyLoadError = `Could not load ${label}.`;
+    appLog("error", `lazy load ${label} failed: ${detail}`);
+  }
+
+  async function loadSettingsView() {
+    if (SettingsViewComponent) return;
+    try {
+      SettingsViewComponent = (
+        await import("$lib/components/SettingsView.svelte")
+      ).default;
+      lazyLoadError = "";
+    } catch (error) {
+      reportLazyLoadFailure("settings", error);
+    }
+  }
+
+  async function openCommandPalette() {
+    if (!CommandPaletteComponent) {
+      try {
+        CommandPaletteComponent = (
+          await import("$lib/components/ui/CommandPalette.svelte")
+        ).default;
+      } catch (error) {
+        reportLazyLoadFailure("command palette", error);
+        return;
+      }
+    }
+    cmdOpen = true;
+  }
+
+  $effect(() => {
+    if (ws.view === "settings") void loadSettingsView();
   });
 
   function onKey(e: KeyboardEvent) {
@@ -26,7 +66,8 @@
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "k") {
       e.preventDefault();
-      cmdOpen = !cmdOpen;
+      if (cmdOpen) cmdOpen = false;
+      else void openCommandPalette();
     } else if (mod && e.key === "Enter" && ws.activeReq && !ws.sending) {
       e.preventDefault();
       void ws.send();
@@ -74,7 +115,15 @@
           {#if ws.view === "home"}
             <div class="flex-1 overflow-hidden"><HomeView /></div>
           {:else if ws.view === "settings"}
-            <div class="flex-1 overflow-hidden"><SettingsView /></div>
+            <div class="flex-1 overflow-hidden">
+              {#if SettingsViewComponent}
+                <SettingsViewComponent />
+              {:else if lazyLoadError}
+                <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
+              {:else}
+                <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+              {/if}
+            </div>
           {:else}
             <Sidebar />
             <div class="grid flex-1 grid-cols-2 overflow-hidden">
@@ -83,7 +132,9 @@
             </div>
           {/if}
         </div>
-        <CommandPalette bind:open={cmdOpen} />
+        {#if cmdOpen && CommandPaletteComponent}
+          <CommandPaletteComponent bind:open={cmdOpen} />
+        {/if}
       {/if}
     </div>
   </div>
