@@ -26,8 +26,26 @@ env:
   NO_STRIP: "1"
 
 jobs:
+  preflight:
+    name: release preflight
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Check RedDB sidecar release assets
+        run: node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
     name: ${{ matrix.label }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
