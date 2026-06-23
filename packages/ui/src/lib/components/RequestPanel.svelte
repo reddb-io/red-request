@@ -11,6 +11,7 @@
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
+  import { appLog } from "../log";
   import { Button } from "./ui/button/index.js";
   import { Textarea } from "./ui/textarea/index.js";
 
@@ -23,18 +24,45 @@
   let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
 
+  function reportLazyLoadFailure(label: string, error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    ws.errorMsg = `Could not load ${label}. Try again.`;
+    appLog("error", `lazy load ${label} failed: ${detail}`);
+  }
+
   async function openRunner() {
-    RunnerPanelComponent ??= (await import("./RunnerPanel.svelte")).default;
+    if (!RunnerPanelComponent) {
+      try {
+        RunnerPanelComponent = (await import("./RunnerPanel.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("Run", error);
+        return;
+      }
+    }
     showRunner = true;
   }
 
   async function openCode() {
-    CodeModalComponent ??= (await import("./CodeModal.svelte")).default;
+    if (!CodeModalComponent) {
+      try {
+        CodeModalComponent = (await import("./CodeModal.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("Code", error);
+        return;
+      }
+    }
     showCode = true;
   }
 
   async function openSchema() {
-    GraphQlSchemaComponent ??= (await import("./GraphQlSchema.svelte")).default;
+    if (!GraphQlSchemaComponent) {
+      try {
+        GraphQlSchemaComponent = (await import("./GraphQlSchema.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("GraphQL schema", error);
+        return;
+      }
+    }
     showSchema = true;
   }
 

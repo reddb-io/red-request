@@ -10,10 +10,12 @@
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import HomeView from "$lib/components/HomeView.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
+  import { appLog } from "$lib/log";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   let cmdOpen = $state(false);
+  let lazyLoadError = $state("");
   let SettingsViewComponent = $state<Component | null>(null);
   let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
     null
@@ -23,16 +25,35 @@
     void ws.init();
   });
 
+  function reportLazyLoadFailure(label: string, error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    lazyLoadError = `Could not load ${label}.`;
+    appLog("error", `lazy load ${label} failed: ${detail}`);
+  }
+
   async function loadSettingsView() {
-    SettingsViewComponent ??= (
-      await import("$lib/components/SettingsView.svelte")
-    ).default;
+    if (SettingsViewComponent) return;
+    try {
+      SettingsViewComponent = (
+        await import("$lib/components/SettingsView.svelte")
+      ).default;
+      lazyLoadError = "";
+    } catch (error) {
+      reportLazyLoadFailure("settings", error);
+    }
   }
 
   async function openCommandPalette() {
-    CommandPaletteComponent ??= (
-      await import("$lib/components/ui/CommandPalette.svelte")
-    ).default;
+    if (!CommandPaletteComponent) {
+      try {
+        CommandPaletteComponent = (
+          await import("$lib/components/ui/CommandPalette.svelte")
+        ).default;
+      } catch (error) {
+        reportLazyLoadFailure("command palette", error);
+        return;
+      }
+    }
     cmdOpen = true;
   }
 
@@ -97,6 +118,8 @@
             <div class="flex-1 overflow-hidden">
               {#if SettingsViewComponent}
                 <SettingsViewComponent />
+              {:else if lazyLoadError}
+                <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
               {:else}
                 <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
               {/if}
