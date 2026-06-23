@@ -8,7 +8,6 @@ import {
   collectionFileSchema,
   proxyToUrl,
   resolveTemplate,
-  DYNAMIC_VARS,
   type AuthConfig,
   type Oauth2TokenResult,
   type BodyType,
@@ -188,11 +187,10 @@ class Workspace {
     return out;
   }
 
-  /** Variable names resolvable in the current scope, plus the dynamic {{$…}} generators. */
+  /** Variable names resolvable in the current scope. Legacy {{$…}} generators are resolved
+   *  for compatibility but no longer surfaced as editor suggestions. */
   get knownVars(): string[] {
-    return [...Object.keys(this.varInfo), ...Object.keys(DYNAMIC_VARS)].sort(
-      (a, b) => a.localeCompare(b)
-    );
+    return Object.keys(this.varInfo).sort((a, b) => a.localeCompare(b));
   }
 
   /** The introspected schema for the active request's endpoint, or null before introspection
@@ -208,8 +206,6 @@ class Workspace {
     const out: Record<string, string> = {};
     for (const [k, info] of Object.entries(this.varInfo))
       out[k] = info.secret ? "🔒 secret" : info.value || "(empty)";
-    for (const [k, info] of Object.entries(DYNAMIC_VARS))
-      out[k] = `⚡ ${info.desc}`;
     return out;
   }
 
