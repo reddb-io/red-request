@@ -12,6 +12,8 @@
 - Prefer indexed lookups, single-pass loops, lazy or partial rendering, storage-side filtering, and realistic fixtures over speculative rewrites.
 - Add or update lightweight perf workloads when touching hot paths. Benchmarks can start non-blocking, but visible regressions should become hard to ignore.
 - For Rust/Tauri performance work, profile release builds before invasive changes; keep `cargo fmt`, Clippy, frame-pointer/debug-info profiling, LTO, allocator, and PGO decisions tied to evidence.
+- Use `Release Fast` for a Linux `.deb` packaging smoke test; keep `Release` as the full Linux/macOS/Windows publishing path. RedDB sidecar assets must pass preflight before spending matrix time.
+- Treat `lto`, `codegen-units`, `strip`, allocator swaps, and PGO as measured release-profile experiments. Avoid `target-cpu=native` for public binaries unless distribution compatibility is intentionally narrowed.
 
 ## Agent skills
 

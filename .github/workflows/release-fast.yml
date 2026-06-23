@@ -1,0 +1,93 @@
+name: Release Fast
+
+on:
+  workflow_dispatch:
+    inputs:
+      reddb_version:
+        description: "Pinned RedDB release tag to smoke-package with"
+        required: true
+        default: "v1.11.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-fast-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REDDB_VERSION: ${{ github.event.inputs.reddb_version }}
+
+jobs:
+  linux-deb:
+    name: linux-x86_64 deb smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev build-essential curl wget file libssl-dev libxdo-dev \
+            clang mold
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.33.3
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "apps/desktop/src-tauri -> target"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check RedDB sidecar release asset
+        run: node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Brand sync
+        run: pnpm brand:sync
+
+      - name: Brand icons
+        run: pnpm brand:icons
+
+      - name: Build core contract
+        run: pnpm --filter @red-request/core build
+
+      - name: Build engine sidecar
+        run: pnpm engine:build
+
+      - name: Provision RedDB sidecar
+        run: pnpm reddb:fetch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REDDB_TARGET: x86_64-unknown-linux-gnu
+
+      - name: Build Linux deb only
+        run: pnpm --filter @red-request/desktop tauri build --bundles deb
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: red-request-linux-x86_64-deb
+          path: apps/desktop/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
