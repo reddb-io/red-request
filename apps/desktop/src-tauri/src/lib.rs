@@ -444,11 +444,13 @@ struct EmbeddedDb {
 }
 
 /// A persistent `red connect <grpc> --json` REPL: write an RQL line to stdin, read one
-/// response line from stdout. `buf` carries partial stdout between reads.
+/// response line. `buf` carries partial stdout between reads; `errbuf` carries partial
+/// stderr — reddb writes query errors there, not to stdout (#rql-error-hang).
 struct RqlSession {
     child: CommandChild,
     rx: tauri::async_runtime::Receiver<CommandEvent>,
     buf: String,
+    errbuf: String,
 }
 
 /// Resolve which `.rdb` to open. A path arg (`rr .` / `rr <dir>`) → project mode at
@@ -1124,6 +1126,7 @@ fn spawn_rql_session(app: &tauri::AppHandle, grpc: &str) -> Result<RqlSession, S
         child,
         rx,
         buf: String::new(),
+        errbuf: String::new(),
     })
 }
 
@@ -1141,7 +1144,7 @@ fn strip_prompt(line: &str) -> &str {
 async fn read_rql_response(sess: &mut RqlSession) -> Result<String, String> {
     let deadline = std::time::Duration::from_secs(30);
     loop {
-        // Drain any complete buffered line first.
+        // A complete stdout line is the normal success / `error:`-on-stdout path.
         if let Some(nl) = sess.buf.find('\n') {
             let raw: String = sess.buf.drain(..=nl).collect();
             let line = strip_prompt(raw.trim_end());
@@ -1153,11 +1156,25 @@ async fn read_rql_response(sess: &mut RqlSession) -> Result<String, String> {
             }
             continue; // banner / blank / prompt-only — skip
         }
+        // reddb's `red connect` writes QUERY ERRORS to stderr, not stdout. Without
+        // reading stderr a failed query yields no stdout line, so the read stalled to
+        // the 30s timeout (then retried) — any RQL error froze the whole app. Surface
+        // the error immediately instead.
+        if let Some(nl) = sess.errbuf.find('\n') {
+            let raw: String = sess.errbuf.drain(..=nl).collect();
+            let line = strip_prompt(raw.trim_end());
+            if let Some(msg) = line.strip_prefix("error:") {
+                return Ok(serde_json::json!({ "ok": false, "error": msg.trim() }).to_string());
+            }
+            continue; // non-error stderr (logs/banner) — skip, keep awaiting stdout
+        }
         match tokio::time::timeout(deadline, sess.rx.recv()).await {
             Ok(Some(CommandEvent::Stdout(b))) => {
                 sess.buf.push_str(&String::from_utf8_lossy(&b));
             }
-            Ok(Some(CommandEvent::Stderr(_))) => {}
+            Ok(Some(CommandEvent::Stderr(b))) => {
+                sess.errbuf.push_str(&String::from_utf8_lossy(&b));
+            }
             Ok(Some(CommandEvent::Terminated(_))) | Ok(None) => {
                 return Err("`red connect` session ended".to_string());
             }
