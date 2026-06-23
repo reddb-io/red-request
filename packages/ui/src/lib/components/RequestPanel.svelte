@@ -1,25 +1,70 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import { ws } from "../store.svelte";
-  import { httpMethodSchema, requestKindSchema } from "@red-request/core";
+  import { HTTP_METHODS, REQUEST_KINDS } from "@red-request/core/constants";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
-  import RunnerPanel from "./RunnerPanel.svelte";
-  import CodeModal from "./CodeModal.svelte";
-  import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import WebSocketPanel from "./WebSocketPanel.svelte";
   import GrpcPanel from "./GrpcPanel.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
+  import { appLog } from "../log";
   import { Button } from "./ui/button/index.js";
   import { Textarea } from "./ui/textarea/index.js";
 
   let showRunner = $state(false);
   let showCode = $state(false);
   let showSchema = $state(false);
+  type ModalComponent = Component<{ onClose: () => void }>;
+  let RunnerPanelComponent = $state<ModalComponent | null>(null);
+  let CodeModalComponent = $state<ModalComponent | null>(null);
+  let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
+
+  function reportLazyLoadFailure(label: string, error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    ws.errorMsg = `Could not load ${label}. Try again.`;
+    appLog("error", `lazy load ${label} failed: ${detail}`);
+  }
+
+  async function openRunner() {
+    if (!RunnerPanelComponent) {
+      try {
+        RunnerPanelComponent = (await import("./RunnerPanel.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("Run", error);
+        return;
+      }
+    }
+    showRunner = true;
+  }
+
+  async function openCode() {
+    if (!CodeModalComponent) {
+      try {
+        CodeModalComponent = (await import("./CodeModal.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("Code", error);
+        return;
+      }
+    }
+    showCode = true;
+  }
+
+  async function openSchema() {
+    if (!GraphQlSchemaComponent) {
+      try {
+        GraphQlSchemaComponent = (await import("./GraphQlSchema.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("GraphQL schema", error);
+        return;
+      }
+    }
+    showSchema = true;
+  }
 
   const gqlVarsError = $derived.by(() => {
     if (ws.activeReq?.body.type !== "graphql") return null;
@@ -43,8 +88,8 @@
     }
   });
 
-  const methods = httpMethodSchema.options;
-  const kinds = requestKindSchema.options;
+  const methods = HTTP_METHODS;
+  const kinds = REQUEST_KINDS;
   const methodColor: Record<string, string> = {
     GET: "text-emerald-400",
     POST: "text-amber-400",
@@ -240,7 +285,7 @@
       >
       {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
         <Button
-          onclick={() => (showRunner = true)}
+          onclick={() => void openRunner()}
           variant="outline"
           size="xs"
           class="shrink-0"
@@ -249,7 +294,7 @@
       {/if}
       {#if ws.activeReq.kind === "http"}
         <Button
-          onclick={() => (showCode = true)}
+          onclick={() => void openCode()}
           variant="outline"
           size="xs"
           class="shrink-0"
@@ -440,7 +485,7 @@
                   Variables{#if gqlVarsError}<span class="ml-1 text-red-400">!</span>{/if}
                 </button>
               </div>
-              <Button variant="outline" size="xs" onclick={() => (showSchema = true)} class="ml-auto"
+              <Button variant="outline" size="xs" onclick={() => void openSchema()} class="ml-auto"
                 title="Fetch the GraphQL schema (introspection)">Schema</Button>
             </div>
             {#if gqlTab === "query"}
@@ -492,14 +537,14 @@
     {/if}
   </section>
 
-  {#if showCode}
-    <CodeModal onClose={() => (showCode = false)} />
+  {#if showCode && CodeModalComponent}
+    <CodeModalComponent onClose={() => (showCode = false)} />
   {/if}
-  {#if showSchema}
-    <GraphQlSchema onClose={() => (showSchema = false)} />
+  {#if showSchema && GraphQlSchemaComponent}
+    <GraphQlSchemaComponent onClose={() => (showSchema = false)} />
   {/if}
-  {#if showRunner}
-    <RunnerPanel onClose={() => (showRunner = false)} />
+  {#if showRunner && RunnerPanelComponent}
+    <RunnerPanelComponent onClose={() => (showRunner = false)} />
   {/if}
 {:else}
   <section

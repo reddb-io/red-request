@@ -6,12 +6,12 @@
   import { Button } from "./ui/button/index.js";
   import { ws } from "../store.svelte";
   import {
-    resolveRequest,
     generateSnippet,
     SNIPPET_LANGS,
     type SnippetLang,
-    type RequestDefinition,
-  } from "@red-request/core";
+  } from "@red-request/core/codegen";
+  import type { RequestDefinition } from "@red-request/core/request";
+  import { resolveRequest } from "@red-request/core/resolver";
 
   let { onClose }: { onClose: () => void } = $props();
 

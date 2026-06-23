@@ -1,15 +1,13 @@
 import { z } from "zod";
 import { authConfigSchema } from "./auth.js";
+import {
+  BODY_TYPES,
+  DNS_RECORD_TYPES,
+  HTTP_METHODS,
+  REQUEST_KINDS,
+} from "./constants.js";
 
-export const httpMethodSchema = z.enum([
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "HEAD",
-  "OPTIONS",
-]);
+export const httpMethodSchema = z.enum(HTTP_METHODS);
 export type HttpMethod = z.infer<typeof httpMethodSchema>;
 
 /** A header / query-param entry. `enabled: false` keeps it in the file but skips sending. */
@@ -20,15 +18,7 @@ export const kvSchema = z.object({
 });
 export type Kv = z.infer<typeof kvSchema>;
 
-export const bodyTypeSchema = z.enum([
-  "none",
-  "json",
-  "raw",
-  "form",
-  "multipart",
-  "xml",
-  "graphql",
-]);
+export const bodyTypeSchema = z.enum(BODY_TYPES);
 export type BodyType = z.infer<typeof bodyTypeSchema>;
 
 export const requestBodySchema = z.object({
@@ -56,31 +46,10 @@ export const scriptsSchema = z.object({
 export type Scripts = z.infer<typeof scriptsSchema>;
 
 /** Request protocol. `http` is the default; the rest use `net` config below. */
-export const requestKindSchema = z.enum([
-  "http",
-  "ws",
-  "sse",
-  "grpc",
-  "tcp",
-  "tls",
-  "udp",
-  "ping",
-  "whois",
-  "dns",
-]);
+export const requestKindSchema = z.enum(REQUEST_KINDS);
 export type RequestKind = z.infer<typeof requestKindSchema>;
 
-export const dnsRecordTypeSchema = z.enum([
-  "A",
-  "AAAA",
-  "MX",
-  "TXT",
-  "NS",
-  "CNAME",
-  "SOA",
-  "SRV",
-  "CAA",
-]);
+export const dnsRecordTypeSchema = z.enum(DNS_RECORD_TYPES);
 export type DnsRecordType = z.infer<typeof dnsRecordTypeSchema>;
 
 /** Params for non-HTTP kinds. `host` doubles as the domain/name for whois/dns. */

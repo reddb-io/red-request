@@ -5,6 +5,16 @@
 - Let `/ship` monitor checks and reviews, then either merge the PR or park the issue/PR for `/hitl`.
 - The agent never switches the primary checkout's branch; only the user does. The `dev.lock.primary-branch` flag in `.red/config.yaml` is the kill-switch for the primary-branch guard.
 
+## Performance discipline
+
+- Treat performance as product quality, especially on startup, project load, request selection, response rendering/search, runner loops, and RedDB history/store access.
+- Before changing a hot path, check for repeated full-list scans, eager `JSON.parse`/`JSON.stringify`, large `structuredClone` calls, whole-collection reads where a subset would do, and rendering thousands of nodes or lines at once.
+- Prefer indexed lookups, single-pass loops, lazy or partial rendering, storage-side filtering, and realistic fixtures over speculative rewrites.
+- Add or update lightweight perf workloads when touching hot paths. Benchmarks can start non-blocking, but visible regressions should become hard to ignore.
+- For Rust/Tauri performance work, profile release builds before invasive changes; keep `cargo fmt`, Clippy, frame-pointer/debug-info profiling, LTO, allocator, and PGO decisions tied to evidence.
+- Use `Release Fast` for a Linux `.deb` packaging smoke test; keep `Release` as the full Linux/macOS/Windows publishing path. RedDB sidecar assets must pass preflight before spending matrix time.
+- Treat `lto`, `codegen-units`, `strip`, allocator swaps, and PGO as measured release-profile experiments. Avoid `target-cpu=native` for public binaries unless distribution compatibility is intentionally narrowed.
+
 ## Agent skills
 
 ### Issue tracker

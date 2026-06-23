@@ -5,13 +5,6 @@ import {
   parseSchema,
   type GqlSchema,
   newRequest,
-  curlToRequest,
-  openapiToCollection,
-  harToCollection,
-  postmanToCollection,
-  insomniaToCollection,
-  collectionsToPostman,
-  collectionsToInsomnia,
   collectionFileSchema,
   proxyToUrl,
   resolveTemplate,
@@ -34,7 +27,6 @@ import {
   type RunnerParams,
   type RunnerResult,
 } from "@red-request/core";
-import { parse as parseYaml } from "yaml";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import {
@@ -233,7 +225,7 @@ class Workspace {
     });
     appLog(
       "info",
-      `init: project_info → is_project=${this.project?.is_project} arg_launched=${this.project?.arg_launched} db=${this.project?.db_path} dir=${this.project?.project_dir}`,
+      `init: project_info → is_project=${this.project?.is_project} arg_launched=${this.project?.arg_launched} db=${this.project?.db_path} dir=${this.project?.project_dir}`
     );
     // Launched via `rr <dir>` → straight into the project; otherwise show the selector.
     if (this.project?.arg_launched) {
@@ -274,12 +266,15 @@ class Workspace {
     const ready = (async () => {
       this.project = await openProject(dir).catch((e) => {
         this.loadError = e instanceof Error ? e.message : String(e);
-        appLog("error", `chooseProject: open_project(${dir ?? "global"}) failed: ${this.loadError}`);
+        appLog(
+          "error",
+          `chooseProject: open_project(${dir ?? "global"}) failed: ${this.loadError}`
+        );
         return this.project;
       });
       appLog(
         "info",
-        `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`,
+        `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
       );
       await this.loadStore();
     })();
@@ -287,9 +282,15 @@ class Workspace {
     try {
       await delay(CLOSE_MS);
       this.transitionPhase = "hold";
-      appLog("debug", "chooseProject: awaiting ready (openProject+loadStore) under black");
+      appLog(
+        "debug",
+        "chooseProject: awaiting ready (openProject+loadStore) under black"
+      );
       await ready; // black covers the swap below
-      appLog("debug", "chooseProject: ready resolved → screen=app, opening iris");
+      appLog(
+        "debug",
+        "chooseProject: ready resolved → screen=app, opening iris"
+      );
       this.screen = "app";
       await delay(HOLD_MS);
       this.transitionPhase = "opening";
@@ -369,13 +370,17 @@ class Workspace {
       // once. Mirrors the whole-db .incompatible recovery, but for per-collection
       // model mismatch that only surfaces once queries run.
       if (canHeal && /model mismatch|expected kv/i.test(msg)) {
-        appLog("warn", `loadStore: incompatible data (${msg}) — backing up + recreating fresh`);
+        appLog(
+          "warn",
+          `loadStore: incompatible data (${msg}) — backing up + recreating fresh`
+        );
         try {
           await resetIncompatibleDb();
           await this.loadStore(false); // retry once on the fresh store
           return;
         } catch (healErr) {
-          this.loadError = healErr instanceof Error ? healErr.message : String(healErr);
+          this.loadError =
+            healErr instanceof Error ? healErr.message : String(healErr);
           appLog("error", `loadStore: heal failed: ${this.loadError}`);
           return;
         }
@@ -1273,6 +1278,7 @@ class Workspace {
     const id = `req-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 1296
     ).toString(36)}`;
+    const { curlToRequest } = await import("@red-request/core/importers");
     const req = curlToRequest(text, id);
     await repo.saveRequest(this.activeColId, req);
     col.requests.push(req);
@@ -1293,6 +1299,7 @@ class Workspace {
       spec = JSON.parse(trimmed);
     } catch {
       try {
+        const { parse: parseYaml } = await import("yaml");
         spec = parseYaml(trimmed);
       } catch {
         /* not structured — fall through to cURL */
@@ -1301,14 +1308,19 @@ class Workspace {
     const s = spec as Record<string, any> | null;
     if (s && typeof s === "object") {
       if (s.paths) {
+        const { openapiToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(openapiToCollection(s));
         return "collection";
       }
       if (s.log?.entries) {
+        const { harToCollection } = await import("@red-request/core/importers");
         await this.importCollection(harToCollection(s));
         return "collection";
       }
       if (s.info && Array.isArray(s.item)) {
+        const { postmanToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(postmanToCollection(s));
         return "collection";
       }
@@ -1316,6 +1328,8 @@ class Workspace {
         Array.isArray(s.resources) &&
         (s.__export_format || s._type === "export")
       ) {
+        const { insomniaToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(insomniaToCollection(s));
         return "collection";
       }
@@ -1326,6 +1340,7 @@ class Workspace {
 
   /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
   async importOpenAPI(spec: unknown): Promise<void> {
+    const { openapiToCollection } = await import("@red-request/core/importers");
     await this.importCollection(openapiToCollection(spec));
   }
 
@@ -1373,6 +1388,8 @@ class Workspace {
       filters: [{ name: "Postman collection", extensions: ["json"] }],
     });
     if (!path) return null;
+    const { collectionsToPostman } =
+      await import("@red-request/core/importers");
     const data = collectionsToPostman(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request export"
@@ -1388,6 +1405,8 @@ class Workspace {
       filters: [{ name: "Insomnia export", extensions: ["json"] }],
     });
     if (!path) return null;
+    const { collectionsToInsomnia } =
+      await import("@red-request/core/importers");
     const data = collectionsToInsomnia(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request"

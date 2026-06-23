@@ -1,6 +1,6 @@
 {
   "name": "red-request",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "private": true,
   "type": "module",
   "description": "Open-source, white-label API client (Bruno/Insomnia alternative) powered by recker, shipped as a Tauri 2 desktop app.",
@@ -14,6 +14,7 @@
     "desktop:dev": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm --filter @red-request/engine build && pnpm --filter @red-request/desktop tauri dev",
     "desktop:build": "pnpm brand:sync && pnpm brand:icons && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
     "engine:build": "node scripts/build-engine.mjs",
+    "reddb:preflight": "node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu x86_64-pc-windows-msvc",
     "reddb:sync": "node scripts/sync-reddb.mjs",
     "reddb:fetch": "node scripts/fetch-reddb.mjs",
     "reddb:migration-demo": "node scripts/reddb-migration-demo.mjs",
@@ -22,6 +23,7 @@
     "build": "pnpm -r build",
     "check": "pnpm -r check",
     "test": "pnpm -r test",
+    "perf:build": "node scripts/perf-build.mjs",
     "format": "prettier --write .",
     "changeset": "changeset",
     "release:version": "changeset version && node scripts/sync-desktop-version.mjs",

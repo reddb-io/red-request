@@ -53,12 +53,30 @@
   let scrollTop = $state(0);
   let lineH = $state(17.5);
   let padTop = $state(6);
-  const lineCount = $derived((value ?? "").split("\n").length);
+  function countLines(text: string): number {
+    let count = 1;
+    for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
+      count++;
+    }
+    return count;
+  }
+  function lineAtOffset(text: string, offset: number): number {
+    let line = 0;
+    for (
+      let i = text.indexOf("\n");
+      i !== -1 && i < offset;
+      i = text.indexOf("\n", i + 1)
+    ) {
+      line++;
+    }
+    return line;
+  }
+  const lineCount = $derived(countLines(value ?? ""));
   const lines = $derived(Array.from({ length: lineCount }, (_, i) => i));
   function updateCaret() {
     if (!el) return;
     const pos = el.selectionStart ?? 0;
-    caretLine = (value ?? "").slice(0, pos).split("\n").length - 1;
+    caretLine = lineAtOffset(value ?? "", pos);
   }
   $effect(() => {
     if (!gutterMode || !el) return;
