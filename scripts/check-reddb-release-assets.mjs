@@ -27,14 +27,23 @@ function assetName(triple) {
 }
 
 async function ghJson(path) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
   const headers = {
     Accept: "application/vnd.github+json",
     "User-Agent": "red-request-reddb-preflight",
   };
   if (env.GITHUB_TOKEN) headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
-  const res = await fetch(`https://api.github.com/${path}`, { headers });
-  if (!res.ok) throw new Error(`${path} -> ${res.status} ${res.statusText}`);
-  return res.json();
+  try {
+    const res = await fetch(`https://api.github.com/${path}`, {
+      headers,
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`${path} -> ${res.status} ${res.statusText}`);
+    return res.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 const targets = process.argv.slice(2);
