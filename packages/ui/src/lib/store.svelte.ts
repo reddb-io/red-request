@@ -60,6 +60,7 @@ import { isTauri } from "./tauri";
 import {
   projectInfo,
   openProject,
+  resetIncompatibleDb,
   recentSetCount,
   recentRename,
   recentRemove,
@@ -332,8 +333,10 @@ class Workspace {
     this.backToSelector();
   }
 
-  /** (Re)load the store; sets loadError on failure. Used by init and Retry. */
-  async loadStore(): Promise<void> {
+  /** (Re)load the store; sets loadError on failure. Used by init and Retry.
+   *  `canHeal` allows one automatic recovery from incompatible on-disk data
+   *  (a collection in the wrong model) — back it up + recreate, then retry once. */
+  async loadStore(canHeal = true): Promise<void> {
     this.loadError = null;
     try {
       appLog("debug", "loadStore: ensureStore…");
@@ -360,8 +363,25 @@ class Workspace {
         void recentSetCount(this.project.project_dir, total);
       }
     } catch (e) {
-      this.loadError = e instanceof Error ? e.message : String(e);
-      appLog("error", `loadStore failed: ${this.loadError}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      // Incompatible project data (a collection in the wrong on-disk model, e.g. a
+      // legacy table where we expect kv) — back it up + recreate fresh, then retry
+      // once. Mirrors the whole-db .incompatible recovery, but for per-collection
+      // model mismatch that only surfaces once queries run.
+      if (canHeal && /model mismatch|expected kv/i.test(msg)) {
+        appLog("warn", `loadStore: incompatible data (${msg}) — backing up + recreating fresh`);
+        try {
+          await resetIncompatibleDb();
+          await this.loadStore(false); // retry once on the fresh store
+          return;
+        } catch (healErr) {
+          this.loadError = healErr instanceof Error ? healErr.message : String(healErr);
+          appLog("error", `loadStore: heal failed: ${this.loadError}`);
+          return;
+        }
+      }
+      this.loadError = msg;
+      appLog("error", `loadStore failed: ${msg}`);
     }
   }
 

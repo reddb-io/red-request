@@ -736,6 +736,68 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     project_info_for(&app)
 }
 
+/// Back up the current project's reddb files and restart on a fresh store. Used to
+/// heal a collection in an incompatible on-disk model — e.g. a legacy `table` where
+/// the app expects `kv` (`model mismatch: expected kv, got table`). That mismatch
+/// only surfaces once queries run, so start_reddb's whole-db open-failure backup
+/// never catches it. Every `app.rdb*` file is moved to `…incompatible-<ts>.bak`
+/// (preserved for recovery, not deleted), then reddb is recreated fresh.
+#[tauri::command]
+async fn reset_incompatible_db(app: tauri::AppHandle) -> Result<(), String> {
+    let db = app.state::<EmbeddedDb>();
+    let db_path =
+        std::path::PathBuf::from(db.db_path.lock().map_err(|e| e.to_string())?.clone());
+    let _guard = db.spawn_lock.lock().await;
+    // Tear down the live sidecar + RQL session so the files are released.
+    if let Ok(mut c) = db.child.lock() {
+        if let Some(child) = c.take() {
+            let _ = child.kill();
+        }
+    }
+    if let Some(sess) = db.rql.lock().await.take() {
+        let _ = sess.child.kill();
+    }
+    if let Ok(mut u) = db.url.lock() {
+        *u = None;
+    }
+    if let Ok(mut g) = db.grpc.lock() {
+        *g = None;
+    }
+    kill_stale_reddb(&db_path);
+    // Move every `app.rdb*` sibling aside (data preserved, not lost).
+    let parent = db_path
+        .parent()
+        .ok_or_else(|| "db path has no parent".to_string())?
+        .to_path_buf();
+    let stem = db_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "app.rdb".to_string());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut moved = 0u32;
+    if let Ok(entries) = std::fs::read_dir(&parent) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(&stem) && !name.contains(".incompatible-") {
+                let dst = parent.join(format!("{name}.incompatible-{stamp}.bak"));
+                if std::fs::rename(entry.path(), &dst).is_ok() {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    log::warn!(
+        target: "reddb",
+        "incompatible project data: backed up {moved} file(s) in {} (stamp {stamp}); recreating fresh",
+        parent.display()
+    );
+    // Recreate a fresh store on the same path.
+    start_reddb(app.clone()).await
+}
+
 /// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
 /// sidecar copy isn't present). Excludes the `red-request-engine` binary.
 fn find_red_binary() -> Option<String> {
@@ -1641,6 +1703,7 @@ pub fn run() {
             reddb_rql,
             project_info,
             open_project,
+            reset_incompatible_db,
             recent_list,
             recent_pin,
             recent_set_count,

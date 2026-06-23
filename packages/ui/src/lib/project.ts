@@ -45,6 +45,10 @@ export const deleteProjectData = (dir: string): Promise<void> =>
 export const openProject = (dir: string | null): Promise<ProjectInfo> =>
   invoke<ProjectInfo>("open_project", { dir });
 
+/** Heal an incompatible store: back up app.rdb* (model mismatch) and recreate fresh. */
+export const resetIncompatibleDb = (): Promise<void> =>
+  invoke<void>("reset_incompatible_db");
+
 /** Short label for the header: the project folder name, or "global". */
 export function projectLabel(info: ProjectInfo | null): string {
   if (!info) return "";
