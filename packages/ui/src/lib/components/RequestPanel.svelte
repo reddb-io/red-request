@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import { ws } from "../store.svelte";
-  import { httpMethodSchema, requestKindSchema } from "@red-request/core";
+  import { HTTP_METHODS, REQUEST_KINDS } from "@red-request/core/constants";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
@@ -88,8 +88,8 @@
     }
   });
 
-  const methods = httpMethodSchema.options;
-  const kinds = requestKindSchema.options;
+  const methods = HTTP_METHODS;
+  const kinds = REQUEST_KINDS;
   const methodColor: Record<string, string> = {
     GET: "text-emerald-400",
     POST: "text-amber-400",

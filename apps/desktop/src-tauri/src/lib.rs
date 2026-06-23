@@ -6,11 +6,25 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tokio::sync::oneshot;
+
+const PERF_LOG_MIN_MS: u128 = 5;
+
+fn perf_ms(start: Instant) -> u128 {
+    start.elapsed().as_millis()
+}
+
+fn log_perf_slow(op: &str, detail: &str, start: Instant) {
+    let ms = perf_ms(start);
+    if ms >= PERF_LOG_MIN_MS {
+        log::debug!(target: "perf", "{op} {detail} in {ms}ms");
+    }
+}
 
 // ---------------------------------------------------------------------------
 // OS keychain bridge (verbatim pattern from red-ui). Secrets referenced by an
@@ -102,8 +116,10 @@ fn collections_root(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 fn fs_list_dir(app: tauri::AppHandle, path: String) -> Result<Vec<DirEntry>, String> {
+    let started = Instant::now();
     let dir = ensure_under_root(&app, &path)?;
     if !dir.exists() {
+        log_perf_slow("fs.list_dir", &format!("empty path={path}"), started);
         return Ok(vec![]);
     }
     let mut out = vec![];
@@ -117,22 +133,46 @@ fn fs_list_dir(app: tauri::AppHandle, path: String) -> Result<Vec<DirEntry>, Str
         });
     }
     out.sort_by(|a, b| (b.is_dir, &a.name).cmp(&(a.is_dir, &b.name)));
+    log_perf_slow(
+        "fs.list_dir",
+        &format!("{} entries path={path}", out.len()),
+        started,
+    );
     Ok(out)
 }
 
 #[tauri::command]
 fn fs_read_text(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let started = Instant::now();
     let file = ensure_under_root(&app, &path)?;
-    std::fs::read_to_string(&file).map_err(|e| e.to_string())
+    let result = std::fs::read_to_string(&file).map_err(|e| e.to_string());
+    if let Ok(contents) = &result {
+        log_perf_slow(
+            "fs.read_text",
+            &format!("{} bytes path={path}", contents.len()),
+            started,
+        );
+    }
+    result
 }
 
 #[tauri::command]
 fn fs_write_text(app: tauri::AppHandle, path: String, contents: String) -> Result<(), String> {
+    let started = Instant::now();
+    let bytes = contents.len();
     let file = ensure_under_root(&app, &path)?;
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&file, contents).map_err(|e| e.to_string())
+    let result = std::fs::write(&file, contents).map_err(|e| e.to_string());
+    if result.is_ok() {
+        log_perf_slow(
+            "fs.write_text",
+            &format!("{bytes} bytes path={path}"),
+            started,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -295,6 +335,8 @@ async fn engine_call(
     method: String,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    let started = Instant::now();
+    let method_name = method.clone();
     let id = app
         .state::<EngineState>()
         .counter
@@ -319,7 +361,7 @@ async fn engine_call(
         child.write(line.as_bytes()).map_err(|e| e.to_string())?;
     }
 
-    match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+    let result = match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("engine channel closed".to_string()),
         Err(_) => {
@@ -330,7 +372,16 @@ async fn engine_call(
                 .map(|mut m| m.remove(&id));
             Err("engine call timed out".to_string())
         }
-    }
+    };
+    log_perf_slow(
+        "engine.call",
+        &format!(
+            "{method_name} {}",
+            if result.is_ok() { "ok" } else { "err" }
+        ),
+        started,
+    );
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -406,12 +457,26 @@ fn open_with_key(key: &[u8; 32], iv: &str, ct: &str) -> Result<String, String> {
 
 #[tauri::command]
 fn secret_seal(plaintext: String) -> Result<Sealed, String> {
-    seal_with_key(&master_key()?, &plaintext)
+    let started = Instant::now();
+    let result = seal_with_key(&master_key()?, &plaintext);
+    log_perf_slow(
+        "secret.seal",
+        if result.is_ok() { "ok" } else { "err" },
+        started,
+    );
+    result
 }
 
 #[tauri::command]
 fn secret_open(iv: String, ct: String) -> Result<String, String> {
-    open_with_key(&master_key()?, &iv, &ct)
+    let started = Instant::now();
+    let result = open_with_key(&master_key()?, &iv, &ct);
+    log_perf_slow(
+        "secret.open",
+        if result.is_ok() { "ok" } else { "err" },
+        started,
+    );
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +733,7 @@ fn delete_project_data(dir: String) -> Result<(), String> {
 /// at runtime: stop the current sidecar, repoint the path, respawn, return the new info.
 #[tauri::command]
 async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<ProjectInfo, String> {
+    let started = Instant::now();
     let (db_path, project_dir) = match dir.as_deref() {
         Some(d) => {
             let abs = std::fs::canonicalize(d).unwrap_or_else(|_| std::path::PathBuf::from(d));
@@ -733,7 +799,14 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     if let Some(d) = &project_dir {
         recent_add_dir(d);
     }
-    project_info_for(&app)
+    let result = project_info_for(&app);
+    log::debug!(
+        target: "perf",
+        "project.open {} in {}ms",
+        if result.is_ok() { "ok" } else { "err" },
+        perf_ms(started)
+    );
+    result
 }
 
 /// Back up the current project's reddb files and restart on a fresh store. Used to
@@ -845,6 +918,7 @@ async fn reddb_version(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
+    let started = Instant::now();
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
     loop {
@@ -857,6 +931,11 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
                 let mut buf = [0u8; 32];
                 if let Ok(n) = stream.read(&mut buf).await {
                     if String::from_utf8_lossy(&buf[..n]).contains(" 200") {
+                        log::debug!(
+                            target: "perf",
+                            "reddb.wait_ready ok bind={bind} in {}ms",
+                            perf_ms(started)
+                        );
                         return Ok(());
                     }
                 }
@@ -924,6 +1003,7 @@ async fn spawn_reddb_once(
     app: &tauri::AppHandle,
     db_path: &std::path::Path,
 ) -> Result<(String, String, CommandChild), String> {
+    let started = Instant::now();
     // Single-writer guard: clear any stale/concurrent server on this exact db first.
     kill_stale_reddb(db_path);
     let free_port = || {
@@ -1018,10 +1098,16 @@ async fn spawn_reddb_once(
         return Err(e);
     }
     log::info!(target: "reddb", "sidecar ready (gen {my_gen}) — http {bind} grpc {grpc}");
+    log::debug!(
+        target: "perf",
+        "reddb.spawn_ready gen={my_gen} in {}ms",
+        perf_ms(started)
+    );
     Ok((bind, grpc, child))
 }
 
 async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
+    let started = Instant::now();
     let db_path = std::path::PathBuf::from(
         app.state::<EmbeddedDb>()
             .db_path
@@ -1075,6 +1161,12 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
     *state.grpc.lock().map_err(|e| e.to_string())? = Some(grpc);
     *state.child.lock().map_err(|e| e.to_string())? = Some(child);
     log::info!(target: "reddb", "start_reddb: url published http://{bind}");
+    log::debug!(
+        target: "perf",
+        "reddb.start ok path={} in {}ms",
+        db_path.display(),
+        perf_ms(started)
+    );
     Ok(())
 }
 
@@ -1103,6 +1195,7 @@ async fn reddb_request(
     path: String,
     body: Option<String>,
 ) -> Result<HttpReply, String> {
+    let started = Instant::now();
     let current = || -> Result<Option<String>, String> {
         Ok(app
             .state::<EmbeddedDb>()
@@ -1143,6 +1236,11 @@ async fn reddb_request(
     let status = res.status().as_u16();
     let body = res.text().await.unwrap_or_default();
     log::debug!(target: "http", "{method} {path} <- {status} ({} bytes)", body.len());
+    log_perf_slow(
+        "reddb.http",
+        &format!("{method} {path} -> {status} {} bytes", body.len()),
+        started,
+    );
     Ok(HttpReply { status, body })
 }
 
@@ -1251,6 +1349,7 @@ async fn read_rql_response(sess: &mut RqlSession) -> Result<String, String> {
 /// only one query is ever in flight on the single long-lived connection.
 #[tauri::command]
 async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, String> {
+    let started = Instant::now();
     let db = app.state::<EmbeddedDb>();
     let preview: String = query.replace('\n', " ").chars().take(120).collect();
     log::debug!(target: "rql", "query: {preview}");
@@ -1277,6 +1376,11 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
         match read_rql_response(sess).await {
             Ok(body) => {
                 log::debug!(target: "rql", "ok ({} bytes): {preview}", body.len());
+                log_perf_slow(
+                    "reddb.rql",
+                    &format!("ok {} bytes query={preview}", body.len()),
+                    started,
+                );
                 return Ok(HttpReply { status: 200, body });
             }
             Err(e) if attempt == 0 => {
@@ -1285,6 +1389,11 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
             }
             Err(e) => {
                 log::error!(target: "rql", "failed after retry ({e}): {preview}");
+                log::debug!(
+                    target: "perf",
+                    "reddb.rql err query={preview} in {}ms",
+                    perf_ms(started)
+                );
                 return Err(e);
             }
         }
@@ -1595,6 +1704,7 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            let setup_started = Instant::now();
             // Reap sidecars on SIGTERM/SIGINT/SIGHUP (kill, Ctrl-C, terminal/session
             // close). Tauri only reaps on a graceful window close + RunEvent::Exit, so
             // a signalled exit would otherwise orphan `red server` on the .rdb. ctrlc
@@ -1627,8 +1737,14 @@ pub fn run() {
 
             // Start the recker engine sidecar and pump its stdout.
             let app_handle = app.handle().clone();
+            let engine_started = Instant::now();
             match spawn_engine(&app_handle) {
                 Ok((mut rx, child)) => {
+                    log::debug!(
+                        target: "perf",
+                        "engine.spawn ok in {}ms",
+                        perf_ms(engine_started)
+                    );
                     *app.state::<EngineState>()
                         .child
                         .lock()
@@ -1654,7 +1770,14 @@ pub fn run() {
                         }
                     });
                 }
-                Err(e) => log::error!(target: "engine", "spawn failed: {e}"),
+                Err(e) => {
+                    log::debug!(
+                        target: "perf",
+                        "engine.spawn err in {}ms",
+                        perf_ms(engine_started)
+                    );
+                    log::error!(target: "engine", "spawn failed: {e}");
+                }
             }
 
             // Resolve which .rdb to open (project-local vs global) and record it.
@@ -1688,6 +1811,11 @@ pub fn run() {
                     log::error!(target: "reddb", "start_reddb failed: {e}");
                 }
             });
+            log::debug!(
+                target: "perf",
+                "app.setup scheduled in {}ms",
+                perf_ms(setup_started)
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

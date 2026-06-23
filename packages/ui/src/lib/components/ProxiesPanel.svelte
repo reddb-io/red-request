@@ -10,7 +10,7 @@
   import { Button } from "./ui/button/index.js";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import { ws } from "../store.svelte";
-  import { USER_AGENTS } from "@red-request/core";
+  import { USER_AGENTS } from "@red-request/core/constants";
 
   // Which panels to render. Defaults to both (legacy); Settings renders one at a time.
   let { show = "both" }: { show?: "proxies" | "profiles" | "both" } = $props();
