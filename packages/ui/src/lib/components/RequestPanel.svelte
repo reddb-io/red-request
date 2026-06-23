@@ -1,12 +1,10 @@
 <script lang="ts">
+  import type { Component } from "svelte";
   import { ws } from "../store.svelte";
   import { httpMethodSchema, requestKindSchema } from "@red-request/core";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
   import EnvBar from "./EnvBar.svelte";
-  import RunnerPanel from "./RunnerPanel.svelte";
-  import CodeModal from "./CodeModal.svelte";
-  import GraphQlSchema from "./GraphQlSchema.svelte";
   import ProtocolForm from "./ProtocolForm.svelte";
   import WebSocketPanel from "./WebSocketPanel.svelte";
   import GrpcPanel from "./GrpcPanel.svelte";
@@ -19,7 +17,26 @@
   let showRunner = $state(false);
   let showCode = $state(false);
   let showSchema = $state(false);
+  type ModalComponent = Component<{ onClose: () => void }>;
+  let RunnerPanelComponent = $state<ModalComponent | null>(null);
+  let CodeModalComponent = $state<ModalComponent | null>(null);
+  let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
+
+  async function openRunner() {
+    RunnerPanelComponent ??= (await import("./RunnerPanel.svelte")).default;
+    showRunner = true;
+  }
+
+  async function openCode() {
+    CodeModalComponent ??= (await import("./CodeModal.svelte")).default;
+    showCode = true;
+  }
+
+  async function openSchema() {
+    GraphQlSchemaComponent ??= (await import("./GraphQlSchema.svelte")).default;
+    showSchema = true;
+  }
 
   const gqlVarsError = $derived.by(() => {
     if (ws.activeReq?.body.type !== "graphql") return null;
@@ -240,7 +257,7 @@
       >
       {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
         <Button
-          onclick={() => (showRunner = true)}
+          onclick={() => void openRunner()}
           variant="outline"
           size="xs"
           class="shrink-0"
@@ -249,7 +266,7 @@
       {/if}
       {#if ws.activeReq.kind === "http"}
         <Button
-          onclick={() => (showCode = true)}
+          onclick={() => void openCode()}
           variant="outline"
           size="xs"
           class="shrink-0"
@@ -440,7 +457,7 @@
                   Variables{#if gqlVarsError}<span class="ml-1 text-red-400">!</span>{/if}
                 </button>
               </div>
-              <Button variant="outline" size="xs" onclick={() => (showSchema = true)} class="ml-auto"
+              <Button variant="outline" size="xs" onclick={() => void openSchema()} class="ml-auto"
                 title="Fetch the GraphQL schema (introspection)">Schema</Button>
             </div>
             {#if gqlTab === "query"}
@@ -492,14 +509,14 @@
     {/if}
   </section>
 
-  {#if showCode}
-    <CodeModal onClose={() => (showCode = false)} />
+  {#if showCode && CodeModalComponent}
+    <CodeModalComponent onClose={() => (showCode = false)} />
   {/if}
-  {#if showSchema}
-    <GraphQlSchema onClose={() => (showSchema = false)} />
+  {#if showSchema && GraphQlSchemaComponent}
+    <GraphQlSchemaComponent onClose={() => (showSchema = false)} />
   {/if}
-  {#if showRunner}
-    <RunnerPanel onClose={() => (showRunner = false)} />
+  {#if showRunner && RunnerPanelComponent}
+    <RunnerPanelComponent onClose={() => (showRunner = false)} />
   {/if}
 {:else}
   <section

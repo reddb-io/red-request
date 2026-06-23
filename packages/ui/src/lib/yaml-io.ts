@@ -4,7 +4,6 @@
 // secret VALUES are never written (only their names, via environmentToFile). Import reads
 // that tree back into RedDB. This keeps the Bruno-style git workflow while RedDB stays the
 // live store.
-import { parse, stringify } from "yaml";
 import {
   collectionFileSchema,
   requestDefinitionSchema,
@@ -30,6 +29,7 @@ export async function exportAll(
   collections: LoadedCollection[],
   environments: StoredEnvironment[] = []
 ): Promise<string> {
+  const { stringify } = await import("yaml");
   const root = await fs.collectionsRoot();
   const outRoot = join(root, EXPORTS);
   for (const col of collections) {
@@ -57,6 +57,7 @@ export async function exportAll(
 
 /** Read the `_exports` tree back into RedDB. Secrets come in empty (values aren't in YAML). */
 export async function importAll(): Promise<number> {
+  const { parse } = await import("yaml");
   const root = await fs.collectionsRoot();
   const outRoot = join(root, EXPORTS);
   let imported = 0;

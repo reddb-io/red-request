@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, type Component } from "svelte";
   import { ws } from "$lib/store.svelte";
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
@@ -9,16 +9,35 @@
   import RequestPanel from "$lib/components/RequestPanel.svelte";
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import HomeView from "$lib/components/HomeView.svelte";
-  import SettingsView from "$lib/components/SettingsView.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
-  import CommandPalette from "$lib/components/ui/CommandPalette.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   let cmdOpen = $state(false);
+  let SettingsViewComponent = $state<Component | null>(null);
+  let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
+    null
+  );
 
   onMount(() => {
     void ws.init();
+  });
+
+  async function loadSettingsView() {
+    SettingsViewComponent ??= (
+      await import("$lib/components/SettingsView.svelte")
+    ).default;
+  }
+
+  async function openCommandPalette() {
+    CommandPaletteComponent ??= (
+      await import("$lib/components/ui/CommandPalette.svelte")
+    ).default;
+    cmdOpen = true;
+  }
+
+  $effect(() => {
+    if (ws.view === "settings") void loadSettingsView();
   });
 
   function onKey(e: KeyboardEvent) {
@@ -26,7 +45,8 @@
     const mod = e.metaKey || e.ctrlKey;
     if (mod && e.key.toLowerCase() === "k") {
       e.preventDefault();
-      cmdOpen = !cmdOpen;
+      if (cmdOpen) cmdOpen = false;
+      else void openCommandPalette();
     } else if (mod && e.key === "Enter" && ws.activeReq && !ws.sending) {
       e.preventDefault();
       void ws.send();
@@ -74,7 +94,13 @@
           {#if ws.view === "home"}
             <div class="flex-1 overflow-hidden"><HomeView /></div>
           {:else if ws.view === "settings"}
-            <div class="flex-1 overflow-hidden"><SettingsView /></div>
+            <div class="flex-1 overflow-hidden">
+              {#if SettingsViewComponent}
+                <SettingsViewComponent />
+              {:else}
+                <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+              {/if}
+            </div>
           {:else}
             <Sidebar />
             <div class="grid flex-1 grid-cols-2 overflow-hidden">
@@ -83,7 +109,9 @@
             </div>
           {/if}
         </div>
-        <CommandPalette bind:open={cmdOpen} />
+        {#if cmdOpen && CommandPaletteComponent}
+          <CommandPaletteComponent bind:open={cmdOpen} />
+        {/if}
       {/if}
     </div>
   </div>
