@@ -98,15 +98,24 @@
     return "text-red-400";
   }
 
+  // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
+  // next request can use {{name}} — chaining without writing a post-response script.
+  type ParsedJson = { ok: true; value: unknown } | { ok: false };
+  const parsedJson = $derived.by<ParsedJson>(() => {
+    if (!r) return { ok: false };
+    try {
+      return { ok: true, value: JSON.parse(r.bodyText) };
+    } catch {
+      return { ok: false };
+    }
+  });
+  const json = $derived(parsedJson.ok ? parsedJson.value : null);
+
   const prettyBody = $derived.by(() => {
     if (!r) return "";
     const ct = r.contentType ?? "";
-    if (ct.includes("json")) {
-      try {
-        return JSON.stringify(JSON.parse(r.bodyText), null, 2);
-      } catch {
-        return r.bodyText;
-      }
+    if (ct.includes("json") && parsedJson.ok) {
+      return JSON.stringify(parsedJson.value, null, 2);
     }
     return r.bodyText;
   });
@@ -133,7 +142,9 @@
       : "text"
   );
   let viewOverride = $state<"text" | "hex" | null>(null);
-  const bodyView = $derived<"text" | "hex">(viewOverride ?? (autoMode === "binary" ? "hex" : "text"));
+  const bodyView = $derived<"text" | "hex">(
+    viewOverride ?? (autoMode === "binary" ? "hex" : "text")
+  );
   // Bytes for the hex view: prefer the raw binary payload, else the UTF-8 of the text body.
   const hexBytes = $derived(
     r?.bodyBase64 ? undefined : new TextEncoder().encode(r?.bodyText ?? "")
@@ -145,16 +156,6 @@
     viewOverride = null;
   });
 
-  // Response → variable: extract a value by dotted/bracket path and save it to a var, so the
-  // next request can use {{name}} — chaining without writing a post-response script.
-  const json = $derived.by<unknown>(() => {
-    if (!r) return null;
-    try {
-      return JSON.parse(r.bodyText);
-    } catch {
-      return null;
-    }
-  });
   function getPath(obj: unknown, path: string): unknown {
     const keys = path
       .replace(/\[(\d+)\]/g, ".$1")

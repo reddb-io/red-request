@@ -745,8 +745,7 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
 #[tauri::command]
 async fn reset_incompatible_db(app: tauri::AppHandle) -> Result<(), String> {
     let db = app.state::<EmbeddedDb>();
-    let db_path =
-        std::path::PathBuf::from(db.db_path.lock().map_err(|e| e.to_string())?.clone());
+    let db_path = std::path::PathBuf::from(db.db_path.lock().map_err(|e| e.to_string())?.clone());
     let _guard = db.spawn_lock.lock().await;
     // Tear down the live sidecar + RQL session so the files are released.
     if let Ok(mut c) = db.child.lock() {
@@ -880,7 +879,11 @@ fn kill_stale_reddb(db_path: &std::path::Path) {
         return;
     };
     for entry in entries.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
             continue;
         };
         if pid == me {
@@ -944,16 +947,13 @@ async fn spawn_reddb_once(
         grpc.clone(),
     ];
     let shell = app.shell();
-    let sidecar = shell
-        .sidecar("red")
-        .ok()
-        .map(|c| {
-            c.env_clear()
-                .envs(sidecar_env())
-                .args(args.clone())
-                .env("RED_HTTP_TLS_DEV", "1")
-                .spawn()
-        });
+    let sidecar = shell.sidecar("red").ok().map(|c| {
+        c.env_clear()
+            .envs(sidecar_env())
+            .args(args.clone())
+            .env("RED_HTTP_TLS_DEV", "1")
+            .spawn()
+    });
     let (mut rx, child) = match sidecar {
         Some(Ok(pair)) => pair,
         _ => {
@@ -1265,7 +1265,11 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
         }
         let sess = guard.as_mut().unwrap();
         let one_line = query.replace('\n', " ");
-        if sess.child.write(format!("{one_line}\n").as_bytes()).is_err() {
+        if sess
+            .child
+            .write(format!("{one_line}\n").as_bytes())
+            .is_err()
+        {
             log::warn!(target: "rql", "stdin write failed — respawning session");
             *guard = None; // stdin closed → respawn
             continue;
@@ -1723,7 +1727,10 @@ pub fn run() {
             // Reap our sidecars on every graceful shutdown path. ExitRequested fires when
             // the last window closes (before teardown); Exit fires as the process ends.
             // The helper is idempotent, so covering both never double-kills.
-            if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
                 reap_sidecars(&app_handle);
             }
         });

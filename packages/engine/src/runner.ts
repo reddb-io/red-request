@@ -62,22 +62,19 @@ export async function runLoop(params: RunnerParams): Promise<RunnerResult> {
     }
   }
 
-  const okCount = iterations.filter((it) => it.response.ok).length;
-  const passed = iterations.reduce(
-    (s, it) => s + (it.scriptResult?.tests.filter((t) => t.passed).length ?? 0),
-    0
-  );
-  const failed = iterations.reduce(
-    (s, it) =>
-      s + (it.scriptResult?.tests.filter((t) => !t.passed).length ?? 0),
-    0
-  );
-  const avgMs = iterations.length
-    ? Math.round(
-        iterations.reduce((s, it) => s + it.response.durationMs, 0) /
-          iterations.length
-      )
-    : 0;
+  let okCount = 0;
+  let passed = 0;
+  let failed = 0;
+  let totalMs = 0;
+  for (const it of iterations) {
+    if (it.response.ok) okCount++;
+    totalMs += it.response.durationMs;
+    for (const test of it.scriptResult?.tests ?? []) {
+      if (test.passed) passed++;
+      else failed++;
+    }
+  }
+  const avgMs = iterations.length ? Math.round(totalMs / iterations.length) : 0;
 
   return {
     iterations,
