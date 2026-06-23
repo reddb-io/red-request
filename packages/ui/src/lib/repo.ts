@@ -13,6 +13,7 @@ import {
   requestDefinitionSchema,
   storedEnvironmentSchema,
   historyEntrySchema,
+  migrateLegacyDynamicTokens,
   networkSettingsSchema,
   newRequest,
   type CollectionFile,
@@ -24,6 +25,7 @@ import {
 } from "@red-request/core";
 import * as db from "./reddb";
 import { MIGRATIONS } from "./migrations";
+import { appLog } from "./log";
 
 /** Register + apply any pending RedDB-native migrations. Run on every project boot. */
 export const runMigrations = () => db.runMigrations(MIGRATIONS);
@@ -163,7 +165,20 @@ export async function loadAll(): Promise<LoadedCollection[]> {
         return ia - ib;
       });
     // Environments are project-level now (loaded via loadEnvironments).
-    return { id: colId, collection, requests, environments: [] };
+    const loaded = { id: colId, collection, requests, environments: [] };
+    const migrated = migrateLegacyDynamicTokens(loaded);
+    if (migrated.warnings.length > 0) {
+      const rewritten = [
+        ...new Set(
+          migrated.warnings.map((w) => `${w.token} -> ${w.replacement}`)
+        ),
+      ].join(", ");
+      appLog(
+        "warn",
+        `Deprecated dynamic tokens migrated in collection ${colId}: ${rewritten}`
+      );
+    }
+    return migrated.value;
   });
 }
 
