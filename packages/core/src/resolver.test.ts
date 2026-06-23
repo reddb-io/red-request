@@ -3,31 +3,135 @@ import {
   mergeScopes,
   resolveTemplate,
   resolveRequest,
-  resolveDynamic,
   resolveFunction,
   parseArgs,
   applyOffset,
+  LEGACY_DYNAMIC_TOKEN_REWRITES,
+  migrateLegacyDynamicTokens,
   TEMPLATE_FUNCTIONS,
   TEMPLATE_FUNCTIONS_WITH_ARGS,
 } from "./resolver.js";
+import { loadedCollectionSchema } from "./collection.js";
 import { newRequest } from "./request.js";
 
-describe("dynamic variables", () => {
-  it("resolves {{$…}} tokens without a scope and never reports them unresolved", () => {
+describe("legacy dynamic token migration", () => {
+  it("documents every legacy {{$...}} token in the rewrite table", () => {
+    expect(LEGACY_DYNAMIC_TOKEN_REWRITES).toEqual({
+      $uuid: "rand.uuid()",
+      $guid: "rand.uuid()",
+      $randomEmail: "rand.email()",
+      $randomFirstName: "rand.firstName()",
+      $randomLastName: "rand.lastName()",
+      $randomFullName: "rand.fullName()",
+      $randomWord: "rand.word()",
+      $randomBoolean: "rand.bool()",
+      $randomIP: "rand.ip()",
+      $randomHexColor: "rand.hexColor()",
+      $randomInt: "rand.int(0,1000)",
+      $timestamp: "datetime.unix()",
+      $isoTimestamp: "datetime.iso8601()",
+    });
+  });
+
+  for (const [legacy, replacement] of Object.entries(
+    LEGACY_DYNAMIC_TOKEN_REWRITES
+  )) {
+    it(`rewrites {{${legacy}}} to {{${replacement}}}`, () => {
+      const migrated = migrateLegacyDynamicTokens(
+        `before {{ ${legacy} }} after`
+      );
+      expect(migrated.value).toBe(`before {{${replacement}}} after`);
+      expect(migrated.warnings).toEqual([{ token: legacy, replacement }]);
+    });
+  }
+
+  it("rewrites legacy tokens across a loaded collection/request shape", () => {
+    const loaded = loadedCollectionSchema.parse({
+      id: "col",
+      collection: {
+        name: "Legacy {{$randomWord}}",
+        baseUrl: "https://{{$randomIP}}",
+        vars: { user: "{{$randomFirstName}}" },
+      },
+      requests: [
+        {
+          ...newRequest("req"),
+          name: "Request {{$guid}}",
+          url: "{{baseUrl}}/users/{{$randomInt}}",
+          headers: [{ name: "X-Trace", value: "{{$uuid}}", enabled: true }],
+          query: [{ name: "email", value: "{{$randomEmail}}", enabled: true }],
+          body: {
+            type: "json",
+            content: '{"at":"{{$isoTimestamp}}"}',
+            fields: [
+              { name: "ok", value: "{{$randomBoolean}}", enabled: true },
+            ],
+          },
+          auth: { type: "bearer", token: "{{$timestamp}}" },
+          net: { ...newRequest("req").net, host: "{{$randomIP}}" },
+        },
+      ],
+    });
+
+    const migrated = migrateLegacyDynamicTokens(loaded);
+
+    expect(migrated.value.collection.name).toBe("Legacy {{rand.word()}}");
+    expect(migrated.value.collection.baseUrl).toBe("https://{{rand.ip()}}");
+    expect(migrated.value.collection.vars.user).toBe("{{rand.firstName()}}");
+    expect(migrated.value.requests[0]!.name).toBe("Request {{rand.uuid()}}");
+    expect(migrated.value.requests[0]!.url).toBe(
+      "{{baseUrl}}/users/{{rand.int(0,1000)}}"
+    );
+    expect(migrated.value.requests[0]!.headers[0]!.value).toBe(
+      "{{rand.uuid()}}"
+    );
+    expect(migrated.value.requests[0]!.query[0]!.value).toBe(
+      "{{rand.email()}}"
+    );
+    expect(migrated.value.requests[0]!.body.content).toBe(
+      '{"at":"{{datetime.iso8601()}}"}'
+    );
+    expect(migrated.value.requests[0]!.body.fields[0]!.value).toBe(
+      "{{rand.bool()}}"
+    );
+    expect(migrated.value.requests[0]!.auth).toEqual({
+      type: "bearer",
+      token: "{{datetime.unix()}}",
+    });
+    expect(migrated.value.requests[0]!.net.host).toBe("{{rand.ip()}}");
+    expect(migrated.warnings.map((w) => w.token).sort()).toEqual(
+      [
+        "$randomWord",
+        "$randomIP",
+        "$randomFirstName",
+        "$guid",
+        "$randomInt",
+        "$uuid",
+        "$randomEmail",
+        "$isoTimestamp",
+        "$randomBoolean",
+        "$timestamp",
+        "$randomIP",
+      ].sort()
+    );
+  });
+
+  it("leaves unknown $ tokens untouched and unwarned", () => {
+    const migrated = migrateLegacyDynamicTokens("{{$nope}}");
+    expect(migrated.value).toBe("{{$nope}}");
+    expect(migrated.warnings).toEqual([]);
+  });
+});
+
+describe("legacy dynamic variable resolution", () => {
+  it("does not resolve bare {{$name}} tokens unless they are real scope vars", () => {
     const r = resolveTemplate("id={{$uuid}}&t={{$timestamp}}&x={{nope}}", {});
-    expect(r.value).toMatch(/^id=[0-9a-f-]{36}&t=\d{10}&x=\{\{nope\}\}$/);
-    expect(r.unresolved).toEqual(["nope"]);
-  });
-  it("each occurrence is independent", () => {
-    const [a, b] = resolveTemplate("{{$uuid}} {{$uuid}}", {}).value.split(" ");
-    expect(a).not.toBe(b);
-  });
-  it("a real scope var wins over a dynamic name; unknown $tokens are undefined", () => {
+    expect(r.value).toBe("id={{$uuid}}&t={{$timestamp}}&x={{nope}}");
+    expect(r.unresolved).toEqual(["$uuid", "$timestamp", "nope"]);
+
     expect(
       resolveTemplate("{{$timestamp}}", { $timestamp: "fixed" }).value
     ).toBe("fixed");
-    expect(resolveDynamic("$randomEmail")).toMatch(/@example\.com$/);
-    expect(resolveDynamic("$nope")).toBeUndefined();
   });
 });
 
@@ -64,9 +168,12 @@ describe("function-call interpolation", () => {
   }
 
   it("recognizes function tokens without breaking adjacent {{var}} resolution", () => {
-    const r = resolveTemplate("u={{$uuid}} h={{ host }} w={{rand.word()}}", {
-      host: "api.test",
-    });
+    const r = resolveTemplate(
+      "u={{rand.uuid()}} h={{ host }} w={{rand.word()}}",
+      {
+        host: "api.test",
+      }
+    );
     expect(r.value).toMatch(/^u=[0-9a-f-]{36} h=api\.test w=[a-z]+$/);
     expect(r.unresolved).toEqual([]);
   });
