@@ -1059,17 +1059,27 @@ async fn reddb_request(
     }
     let base = base.ok_or_else(|| "reddb not ready".to_string())?;
     let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
-    let mut rb = reqwest::Client::new()
+    log::debug!(target: "http", "{method} {path} -> {base}");
+    // Bounded: reddb accepting the socket but never answering must NOT hang the app
+    // forever (black screen). A timeout turns it into a clean, logged error instead.
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut rb = client
         .request(m, format!("{base}{path}"))
         .header("content-type", "application/json");
     if let Some(b) = body {
         rb = rb.body(b);
     }
-    let res = rb.send().await.map_err(|e| e.to_string())?;
-    Ok(HttpReply {
-        status: res.status().as_u16(),
-        body: res.text().await.unwrap_or_default(),
-    })
+    let res = rb.send().await.map_err(|e| {
+        log::warn!(target: "http", "{method} {path} failed: {e}");
+        e.to_string()
+    })?;
+    let status = res.status().as_u16();
+    let body = res.text().await.unwrap_or_default();
+    log::debug!(target: "http", "{method} {path} <- {status} ({} bytes)", body.len());
+    Ok(HttpReply { status, body })
 }
 
 /// Current gRPC front-door address, bringing the embedded server up if needed.
@@ -1163,27 +1173,37 @@ async fn read_rql_response(sess: &mut RqlSession) -> Result<String, String> {
 #[tauri::command]
 async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, String> {
     let db = app.state::<EmbeddedDb>();
+    let preview: String = query.replace('\n', " ").chars().take(120).collect();
+    log::debug!(target: "rql", "query: {preview}");
     let mut guard = db.rql.lock().await;
 
     // Drive the query once on the live session; respawn + retry on a dead/missing session.
     for attempt in 0..2 {
         if guard.is_none() {
+            log::debug!(target: "rql", "no live session — spawning red connect (attempt {attempt})");
             let grpc = ensure_grpc(&app).await?;
             *guard = Some(spawn_rql_session(&app, &grpc)?);
         }
         let sess = guard.as_mut().unwrap();
         let one_line = query.replace('\n', " ");
         if sess.child.write(format!("{one_line}\n").as_bytes()).is_err() {
+            log::warn!(target: "rql", "stdin write failed — respawning session");
             *guard = None; // stdin closed → respawn
             continue;
         }
         match read_rql_response(sess).await {
-            Ok(body) => return Ok(HttpReply { status: 200, body }),
-            Err(e) if attempt == 0 => {
-                *guard = None; // session died mid-read → respawn once
-                let _ = e;
+            Ok(body) => {
+                log::debug!(target: "rql", "ok ({} bytes): {preview}", body.len());
+                return Ok(HttpReply { status: 200, body });
             }
-            Err(e) => return Err(e),
+            Err(e) if attempt == 0 => {
+                log::warn!(target: "rql", "read failed ({e}) — respawning once: {preview}");
+                *guard = None; // session died mid-read → respawn once
+            }
+            Err(e) => {
+                log::error!(target: "rql", "failed after retry ({e}): {preview}");
+                return Err(e);
+            }
         }
     }
     Err("RQL session could not be established".to_string())

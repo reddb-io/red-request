@@ -286,7 +286,9 @@ class Workspace {
     try {
       await delay(CLOSE_MS);
       this.transitionPhase = "hold";
+      appLog("debug", "chooseProject: awaiting ready (openProject+loadStore) under black");
       await ready; // black covers the swap below
+      appLog("debug", "chooseProject: ready resolved → screen=app, opening iris");
       this.screen = "app";
       await delay(HOLD_MS);
       this.transitionPhase = "opening";
@@ -294,6 +296,7 @@ class Workspace {
     } finally {
       this.transitioning = false;
       this.transitionPhase = "idle";
+      appLog("debug", "chooseProject: transition done (idle)");
     }
   }
 
@@ -333,14 +336,21 @@ class Workspace {
   async loadStore(): Promise<void> {
     this.loadError = null;
     try {
+      appLog("debug", "loadStore: ensureStore…");
       await repo.ensureStore();
       // RedDB-native migrations: register + APPLY MIGRATION * (pending → applied in
       // dependency order). No-op when nothing's pending; runs on every project boot.
+      appLog("debug", "loadStore: runMigrations…");
       await repo.runMigrations();
+      appLog("debug", "loadStore: ensureSample…");
       await repo.ensureSample();
+      appLog("debug", "loadStore: loadNetwork…");
       this.network = await repo.loadNetwork();
+      appLog("debug", "loadStore: reload…");
       await this.reload();
+      appLog("debug", "loadStore: reloadEnvironments…");
       await this.reloadEnvironments();
+      appLog("debug", "loadStore: done");
       // Persist this project's request count for the selector cards.
       if (this.project?.is_project && this.project.project_dir) {
         const total = this.collections.reduce(
@@ -351,6 +361,7 @@ class Workspace {
       }
     } catch (e) {
       this.loadError = e instanceof Error ? e.message : String(e);
+      appLog("error", `loadStore failed: ${this.loadError}`);
     }
   }
 
