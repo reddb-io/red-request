@@ -5,13 +5,6 @@ import {
   parseSchema,
   type GqlSchema,
   newRequest,
-  curlToRequest,
-  openapiToCollection,
-  harToCollection,
-  postmanToCollection,
-  insomniaToCollection,
-  collectionsToPostman,
-  collectionsToInsomnia,
   collectionFileSchema,
   proxyToUrl,
   resolveTemplate,
@@ -1285,6 +1278,7 @@ class Workspace {
     const id = `req-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 1296
     ).toString(36)}`;
+    const { curlToRequest } = await import("@red-request/core/importers");
     const req = curlToRequest(text, id);
     await repo.saveRequest(this.activeColId, req);
     col.requests.push(req);
@@ -1314,14 +1308,19 @@ class Workspace {
     const s = spec as Record<string, any> | null;
     if (s && typeof s === "object") {
       if (s.paths) {
+        const { openapiToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(openapiToCollection(s));
         return "collection";
       }
       if (s.log?.entries) {
+        const { harToCollection } = await import("@red-request/core/importers");
         await this.importCollection(harToCollection(s));
         return "collection";
       }
       if (s.info && Array.isArray(s.item)) {
+        const { postmanToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(postmanToCollection(s));
         return "collection";
       }
@@ -1329,6 +1328,8 @@ class Workspace {
         Array.isArray(s.resources) &&
         (s.__export_format || s._type === "export")
       ) {
+        const { insomniaToCollection } =
+          await import("@red-request/core/importers");
         await this.importCollection(insomniaToCollection(s));
         return "collection";
       }
@@ -1339,6 +1340,7 @@ class Workspace {
 
   /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
   async importOpenAPI(spec: unknown): Promise<void> {
+    const { openapiToCollection } = await import("@red-request/core/importers");
     await this.importCollection(openapiToCollection(spec));
   }
 
@@ -1386,6 +1388,8 @@ class Workspace {
       filters: [{ name: "Postman collection", extensions: ["json"] }],
     });
     if (!path) return null;
+    const { collectionsToPostman } =
+      await import("@red-request/core/importers");
     const data = collectionsToPostman(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request export"
@@ -1401,6 +1405,8 @@ class Workspace {
       filters: [{ name: "Insomnia export", extensions: ["json"] }],
     });
     if (!path) return null;
+    const { collectionsToInsomnia } =
+      await import("@red-request/core/importers");
     const data = collectionsToInsomnia(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request"

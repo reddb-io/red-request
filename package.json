@@ -23,6 +23,7 @@
     "build": "pnpm -r build",
     "check": "pnpm -r check",
     "test": "pnpm -r test",
+    "perf:build": "node scripts/perf-build.mjs",
     "format": "prettier --write .",
     "changeset": "changeset",
     "release:version": "changeset version && node scripts/sync-desktop-version.mjs",

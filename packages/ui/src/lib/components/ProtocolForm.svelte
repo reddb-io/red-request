@@ -1,9 +1,6 @@
 <script lang="ts">
-  import {
-    dnsRecordTypeSchema,
-    type NetConfig,
-    type RequestKind,
-  } from "@red-request/core";
+  import { DNS_RECORD_TYPES } from "@red-request/core/constants";
+  import type { NetConfig, RequestKind } from "@red-request/core/request";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
@@ -15,7 +12,7 @@
     net = $bindable(),
   }: { kind: RequestKind; net: NetConfig } = $props();
 
-  const recordTypes = dnsRecordTypeSchema.options;
+  const recordTypes = DNS_RECORD_TYPES;
   const hostLabel = $derived(
     kind === "whois" ? "domain" : kind === "dns" ? "name" : "host"
   );
