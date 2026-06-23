@@ -3,7 +3,13 @@
   // is known, red when not) via a backdrop layer behind a transparent input, and offers an
   // autocomplete dropdown of known variables while you type inside {{ … }}.
   import { tick } from "svelte";
-  import { suggestGraphQL, type GqlSchema, type GqlSuggestion } from "@red-request/core";
+  import {
+    TEMPLATE_FUNCTION_CATALOG,
+    suggestGraphQL,
+    type GqlSchema,
+    type GqlSuggestion,
+    type TemplateFunctionCatalogEntry,
+  } from "@red-request/core";
 
   type Props = {
     // optional so callers can bind an optional field (e.g. graphql variables); "" when unset.
@@ -88,23 +94,35 @@
   });
 
   let showMenu = $state(false);
-  let menuItems = $state<string[]>([]);
+  type MenuItem =
+    | { kind: "var"; label: string; insertText: string; desc?: string }
+    | {
+        kind: "fn";
+        label: string;
+        insertText: string;
+        desc: string;
+        args: readonly string[];
+      }
+    | { kind: "gql"; label: string; insertText: string; gql: GqlSuggestion };
+
+  let menuItems = $state<MenuItem[]>([]);
   let menuIndex = $state(0);
   let tokenStart = $state(-1);
   // "var" inserts {{name}} for a {{ … }} token; "gql" replaces the partial identifier under the
   // cursor with a schema-sourced GraphQL field/argument name.
   let menuMode = $state<"var" | "gql">("var");
-  let gqlItems = $state<GqlSuggestion[]>([]);
   let wordStart = $state(-1);
 
   const knownSet = $derived(new Set(known));
+  const functionCatalog = TEMPLATE_FUNCTION_CATALOG;
+  const functionByName = new Map(functionCatalog.map((fn) => [fn.name, fn]));
   const pathSet = $derived(new Set(pathNames ?? []));
   const enablePath = $derived(pathNames !== undefined);
 
   type Seg = {
     text: string;
     kind: "plain" | "ok" | "bad";
-    token?: "var" | "path";
+    token?: "var" | "path" | "fn";
     title?: string;
   };
   const segments = $derived.by<Seg[]>(() => {
@@ -120,12 +138,18 @@
       if (m.index > last) out.push({ text: v.slice(last, m.index), kind: "plain" });
       if (m[1] !== undefined) {
         const name = m[2]!;
-        const ok = knownSet.has(name);
+        const fnName = /^([\w.$-]+)\s*\([^}]*\)$/.exec(name)?.[1];
+        const fn = fnName ? functionByName.get(fnName) : undefined;
+        const ok = fn ? true : knownSet.has(name);
         out.push({
           text: m[1],
           kind: ok ? "ok" : "bad",
-          token: "var",
-          title: ok ? (values[name] ?? "") : "undefined variable",
+          token: fn ? "fn" : "var",
+          title: fn
+            ? `${fn.signature} — ${fn.desc}`
+            : ok
+              ? (values[name] ?? "")
+              : "undefined variable",
         });
       } else {
         const name = m[4]!;
@@ -190,7 +214,27 @@
         .toLowerCase();
       menuMode = "var";
       tokenStart = open;
-      menuItems = known.filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
+      const variableItems: MenuItem[] = known
+        .filter((n) => !n.startsWith("$") && n.toLowerCase().includes(q))
+        .map((n) => ({
+          kind: "var",
+          label: n,
+          insertText: n,
+          desc: values[n],
+        }));
+      const functionItems: MenuItem[] = functionCatalog
+        .filter((fn) => {
+          const haystack = `${fn.name} ${fn.signature} ${fn.desc}`.toLowerCase();
+          return haystack.includes(q);
+        })
+        .map((fn: TemplateFunctionCatalogEntry) => ({
+          kind: "fn",
+          label: fn.signature,
+          insertText: `${fn.name}()`,
+          desc: fn.desc,
+          args: fn.args,
+        }));
+      menuItems = [...functionItems, ...variableItems];
       menuIndex = 0;
       showMenu = menuItems.length > 0;
       return;
@@ -201,8 +245,12 @@
       const word = /([A-Za-z_]\w*)$/.exec(before)?.[1] ?? "";
       menuMode = "gql";
       wordStart = caret - word.length;
-      gqlItems = suggestions;
-      menuItems = suggestions.map((s) => s.label);
+      menuItems = suggestions.map((s) => ({
+        kind: "gql",
+        label: s.label,
+        insertText: s.label,
+        gql: s,
+      }));
       menuIndex = 0;
       showMenu = menuItems.length > 0;
       return;
@@ -210,18 +258,21 @@
     showMenu = false;
   }
 
-  async function accept(name: string) {
+  async function accept(item: MenuItem) {
     if (!el) return;
     const caret = el.selectionStart ?? (value ?? "").length;
     let pos: number;
     if (menuMode === "gql") {
-      value = (value ?? "").slice(0, wordStart) + name + (value ?? "").slice(caret);
-      pos = wordStart + name.length;
+      value = (value ?? "").slice(0, wordStart) + item.insertText + (value ?? "").slice(caret);
+      pos = wordStart + item.insertText.length;
     } else {
       const rest = (value ?? "").slice(caret);
       const tail = rest.startsWith("}}") ? rest.slice(2) : rest;
-      value = (value ?? "").slice(0, tokenStart) + "{{" + name + "}}" + tail;
-      pos = tokenStart + 2 + name.length + 2;
+      value = (value ?? "").slice(0, tokenStart) + "{{" + item.insertText + "}}" + tail;
+      pos =
+        item.kind === "fn" && item.args.length > 0
+          ? tokenStart + 2 + item.insertText.length - 1
+          : tokenStart + 2 + item.insertText.length + 2;
     }
     showMenu = false;
     await tick();
@@ -332,7 +383,7 @@
     <ul
       class="panel absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto py-1 shadow-xl"
     >
-      {#each menuItems as item, i (item)}
+      {#each menuItems as item, i (item.label)}
         <li>
           <button
             type="button"
@@ -345,15 +396,20 @@
               ? 'bg-[var(--color-bg-2)] text-fg-strong'
               : 'text-fg-muted'} hover:bg-[var(--color-bg-2)]"
           >
-            <span class="text-xs {menuMode === 'gql' && gqlItems[i]?.kind === 'argument'
+            <span class="text-xs {item.kind === 'gql' && item.gql.kind === 'argument'
               ? 'text-sky-400'
-              : 'text-emerald-400'}">{menuMode === "gql" && gqlItems[i]?.kind === "argument"
+              : item.kind === 'fn'
+                ? 'text-[var(--color-brand)]'
+                : 'text-emerald-400'}">{item.kind === "gql" && item.gql.kind === "argument"
                 ? "›"
-                : "⬩"}</span>
-            <span class="truncate">{item}</span>
-            {#if menuMode === "gql" && gqlItems[i]?.type}
-              <span class="ml-auto truncate text-xs text-[var(--color-brand)]">{gqlItems[i]!
-                  .type}</span>
+                : item.kind === "fn"
+                  ? "ƒ"
+                  : "⬩"}</span>
+            <span class="min-w-0 flex-1 truncate">{item.label}</span>
+            {#if item.kind === "gql" && item.gql.type}
+              <span class="ml-auto truncate text-xs text-[var(--color-brand)]">{item.gql.type}</span>
+            {:else if item.kind !== "gql" && item.desc}
+              <span class="ml-auto truncate text-xs text-fg-faint">{item.desc}</span>
             {/if}
           </button>
         </li>
