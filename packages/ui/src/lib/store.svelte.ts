@@ -8,7 +8,8 @@ import {
   collectionFileSchema,
   proxyToUrl,
   resolveTemplate,
-  DYNAMIC_VARS,
+  TEMPLATE_FUNCTIONS,
+  TEMPLATE_FUNCTIONS_WITH_ARGS,
   type AuthConfig,
   type Oauth2TokenResult,
   type BodyType,
@@ -188,11 +189,23 @@ class Workspace {
     return out;
   }
 
-  /** Variable names resolvable in the current scope, plus the dynamic {{$…}} generators. */
+  /** Variable names resolvable in the current scope, plus function-form generators. */
   get knownVars(): string[] {
-    return [...Object.keys(this.varInfo), ...Object.keys(DYNAMIC_VARS)].sort(
-      (a, b) => a.localeCompare(b)
-    );
+    return [
+      ...Object.keys(this.varInfo),
+      ...Object.keys(TEMPLATE_FUNCTIONS).map((name) => `${name}()`),
+      "rand.int(0,1000)",
+      "rand.float(0,1)",
+      "rand.string(12)",
+      "rand.hex(8)",
+      "rand.pick('a','b')",
+      "datetime.iso8601()",
+      "datetime.unix()",
+      "datetime.unixMs()",
+      "datetime.date()",
+      "datetime.time()",
+      "datetime.now()",
+    ].sort((a, b) => a.localeCompare(b));
   }
 
   /** The introspected schema for the active request's endpoint, or null before introspection
@@ -208,8 +221,19 @@ class Workspace {
     const out: Record<string, string> = {};
     for (const [k, info] of Object.entries(this.varInfo))
       out[k] = info.secret ? "🔒 secret" : info.value || "(empty)";
-    for (const [k, info] of Object.entries(DYNAMIC_VARS))
-      out[k] = `⚡ ${info.desc}`;
+    for (const [k, info] of Object.entries(TEMPLATE_FUNCTIONS))
+      out[`${k}()`] = `⚡ ${info.desc}`;
+    for (const [k, info] of Object.entries(TEMPLATE_FUNCTIONS_WITH_ARGS))
+      out[`${k}()`] = `⚡ ${info.desc}`;
+    out["rand.int(0,1000)"] =
+      `⚡ ${TEMPLATE_FUNCTIONS_WITH_ARGS["rand.int"].desc}`;
+    out["rand.float(0,1)"] =
+      `⚡ ${TEMPLATE_FUNCTIONS_WITH_ARGS["rand.float"].desc}`;
+    out["rand.string(12)"] =
+      `⚡ ${TEMPLATE_FUNCTIONS_WITH_ARGS["rand.string"].desc}`;
+    out["rand.hex(8)"] = `⚡ ${TEMPLATE_FUNCTIONS_WITH_ARGS["rand.hex"].desc}`;
+    out["rand.pick('a','b')"] =
+      `⚡ ${TEMPLATE_FUNCTIONS_WITH_ARGS["rand.pick"].desc}`;
     return out;
   }
 
