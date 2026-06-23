@@ -4,6 +4,25 @@ import type { AuthConfig } from "./auth.js";
 /** A flat name→value map. */
 export type VariableScope = Record<string, string>;
 
+type TemplateFunctionArgs = readonly string[];
+type ZeroArgTemplateFunction = {
+  gen: () => string;
+  desc: string;
+  args: TemplateFunctionArgs;
+};
+type TemplateFunctionWithArgs = {
+  apply: (args: FnArg[]) => string | undefined;
+  desc: string;
+  args: TemplateFunctionArgs;
+};
+
+export type TemplateFunctionCatalogEntry = {
+  name: string;
+  args: TemplateFunctionArgs;
+  signature: string;
+  desc: string;
+};
+
 // Matches both flat variable tokens (`{{var}}`, group 1) and namespaced
 // function-call tokens (`{{ns.fn(args)}}`). Group 1 is the name; group 2, when
 // present, is the raw argument source between the parentheses (empty for `()`).
@@ -147,41 +166,52 @@ export function migrateLegacyDynamicTokens<T>(input: T): {
  * (autocomplete/highlighting will consume the catalog). Every entry here is
  * zero-arg and called with empty `()`.
  */
-export const TEMPLATE_FUNCTIONS: Record<
-  string,
-  { gen: () => string; desc: string }
-> = {
-  "rand.uuid": { gen: uuid, desc: "random UUID v4" },
-  "rand.guid": { gen: uuid, desc: "random UUID v4 (alias)" },
+export const TEMPLATE_FUNCTIONS: Record<string, ZeroArgTemplateFunction> = {
+  "rand.uuid": { gen: uuid, desc: "random UUID v4", args: [] },
+  "rand.guid": { gen: uuid, desc: "random UUID v4 (alias)", args: [] },
   "rand.email": {
     gen: () =>
       `${pick(FIRST).toLowerCase()}.${pick(LAST).toLowerCase()}${randInt(1, 999)}@example.com`,
     desc: "random email",
+    args: [],
   },
   "rand.username": {
     gen: () =>
       `${pick(FIRST).toLowerCase()}${pick(LAST).toLowerCase()}${randInt(1, 999)}`,
     desc: "random username",
+    args: [],
   },
-  "rand.firstName": { gen: () => pick(FIRST), desc: "random first name" },
-  "rand.lastName": { gen: () => pick(LAST), desc: "random last name" },
+  "rand.firstName": {
+    gen: () => pick(FIRST),
+    desc: "random first name",
+    args: [],
+  },
+  "rand.lastName": {
+    gen: () => pick(LAST),
+    desc: "random last name",
+    args: [],
+  },
   "rand.fullName": {
     gen: () => `${pick(FIRST)} ${pick(LAST)}`,
     desc: "random full name",
+    args: [],
   },
-  "rand.word": { gen: () => pick(WORDS), desc: "random word" },
+  "rand.word": { gen: () => pick(WORDS), desc: "random word", args: [] },
   "rand.bool": {
     gen: () => (Math.random() < 0.5 ? "true" : "false"),
     desc: "true / false",
+    args: [],
   },
   "rand.ip": {
     gen: () =>
       `${randInt(1, 255)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 255)}`,
     desc: "random IPv4",
+    args: [],
   },
   "rand.hexColor": {
     gen: () => "#" + randInt(0, 0xffffff).toString(16).padStart(6, "0"),
     desc: "random hex colour",
+    args: [],
   },
 };
 
@@ -373,8 +403,9 @@ function nowWithOffset(offsetArg: FnArg | undefined): Date | undefined {
 const datetimeFn = (
   fmt: (d: Date) => string,
   desc: string
-): { apply: (args: FnArg[]) => string | undefined; desc: string } => ({
+): TemplateFunctionWithArgs => ({
   desc,
+  args: ["offset?"],
   apply: (args) => {
     if (args.length > 1) return undefined;
     const d = nowWithOffset(args[0]);
@@ -389,10 +420,11 @@ const datetimeFn = (
  */
 export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   string,
-  { apply: (args: FnArg[]) => string | undefined; desc: string }
+  TemplateFunctionWithArgs
 > = {
   "rand.int": {
     desc: "random integer in [min,max]",
+    args: ["min", "max"],
     apply: (args) => {
       if (args.length !== 2) return undefined;
       const [min, max] = args;
@@ -405,6 +437,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.float": {
     desc: "random float in [min,max)",
+    args: ["min", "max"],
     apply: (args) => {
       if (args.length !== 2) return undefined;
       const [min, max] = args;
@@ -415,6 +448,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.string": {
     desc: "random alphanumeric string of length len",
+    args: ["len"],
     apply: (args) => {
       if (args.length !== 1 || !isLen(args[0])) return undefined;
       return randString(args[0], ALPHANUM);
@@ -422,6 +456,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.hex": {
     desc: "random hex string of length len",
+    args: ["len"],
     apply: (args) => {
       if (args.length !== 1 || !isLen(args[0])) return undefined;
       return randString(args[0], HEX);
@@ -429,6 +464,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.pick": {
     desc: "random pick from the given literal arguments",
+    args: ["value", "...values"],
     apply: (args) => {
       if (args.length < 1) return undefined;
       return String(pick(args));
@@ -456,6 +492,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   ),
   "datetime.now": {
     desc: "current time in a custom format (format?, offset?)",
+    args: ["format?", "offset?"],
     apply: (args) => {
       if (args.length > 2) return undefined;
       const [fmt, offset] = args;
@@ -467,6 +504,21 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
     },
   },
 };
+
+export const TEMPLATE_FUNCTION_CATALOG: readonly TemplateFunctionCatalogEntry[] =
+  Object.freeze(
+    [
+      ...Object.entries(TEMPLATE_FUNCTIONS),
+      ...Object.entries(TEMPLATE_FUNCTIONS_WITH_ARGS),
+    ]
+      .map(([name, fn]) => ({
+        name,
+        args: fn.args,
+        signature: `${name}(${fn.args.join(", ")})`,
+        desc: fn.desc,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  );
 
 /**
  * Resolve a `{{ns.fn(source)}}` call. `source` is the raw text between the
