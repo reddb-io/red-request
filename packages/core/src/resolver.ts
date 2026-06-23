@@ -4,6 +4,25 @@ import type { AuthConfig } from "./auth.js";
 /** A flat name→value map. */
 export type VariableScope = Record<string, string>;
 
+type TemplateFunctionArgs = readonly string[];
+type ZeroArgTemplateFunction = {
+  gen: () => string;
+  desc: string;
+  args: TemplateFunctionArgs;
+};
+type TemplateFunctionWithArgs = {
+  apply: (args: FnArg[]) => string | undefined;
+  desc: string;
+  args: TemplateFunctionArgs;
+};
+
+export type TemplateFunctionCatalogEntry = {
+  name: string;
+  args: TemplateFunctionArgs;
+  signature: string;
+  desc: string;
+};
+
 // Matches both flat variable tokens (`{{var}}`, group 1) and namespaced
 // function-call tokens (`{{ns.fn(args)}}`). Group 1 is the name; group 2, when
 // present, is the raw argument source between the parentheses (empty for `()`).
@@ -13,10 +32,6 @@ export type VariableScope = Record<string, string>;
 const PLACEHOLDER = /\{\{\s*([\w.$-]+)\s*(?:\(([^}]*)\))?\s*\}\}/g;
 const MAX_PASSES = 5;
 
-// ---------------------------------------------------------------------------
-// Dynamic variables — Postman-style `{{$name}}` tokens generated fresh on each
-// resolve (not stored in any scope). Each occurrence is independent.
-// ---------------------------------------------------------------------------
 const randInt = (min: number, max: number) =>
   Math.floor(Math.random() * (max - min + 1)) + min;
 const pick = <T>(a: readonly T[]): T =>
@@ -67,50 +82,76 @@ function uuid(): string {
   });
 }
 
-/** name → (generator, human description). Exposed for autocomplete/highlighting. */
-export const DYNAMIC_VARS: Record<string, { gen: () => string; desc: string }> =
-  {
-    $uuid: { gen: uuid, desc: "random UUID v4" },
-    $guid: { gen: uuid, desc: "random UUID v4 (alias)" },
-    $timestamp: {
-      gen: () => String(Math.floor(Date.now() / 1000)),
-      desc: "unix time (seconds)",
-    },
-    $isoTimestamp: {
-      gen: () => new Date().toISOString(),
-      desc: "ISO-8601 datetime",
-    },
-    $randomInt: { gen: () => String(randInt(0, 1000)), desc: "integer 0–1000" },
-    $randomEmail: {
-      gen: () =>
-        `${pick(FIRST).toLowerCase()}.${pick(LAST).toLowerCase()}${randInt(1, 999)}@example.com`,
-      desc: "random email",
-    },
-    $randomFirstName: { gen: () => pick(FIRST), desc: "random first name" },
-    $randomLastName: { gen: () => pick(LAST), desc: "random last name" },
-    $randomFullName: {
-      gen: () => `${pick(FIRST)} ${pick(LAST)}`,
-      desc: "random full name",
-    },
-    $randomWord: { gen: () => pick(WORDS), desc: "random word" },
-    $randomBoolean: {
-      gen: () => (Math.random() < 0.5 ? "true" : "false"),
-      desc: "true / false",
-    },
-    $randomIP: {
-      gen: () =>
-        `${randInt(1, 255)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 255)}`,
-      desc: "random IPv4",
-    },
-    $randomHexColor: {
-      gen: () => "#" + randInt(0, 0xffffff).toString(16).padStart(6, "0"),
-      desc: "random hex colour",
-    },
+/**
+ * Legacy Postman-style `{{$...}}` dynamic tokens are rewritten on load before
+ * resolution. Keep this table explicit so migrations, tests, and warnings stay
+ * aligned as the function catalog evolves.
+ */
+export const LEGACY_DYNAMIC_TOKEN_REWRITES = {
+  $uuid: "rand.uuid()",
+  $guid: "rand.uuid()",
+  $randomEmail: "rand.email()",
+  $randomFirstName: "rand.firstName()",
+  $randomLastName: "rand.lastName()",
+  $randomFullName: "rand.fullName()",
+  $randomWord: "rand.word()",
+  $randomBoolean: "rand.bool()",
+  $randomIP: "rand.ip()",
+  $randomHexColor: "rand.hexColor()",
+  $randomInt: "rand.int(0,1000)",
+  $timestamp: "datetime.unix()",
+  $isoTimestamp: "datetime.iso8601()",
+} as const;
+
+export type LegacyDynamicToken = keyof typeof LEGACY_DYNAMIC_TOKEN_REWRITES;
+
+export interface LegacyDynamicTokenWarning {
+  token: LegacyDynamicToken;
+  replacement: (typeof LEGACY_DYNAMIC_TOKEN_REWRITES)[LegacyDynamicToken];
+}
+
+const LEGACY_DYNAMIC_PLACEHOLDER = /\{\{\s*(\$[\w-]+)\s*\}\}/g;
+
+function isLegacyDynamicToken(name: string): name is LegacyDynamicToken {
+  return Object.prototype.hasOwnProperty.call(
+    LEGACY_DYNAMIC_TOKEN_REWRITES,
+    name
+  );
+}
+
+/**
+ * Rewrite legacy dynamic tokens anywhere inside JSON-like collection/request
+ * data. Unknown `$` placeholders are left untouched so they resolve like any
+ * other unknown variable.
+ */
+export function migrateLegacyDynamicTokens<T>(input: T): {
+  value: T;
+  warnings: LegacyDynamicTokenWarning[];
+} {
+  const warnings: LegacyDynamicTokenWarning[] = [];
+
+  const visit = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      return value.replace(
+        LEGACY_DYNAMIC_PLACEHOLDER,
+        (match, token: string) => {
+          if (!isLegacyDynamicToken(token)) return match;
+          const replacement = LEGACY_DYNAMIC_TOKEN_REWRITES[token];
+          warnings.push({ token, replacement });
+          return `{{${replacement}}}`;
+        }
+      );
+    }
+    if (Array.isArray(value)) return value.map(visit);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, child]) => [key, visit(child)])
+      );
+    }
+    return value;
   };
 
-/** Resolve a `{{$name}}` dynamic token, or undefined if it isn't one. */
-export function resolveDynamic(name: string): string | undefined {
-  return DYNAMIC_VARS[name]?.gen();
+  return { value: visit(input) as T, warnings };
 }
 
 // ---------------------------------------------------------------------------
@@ -125,41 +166,52 @@ export function resolveDynamic(name: string): string | undefined {
  * (autocomplete/highlighting will consume the catalog). Every entry here is
  * zero-arg and called with empty `()`.
  */
-export const TEMPLATE_FUNCTIONS: Record<
-  string,
-  { gen: () => string; desc: string }
-> = {
-  "rand.uuid": { gen: uuid, desc: "random UUID v4" },
-  "rand.guid": { gen: uuid, desc: "random UUID v4 (alias)" },
+export const TEMPLATE_FUNCTIONS: Record<string, ZeroArgTemplateFunction> = {
+  "rand.uuid": { gen: uuid, desc: "random UUID v4", args: [] },
+  "rand.guid": { gen: uuid, desc: "random UUID v4 (alias)", args: [] },
   "rand.email": {
     gen: () =>
       `${pick(FIRST).toLowerCase()}.${pick(LAST).toLowerCase()}${randInt(1, 999)}@example.com`,
     desc: "random email",
+    args: [],
   },
   "rand.username": {
     gen: () =>
       `${pick(FIRST).toLowerCase()}${pick(LAST).toLowerCase()}${randInt(1, 999)}`,
     desc: "random username",
+    args: [],
   },
-  "rand.firstName": { gen: () => pick(FIRST), desc: "random first name" },
-  "rand.lastName": { gen: () => pick(LAST), desc: "random last name" },
+  "rand.firstName": {
+    gen: () => pick(FIRST),
+    desc: "random first name",
+    args: [],
+  },
+  "rand.lastName": {
+    gen: () => pick(LAST),
+    desc: "random last name",
+    args: [],
+  },
   "rand.fullName": {
     gen: () => `${pick(FIRST)} ${pick(LAST)}`,
     desc: "random full name",
+    args: [],
   },
-  "rand.word": { gen: () => pick(WORDS), desc: "random word" },
+  "rand.word": { gen: () => pick(WORDS), desc: "random word", args: [] },
   "rand.bool": {
     gen: () => (Math.random() < 0.5 ? "true" : "false"),
     desc: "true / false",
+    args: [],
   },
   "rand.ip": {
     gen: () =>
       `${randInt(1, 255)}.${randInt(0, 255)}.${randInt(0, 255)}.${randInt(1, 255)}`,
     desc: "random IPv4",
+    args: [],
   },
   "rand.hexColor": {
     gen: () => "#" + randInt(0, 0xffffff).toString(16).padStart(6, "0"),
     desc: "random hex colour",
+    args: [],
   },
 };
 
@@ -351,8 +403,9 @@ function nowWithOffset(offsetArg: FnArg | undefined): Date | undefined {
 const datetimeFn = (
   fmt: (d: Date) => string,
   desc: string
-): { apply: (args: FnArg[]) => string | undefined; desc: string } => ({
+): TemplateFunctionWithArgs => ({
   desc,
+  args: ["offset?"],
   apply: (args) => {
     if (args.length > 1) return undefined;
     const d = nowWithOffset(args[0]);
@@ -367,10 +420,11 @@ const datetimeFn = (
  */
 export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   string,
-  { apply: (args: FnArg[]) => string | undefined; desc: string }
+  TemplateFunctionWithArgs
 > = {
   "rand.int": {
     desc: "random integer in [min,max]",
+    args: ["min", "max"],
     apply: (args) => {
       if (args.length !== 2) return undefined;
       const [min, max] = args;
@@ -383,6 +437,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.float": {
     desc: "random float in [min,max)",
+    args: ["min", "max"],
     apply: (args) => {
       if (args.length !== 2) return undefined;
       const [min, max] = args;
@@ -393,6 +448,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.string": {
     desc: "random alphanumeric string of length len",
+    args: ["len"],
     apply: (args) => {
       if (args.length !== 1 || !isLen(args[0])) return undefined;
       return randString(args[0], ALPHANUM);
@@ -400,6 +456,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.hex": {
     desc: "random hex string of length len",
+    args: ["len"],
     apply: (args) => {
       if (args.length !== 1 || !isLen(args[0])) return undefined;
       return randString(args[0], HEX);
@@ -407,6 +464,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   },
   "rand.pick": {
     desc: "random pick from the given literal arguments",
+    args: ["value", "...values"],
     apply: (args) => {
       if (args.length < 1) return undefined;
       return String(pick(args));
@@ -434,6 +492,7 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
   ),
   "datetime.now": {
     desc: "current time in a custom format (format?, offset?)",
+    args: ["format?", "offset?"],
     apply: (args) => {
       if (args.length > 2) return undefined;
       const [fmt, offset] = args;
@@ -445,6 +504,21 @@ export const TEMPLATE_FUNCTIONS_WITH_ARGS: Record<
     },
   },
 };
+
+export const TEMPLATE_FUNCTION_CATALOG: readonly TemplateFunctionCatalogEntry[] =
+  Object.freeze(
+    [
+      ...Object.entries(TEMPLATE_FUNCTIONS),
+      ...Object.entries(TEMPLATE_FUNCTIONS_WITH_ARGS),
+    ]
+      .map(([name, fn]) => ({
+        name,
+        args: fn.args,
+        signature: `${name}(${fn.args.join(", ")})`,
+        desc: fn.desc,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  );
 
 /**
  * Resolve a `{{ns.fn(source)}}` call. `source` is the raw text between the
@@ -516,11 +590,6 @@ export function resolveTemplate(
         if (Object.prototype.hasOwnProperty.call(lookup, name)) {
           changed = true;
           return lookup[name] ?? "";
-        }
-        const dyn = resolveDynamic(name);
-        if (dyn !== undefined) {
-          changed = true;
-          return dyn;
         }
         return match;
       }
