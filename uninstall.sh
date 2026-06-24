@@ -19,25 +19,30 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/red-request"
 DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 
 removed=0
+SUDO=""; [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1 && SUDO="sudo"
 rm_path() { [[ -e "$1" || -L "$1" ]] && rm -rf "$1" && { echo "✓ removed $1"; removed=1; }; return 0; }
 
 # The `rr` shortcut — only if it points at our binary (don't clobber an unrelated `rr`).
-# Match both forms install.sh creates: the AppImage's relative `red-request` and the
-# absolute `/usr/bin/red-request` the .deb path re-points it to via clear_appimage_shadow.
-if [[ -L "$INSTALL_DIR/$SHORTCUT" ]]; then
-  rr_tgt="$(readlink "$INSTALL_DIR/$SHORTCUT")"
-  if [[ "$rr_tgt" == "$BIN_NAME" || "${rr_tgt##*/}" == "$BIN_NAME" ]]; then
-    rm_path "$INSTALL_DIR/$SHORTCUT"
+# install.sh creates it in ~/.local/bin (AppImage) or /usr/local/bin (.deb); the target is
+# the AppImage's relative `red-request` or the absolute `/usr/bin/red-request` (.deb).
+for sc in "$INSTALL_DIR/$SHORTCUT" "/usr/local/bin/$SHORTCUT"; do
+  [[ -L "$sc" ]] || continue
+  rr_tgt="$(readlink "$sc")"
+  [[ "$rr_tgt" == "$BIN_NAME" || "${rr_tgt##*/}" == "$BIN_NAME" ]] || continue
+  if [[ "$sc" == /usr/local/* ]]; then
+    $SUDO rm -f "$sc" && { echo "✓ removed $sc"; removed=1; }
+  else
+    rm_path "$sc"
   fi
-fi
+done
 rm_path "$INSTALL_DIR/$BIN_NAME"
 rm_path "$INSTALL_DIR/$BIN_NAME.new"     # stray temp from an interrupted upgrade
 rm_path "$DATA_DIR"
 rm_path "$DESKTOP_DIR/red-request.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
 
-# Strip the PATH block install.sh appended, from whichever rc has it.
-for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
+# Strip the PATH block install.sh appended, from whichever rc has it (incl. fish).
+for rc in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile" "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"; do
   [[ -f "$rc" ]] || continue
   if grep -q '# >>> red-request >>>' "$rc"; then
     tmp="$(mktemp)"
@@ -51,8 +56,7 @@ done
 # deps (libwebkit2gtk-4.1-0, libgtk-3-0, …) other apps may rely on. We only remove
 # the red-request package itself; its dependencies stay installed.
 if command -v dpkg >/dev/null 2>&1 && dpkg -s "$BIN_NAME" >/dev/null 2>&1; then
-  sudo=""; [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
-  if $sudo apt-get purge -y "$BIN_NAME"; then echo "✓ removed apt package $BIN_NAME"; removed=1; fi
+  if $SUDO apt-get purge -y "$BIN_NAME"; then echo "✓ removed apt package $BIN_NAME"; removed=1; fi
 fi
 
 if [[ "$removed" == "1" ]]; then

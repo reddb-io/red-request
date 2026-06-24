@@ -1702,6 +1702,17 @@ fn app_log(level: String, message: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Headless `--version` / `-V`: print and exit BEFORE building the GUI, so installers and
+    // users can verify the binary without a window opening. resolve_db_target() ignores args
+    // starting with `-`, so without this the flag would be silently dropped and the app would
+    // launch normally instead.
+    if std::env::args()
+        .skip(1)
+        .any(|a| a == "--version" || a == "-V")
+    {
+        println!("red-request {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
