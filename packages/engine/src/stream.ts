@@ -23,12 +23,22 @@ interface GqlState {
   } | null;
 }
 
+interface PhxState {
+  // Monotonic message ref (the Phoenix `ref`, incremented per outbound frame).
+  ref: number;
+  // topic -> join_ref assigned when that channel was joined.
+  joinRefs: Map<string, string>;
+  // Periodic keepalive; cleared on close. Capped by a beat deadline.
+  heartbeat?: ReturnType<typeof setInterval>;
+}
+
 interface ConnState {
   ws: any;
   frameCount: number;
   // null until the first wsSend; incoming frames before any send are unsolicited
   lastFrameId: string | null;
   gql?: GqlState;
+  phx?: PhxState;
 }
 const conns = new Map<string, ConnState>();
 
@@ -88,7 +98,9 @@ export function wsSend(
 }
 
 export function wsClose(id: string): { ok: boolean } {
-  conns.get(id)?.ws?.close?.();
+  const state = conns.get(id);
+  if (state?.phx?.heartbeat) clearInterval(state.phx.heartbeat);
+  state?.ws?.close?.();
   conns.delete(id);
   return { ok: true };
 }
@@ -199,6 +211,174 @@ export function gqlWsClose(id: string): { ok: boolean } {
   state?.ws?.close?.();
   conns.delete(id);
   return { ok: true };
+}
+
+// --- Phoenix Channels (topic-based rooms over a live ws connection) --------
+// Wire format: every frame is a JSON array `[join_ref, ref, topic, event, payload]`.
+// The connection is opened with `wsOpen`; `phxJoin`/`phxLeave` then add/remove
+// rooms on it and tag every inbound frame with its `room` (the topic) so the UI
+// can show which room a message belongs to.
+
+const PHX_HEARTBEAT_MS = 30_000;
+// Deadline on the keepalive loop: stop after this many beats so a forgotten
+// connection can't drive an unbounded timer.
+const PHX_HEARTBEAT_MAX_BEATS = 20;
+
+// Installs the Phoenix-aware inbound handler (and a capped heartbeat) once per
+// connection. Inbound frames are parsed as `[join_ref, ref, topic, event, payload]`
+// and re-emitted tagged with `room: topic`.
+function phxInstall(id: string, state: ConnState): PhxState {
+  if (state.phx) return state.phx;
+  const phx: PhxState = { ref: 0, joinRefs: new Map() };
+  state.phx = phx;
+  const ws = state.ws;
+
+  ws.onmessage = (e: any) => {
+    const raw =
+      typeof e.data === "string"
+        ? e.data
+        : Buffer.from(e.data).toString("utf8");
+
+    let frame: any;
+    try {
+      frame = JSON.parse(raw);
+    } catch {
+      emit(id, "message", { dir: "in", data: raw });
+      return;
+    }
+    if (!Array.isArray(frame)) {
+      emit(id, "message", { dir: "in", data: raw });
+      return;
+    }
+
+    const [, , topic, event, payload] = frame;
+    const data: Record<string, unknown> = {
+      dir: "in",
+      room: topic,
+      event,
+      data: raw,
+    };
+    // phx_reply carries the join/leave/push outcome — surface ok/error.
+    if (event === "phx_reply" && payload && typeof payload === "object") {
+      data.status = (payload as any).status;
+      data.response = (payload as any).response;
+    }
+    emit(id, "message", data);
+  };
+
+  // Wrap the existing onclose so the heartbeat is always torn down.
+  const prevOnClose = ws.onclose;
+  ws.onclose = (ev: any) => {
+    if (phx.heartbeat) clearInterval(phx.heartbeat);
+    prevOnClose?.(ev);
+  };
+
+  let beats = 0;
+  phx.heartbeat = setInterval(() => {
+    if (ws.readyState !== 1 || beats >= PHX_HEARTBEAT_MAX_BEATS) {
+      if (phx.heartbeat) clearInterval(phx.heartbeat);
+      return;
+    }
+    beats++;
+    const ref = String(++phx.ref);
+    const hb = JSON.stringify([null, ref, "phoenix", "heartbeat", {}]);
+    try {
+      ws.send(hb);
+      emit(id, "message", {
+        dir: "out",
+        room: "phoenix",
+        event: "heartbeat",
+        data: hb,
+        status: "sent",
+      });
+    } catch {
+      if (phx.heartbeat) clearInterval(phx.heartbeat);
+    }
+  }, PHX_HEARTBEAT_MS);
+
+  return phx;
+}
+
+export function phxJoin(
+  id: string,
+  topic: string
+): { ok: boolean; error?: string } {
+  const state = conns.get(id);
+  if (!state || state.ws.readyState !== 1) {
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_join",
+      status: "error",
+    });
+    return { ok: false, error: "not connected" };
+  }
+  const phx = phxInstall(id, state);
+  const ref = String(++phx.ref);
+  // join_ref is fixed for the channel's lifetime; reuse this ref for it.
+  phx.joinRefs.set(topic, ref);
+  const frame = JSON.stringify([ref, ref, topic, "phx_join", {}]);
+  try {
+    state.ws.send(frame);
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_join",
+      data: frame,
+      status: "sent",
+    });
+    return { ok: true };
+  } catch (e: any) {
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_join",
+      data: frame,
+      status: "error",
+    });
+    return { ok: false, error: e?.message ?? "join failed" };
+  }
+}
+
+export function phxLeave(
+  id: string,
+  topic: string
+): { ok: boolean; error?: string } {
+  const state = conns.get(id);
+  if (!state || state.ws.readyState !== 1) {
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_leave",
+      status: "error",
+    });
+    return { ok: false, error: "not connected" };
+  }
+  const phx = phxInstall(id, state);
+  const joinRef = phx.joinRefs.get(topic) ?? null;
+  const ref = String(++phx.ref);
+  phx.joinRefs.delete(topic);
+  const frame = JSON.stringify([joinRef, ref, topic, "phx_leave", {}]);
+  try {
+    state.ws.send(frame);
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_leave",
+      data: frame,
+      status: "sent",
+    });
+    return { ok: true };
+  } catch (e: any) {
+    emit(id, "message", {
+      dir: "out",
+      room: topic,
+      event: "phx_leave",
+      data: frame,
+      status: "error",
+    });
+    return { ok: false, error: e?.message ?? "leave failed" };
+  }
 }
 
 // --- server-sent events (kind === "sse") ----------------------------------
