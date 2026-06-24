@@ -12,6 +12,7 @@
     "test": "echo \"(ui: no unit tests yet)\" && exit 0"
   },
   "dependencies": {
+    "@fontsource-variable/fira-code": "^5.2.7",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
     "@tauri-apps/plugin-http": "^2.5.9",
