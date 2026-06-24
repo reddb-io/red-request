@@ -240,6 +240,8 @@ class Workspace {
    *  the selector→workspace cut is never visible. Phase durations below must stay in
    *  sync with ProjectTransition.svelte's CSS transitions. */
   async chooseProject(dir: string | null): Promise<void> {
+    // Persist any pending edit on the CURRENT project before we swap reddb.
+    await this.flushSave();
     // A hair longer than the matching CSS transitions so each extreme is reached.
     const CLOSE_MS = 400; // circle shrinks to black  (CSS: 340ms close)
     const HOLD_MS = 130; // minimum fully-black beat
@@ -1094,6 +1096,30 @@ class Workspace {
       const idx = col.requests.findIndex((r) => r.id === snap.id);
       if (idx >= 0) col.requests[idx] = snap;
       else col.requests.push(snap);
+    }
+  }
+
+  /** Pending debounced autosave timer for the active request. */
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Debounced autosave: persist the active request shortly after the last edit,
+   *  so URL / params / headers / body changes survive a reload or project switch
+   *  even without an explicit Ctrl-S. Driven by an effect in +page.svelte. */
+  scheduleSave(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      void this.save();
+    }, 500);
+  }
+
+  /** Flush a pending autosave immediately — call before switching project or
+   *  closing, so an in-flight edit isn't dropped when the sidecar is swapped. */
+  async flushSave(): Promise<void> {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      await this.save();
     }
   }
 

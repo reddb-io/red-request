@@ -25,6 +25,30 @@
     void ws.init();
   });
 
+  // Autosave: persist the active request a short beat after the user stops
+  // editing (URL, params, headers, body, auth…), so edits survive a reload or
+  // project switch even without an explicit Ctrl-S. Selecting a different
+  // request only resets the baseline — it never triggers a save.
+  let lastReqId: string | null = null;
+  let lastReqSnap = "";
+  $effect(() => {
+    const req = ws.activeReq;
+    if (!req || !ws.activeColId) {
+      lastReqId = null;
+      lastReqSnap = "";
+      return;
+    }
+    const snap = JSON.stringify($state.snapshot(req)); // deep-tracks every field
+    if (req.id !== lastReqId) {
+      lastReqId = req.id;
+      lastReqSnap = snap;
+      return;
+    }
+    if (snap === lastReqSnap) return;
+    lastReqSnap = snap;
+    ws.scheduleSave();
+  });
+
   function reportLazyLoadFailure(label: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     lazyLoadError = `Could not load ${label}.`;

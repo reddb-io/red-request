@@ -780,10 +780,11 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
         project_dir.as_deref().unwrap_or("global")
     );
     let _guard = st.spawn_lock.lock().await;
-    if let Ok(mut c) = st.child.lock() {
-        if let Some(child) = c.take() {
-            let _ = child.kill();
-        }
+    // Take the child OUT of the lock first, then stop it gracefully outside the lock
+    // (SIGTERM → checkpoint the collection contracts; SIGKILL would lose the KV model).
+    let old_child = st.child.lock().ok().and_then(|mut c| c.take());
+    if let Some(child) = old_child {
+        graceful_kill_reddb(child);
     }
     // Drop the RQL connection — it points at the server we're replacing; the next
     // query respawns it against the new project's gRPC port.
@@ -827,11 +828,11 @@ async fn reset_incompatible_db(app: tauri::AppHandle) -> Result<(), String> {
     let db = app.state::<EmbeddedDb>();
     let db_path = std::path::PathBuf::from(db.db_path.lock().map_err(|e| e.to_string())?.clone());
     let _guard = db.spawn_lock.lock().await;
-    // Tear down the live sidecar + RQL session so the files are released.
-    if let Ok(mut c) = db.child.lock() {
-        if let Some(child) = c.take() {
-            let _ = child.kill();
-        }
+    // Tear down the live sidecar + RQL session so the files are released. Graceful
+    // SIGTERM so reddb checkpoints the contracts before we move its files.
+    let old_child = db.child.lock().ok().and_then(|mut c| c.take());
+    if let Some(child) = old_child {
+        graceful_kill_reddb(child);
     }
     if let Some(sess) = db.rql.lock().await.take() {
         let _ = sess.child.kill();
@@ -1647,10 +1648,11 @@ fn reap_sidecars(app: &tauri::AppHandle) {
         }
     }
     if let Some(db) = app.try_state::<EmbeddedDb>() {
-        if let Ok(mut guard) = db.child.lock() {
-            if let Some(child) = guard.take() {
-                let _ = child.kill();
-            }
+        // Graceful SIGTERM so reddb checkpoints the collection contracts on exit —
+        // a plain SIGKILL here loses the KV model and the next launch heals (wipes).
+        let reddb_child = db.child.lock().ok().and_then(|mut g| g.take());
+        if let Some(child) = reddb_child {
+            graceful_kill_reddb(child);
         }
         // Best-effort reap of the long-lived `red connect` REPL.
         if let Ok(mut guard) = db.rql.try_lock() {
@@ -1659,6 +1661,28 @@ fn reap_sidecars(app: &tauri::AppHandle) {
             }
         }
     }
+}
+
+/// Stop a reddb sidecar gracefully: SIGTERM so it checkpoints + flushes the
+/// collection contracts (declared_model) before exiting, wait briefly for it to
+/// exit, then hard-kill as a backstop. A plain CommandChild::kill() is SIGKILL —
+/// reddb never checkpoints, the KV model never reaches disk, and the next open
+/// fails "model mismatch: expected kv, got table" (which the heal then wipes).
+fn graceful_kill_reddb(child: CommandChild) {
+    #[cfg(unix)]
+    {
+        let pid = nix::unistd::Pid::from_raw(child.pid() as i32);
+        if nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM).is_ok() {
+            // reddb's graceful shutdown is tens of ms; poll up to ~3s for it to exit.
+            for _ in 0..60 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                if nix::sys::signal::kill(pid, None).is_err() {
+                    return; // exited cleanly — contracts checkpointed
+                }
+            }
+        }
+    }
+    let _ = child.kill(); // non-unix, or backstop if SIGTERM didn't take
 }
 
 /// Bridge for the webview to funnel its logs into the same sink as the backend
