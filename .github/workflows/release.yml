@@ -44,7 +44,10 @@ jobs:
           node-version: "22"
 
       - name: Check RedDB sidecar release assets
-        run: node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
+        # Linux-only for now: RedDB publishes only the linux sidecar (red-linux-x86_64).
+        # Re-add x86_64-pc-windows-msvc here (and the windows matrix leg below) once reddb
+        # ships red-windows-x86_64.exe.
+        run: node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -65,18 +68,10 @@ jobs:
               label: linux-x86_64,
               args: "--bundles deb,appimage",
             }
-          - {
-              os: blacksmith-6vcpu-macos-15,
-              target: aarch64-apple-darwin,
-              label: macos-arm64,
-              args: "",
-            }
-          - {
-              os: blacksmith-8vcpu-windows-2025,
-              target: x86_64-pc-windows-msvc,
-              label: windows-x86_64,
-              args: "",
-            }
+          # macOS (build-from-source) and Windows (reddb:fetch) legs are temporarily
+          # dropped: reddb publishes only the linux sidecar, so the windows leg fails
+          # preflight and blocks the whole publish. Restore both legs once reddb ships
+          # red-windows-x86_64.exe (and a darwin binary, to swap macOS off the source build).
     steps:
       - uses: actions/checkout@v7
         with:
@@ -184,8 +179,7 @@ jobs:
             `checksums.txt`, and drops `red-request` (+ an `rr` shortcut) on your PATH. Prefer apt?
             Grab the `.deb`.
 
-            **macOS** — open `red-request-darwin-aarch64.dmg` (Apple Silicon). First launch: right-click → Open.
-            **Windows** — run `red-request-windows-x86_64-setup.exe`, then "More info → Run anyway".
+            _macOS and Windows builds are paused while the RedDB sidecar ships Linux-only; they'll return in a later release._
 
             Every asset's sha256 is in `checksums.txt`. Unsigned builds for now.
           releaseDraft: false
