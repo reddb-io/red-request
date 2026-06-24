@@ -6,7 +6,7 @@ on:
       reddb_version:
         description: "Pinned RedDB release tag to smoke-package with"
         required: true
-        default: "v1.11.0"
+        default: "v1.13.1"
 
 permissions:
   contents: read

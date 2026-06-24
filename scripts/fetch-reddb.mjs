@@ -41,7 +41,13 @@ function hostTriple() {
   return `${a}-unknown-linux-gnu`;
 }
 
-function assetName(triple) {
+// Candidate asset names for this triple, in preference order. Linux x86_64/aarch64 ship a
+// fully *static* (musl) `red` as `<asset>-static`; prefer it. The dynamic `red-linux-<arch>`
+// links the build host's glibc, so it fails to start on any host with an older glibc
+// ("GLIBC_2.xx not found") — which black-screens the desktop app (the reddb sidecar
+// crash-loops, the UI waits on it forever). The static build runs on any glibc. Fall back to
+// the glibc asset for older reddb releases that predate the static one. Mirrors install.sh.
+function assetCandidates(triple) {
   const [arch] = triple.split("-");
   const os = triple.includes("linux")
     ? "linux"
@@ -52,7 +58,11 @@ function assetName(triple) {
         : null;
   if (!os) throw new Error(`Unsupported target triple: ${triple}`);
   const ext = os === "windows" ? ".exe" : "";
-  return { name: `red-${os}-${arch}${ext}`, ext, os };
+  const glibc = `red-${os}-${arch}${ext}`;
+  // The static variant is published only for the linux x86_64 / aarch64 sidecars.
+  const preferStatic = os === "linux" && (arch === "x86_64" || arch === "aarch64");
+  const names = preferStatic ? [`red-${os}-${arch}-static`, glibc] : [glibc];
+  return { names, ext, os };
 }
 
 async function ghJson(url) {
@@ -74,7 +84,7 @@ async function download(url) {
 }
 
 const triple = hostTriple();
-const { name, ext, os } = assetName(triple);
+const { names, ext, os } = assetCandidates(triple);
 
 const tag =
   process.env.REDDB_VERSION ||
@@ -83,8 +93,27 @@ const tag =
 if (!tag) throw new Error("could not determine a reddb release tag");
 
 const base = `https://github.com/${REPO}/releases/download/${tag}`;
-console.log(`Fetching RedDB ${name} from ${REPO}@${tag} …`);
-const bin = await download(`${base}/${name}`);
+
+// Download the first candidate that exists. Fall back to the next ONLY on a 404 (asset not
+// published in this release) — a real network/auth error still propagates instead of being
+// masked by a fallback that would also fail.
+let name, bin;
+for (let i = 0; i < names.length; i++) {
+  const candidate = names[i];
+  console.log(`Fetching RedDB ${candidate} from ${REPO}@${tag} …`);
+  try {
+    bin = await download(`${base}/${candidate}`);
+    name = candidate;
+    break;
+  } catch (e) {
+    const last = i === names.length - 1;
+    if (String(e).includes("→ 404") && !last) {
+      console.log(`  (${candidate} not published in ${tag} — trying ${names[i + 1]})`);
+      continue;
+    }
+    throw e;
+  }
+}
 
 // Verify the published .sha256 sidecar when present (best-effort). Pull the hash out by
 // regex so we don't care about the format: `<hash>  file` (sha256sum), `SHA256(file)= <hash>`
