@@ -959,11 +959,12 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
 /// on one .rdb corrupt the B-tree, so the newest launch wins. Linux-only (scans
 /// /proc); a no-op elsewhere.
 #[cfg(target_os = "linux")]
-fn kill_stale_reddb(db_path: &std::path::Path) {
+fn stale_reddb_pids(db_path: &std::path::Path) -> Vec<u32> {
     let me = std::process::id();
     let want = db_path.to_string_lossy();
+    let mut pids = Vec::new();
     let Ok(entries) = std::fs::read_dir("/proc") else {
-        return;
+        return pids;
     };
     for entry in entries.flatten() {
         let Some(pid) = entry
@@ -991,19 +992,51 @@ fn kill_stale_reddb(db_path: &std::path::Path) {
             && args.iter().any(|a| a == "server");
         let on_this_db = args.windows(2).any(|w| w[0] == "--path" && w[1] == *want);
         if is_red_server && on_this_db {
-            log::warn!(
-                target: "reddb",
-                "single-writer guard: killing stale red server pid {pid} on {want}"
-            );
-            let _ = std::process::Command::new("kill")
-                .args(["-9", &pid.to_string()])
-                .status();
+            pids.push(pid);
         }
     }
+    pids
+}
+
+#[cfg(target_os = "linux")]
+fn kill_stale_reddb(db_path: &std::path::Path) {
+    for pid in stale_reddb_pids(db_path) {
+        log::warn!(
+            target: "reddb",
+            "single-writer guard: killing stale red server pid {pid} on {}",
+            db_path.to_string_lossy()
+        );
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status();
+    }
+}
+
+/// Wait until no `red server` holds `db_path` — the kill above is async to the OS, and the
+/// dying process keeps the file lock until it's fully reaped. Spawning before then makes reddb
+/// report the db as unopenable, which used to trigger a DESTRUCTIVE "incompatible" backup of a
+/// perfectly good store (the data-loss-on-upgrade bug). Bounded so a wedged process can't hang
+/// startup. No-op off Linux (we can't enumerate processes there).
+#[cfg(target_os = "linux")]
+async fn wait_for_no_stale(db_path: &std::path::Path) {
+    for _ in 0..40 {
+        if stale_reddb_pids(db_path).is_empty() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    }
+    log::warn!(
+        target: "reddb",
+        "stale red server still holding {} after wait — proceeding anyway",
+        db_path.to_string_lossy()
+    );
 }
 
 #[cfg(not(target_os = "linux"))]
 fn kill_stale_reddb(_db_path: &std::path::Path) {}
+
+#[cfg(not(target_os = "linux"))]
+async fn wait_for_no_stale(_db_path: &std::path::Path) {}
 
 /// Spawn one reddb sidecar for `db_path` and wait until it answers /stats.
 /// On readiness failure the child is killed (so a failed start can't orphan a process).
@@ -1012,8 +1045,11 @@ async fn spawn_reddb_once(
     db_path: &std::path::Path,
 ) -> Result<(String, String, CommandChild), String> {
     let started = Instant::now();
-    // Single-writer guard: clear any stale/concurrent server on this exact db first.
+    // Single-writer guard: clear any stale/concurrent server on this exact db first, then wait
+    // for it to actually exit so the file lock is released before we open (avoids a false
+    // "unopenable" that used to nuke the store on upgrade).
     kill_stale_reddb(db_path);
+    wait_for_no_stale(db_path).await;
     let free_port = || {
         std::net::TcpListener::bind("127.0.0.1:0")
             .and_then(|l| l.local_addr())
@@ -1114,6 +1150,73 @@ async fn spawn_reddb_once(
     Ok((bind, grpc, child))
 }
 
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Bring back data a prior (buggy) boot wrongly filed away. The old startup path renamed a
+/// store it failed to open to `<name>.incompatible-<ts>.bak` and started fresh — but that
+/// failure was almost always a stale `red` holding the file lock during an upgrade, not real
+/// corruption. On boot, if such a backup exists and holds MORE than the current (fresh/empty)
+/// store, restore the largest one. Nothing is deleted: the current file is moved aside first.
+/// The backup is consumed (renamed onto db_path) and last-resort backups now use a different
+/// suffix (`.corrupt-`), so this can't loop.
+fn recover_incompatible_backup(db_path: &std::path::Path) {
+    let Some(dir) = db_path.parent() else {
+        return;
+    };
+    let stem = db_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "app.rdb".to_string());
+    let prefix = format!("{stem}.incompatible-");
+    // Pick the LARGEST matching backup (most data) — repeated wipes can leave several.
+    let mut best: Option<(u64, std::path::PathBuf)> = None;
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with(&prefix) && name.ends_with(".bak") {
+                let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+                if best.as_ref().map(|(b, _)| len > *b).unwrap_or(true) {
+                    best = Some((len, e.path()));
+                }
+            }
+        }
+    }
+    let Some((bak_size, bak_path)) = best else {
+        return;
+    };
+    if bak_size == 0 {
+        return;
+    }
+    let cur_size = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+    // Only restore when the backup clearly holds more than the current store, i.e. the current
+    // file is the wiped/fresh one. Never clobber a store the user has since filled.
+    if cur_size >= bak_size {
+        return;
+    }
+    if cur_size > 0 {
+        let aside = db_path.with_file_name(format!("{stem}.superseded-{}", now_secs()));
+        if let Err(e) = std::fs::rename(db_path, &aside) {
+            log::error!(target: "reddb", "recovery: could not move current store aside: {e}");
+            return;
+        }
+    }
+    match std::fs::rename(&bak_path, db_path) {
+        Ok(_) => log::warn!(
+            target: "reddb",
+            "recovery: restored {} ({bak_size} bytes) over the fresh store at {}",
+            bak_path.display(), db_path.display()
+        ),
+        Err(e) => log::error!(
+            target: "reddb", "recovery: failed to restore {}: {e}", bak_path.display()
+        ),
+    }
+}
+
 async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
     let started = Instant::now();
     let db_path = std::path::PathBuf::from(
@@ -1128,36 +1231,59 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
     }
     log::info!(target: "reddb", "start_reddb: opening {}", db_path.display());
 
-    let (bind, grpc, child) = match spawn_reddb_once(&app, &db_path).await {
-        Ok(triple) => triple,
-        Err(e) => {
-            // reddb couldn't open the file. A non-empty existing file is almost certainly an
-            // older on-disk format (RedDB file format is not backward-compatible across major
-            // versions) — back it up next to itself and start fresh rather than leaving the
-            // app permanently broken. An empty/missing file means a real error: propagate it.
+    // Embedded recovery: undo a prior boot's destructive "incompatible" backup (data wrongly
+    // filed away when a stale `red` held the lock during an upgrade) before we try to open.
+    recover_incompatible_backup(&db_path);
+
+    // Retry before doing anything destructive: a failure here is almost always a stale `red`
+    // from a just-replaced binary (upgrade) still releasing the file lock. spawn_reddb_once
+    // kills + waits for stale servers, so a retry nearly always succeeds — far better than
+    // destroying a good store.
+    let mut spawned = None;
+    let mut last_err = String::new();
+    for attempt in 1..=4 {
+        match spawn_reddb_once(&app, &db_path).await {
+            Ok(triple) => {
+                spawned = Some(triple);
+                break;
+            }
+            Err(e) => {
+                log::warn!(target: "reddb", "start_reddb: spawn attempt {attempt}/4 failed: {e}");
+                last_err = e;
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        }
+    }
+
+    let (bind, grpc, child) = match spawned {
+        Some(triple) => triple,
+        None => {
+            // Still unopenable after retries — now it's likely a genuinely incompatible on-disk
+            // format (RedDB files aren't backward-compatible across major versions). An
+            // empty/missing file means a real error: propagate it. Otherwise back it up — as
+            // `.corrupt-` (NOT `.incompatible-`, so recover_incompatible_backup won't restore it
+            // into a loop) — and start fresh rather than leaving the app permanently broken.
+            let e = last_err;
             let nonempty = std::fs::metadata(&db_path)
                 .map(|m| m.len() > 0)
                 .unwrap_or(false);
             if !nonempty {
                 return Err(e);
             }
-            let stamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
             let bak = db_path.with_file_name(format!(
-                "{}.incompatible-{stamp}.bak",
+                "{}.corrupt-{}.bak",
                 db_path
                     .file_name()
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "app.rdb".to_string())
+                    .unwrap_or_else(|| "app.rdb".to_string()),
+                now_secs()
             ));
             std::fs::rename(&db_path, &bak).map_err(|re| {
                 format!("reddb could not open the database ({e}) and backup failed: {re}")
             })?;
             log::warn!(
                 target: "reddb",
-                "could not open {} ({e}); backed it up to {} and started fresh",
+                "could not open {} after retries ({e}); backed it up to {} and started fresh",
                 db_path.display(), bak.display()
             );
             spawn_reddb_once(&app, &db_path).await?
