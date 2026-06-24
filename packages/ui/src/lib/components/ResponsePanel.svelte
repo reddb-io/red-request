@@ -253,7 +253,14 @@
     </div>
   {/if}
 
-  {#if !r}
+  {#if ws.sending}
+    <div class="grid flex-1 place-items-center gap-3 text-fg-faint">
+      <span
+        class="h-7 w-7 animate-spin rounded-full border-2 border-border border-t-[var(--color-brand)]"
+      ></span>
+      <span class="text-sm">Sending…</span>
+    </div>
+  {:else if !r}
     <div class="grid flex-1 place-items-center text-sm text-fg-faint">
       Send a request to see the response.
     </div>

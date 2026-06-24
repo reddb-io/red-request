@@ -49,6 +49,28 @@
     ws.scheduleSave();
   });
 
+  // Resizable split between the request and response panels (#7).
+  let splitEl = $state<HTMLDivElement | undefined>();
+  let reqPct = $state(50);
+  let dragging = $state(false);
+  function startResize(e: MouseEvent) {
+    e.preventDefault();
+    dragging = true;
+    const onMove = (ev: MouseEvent) => {
+      if (!splitEl) return;
+      const r = splitEl.getBoundingClientRect();
+      const pct = ((ev.clientX - r.left) / r.width) * 100;
+      reqPct = Math.min(80, Math.max(20, pct));
+    };
+    const onUp = () => {
+      dragging = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function reportLazyLoadFailure(label: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     lazyLoadError = `Could not load ${label}.`;
@@ -150,9 +172,24 @@
             </div>
           {:else}
             <Sidebar />
-            <div class="grid flex-1 grid-cols-2 overflow-hidden">
-              <RequestPanel />
-              <ResponsePanel />
+            <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
+              <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
+                <RequestPanel />
+              </div>
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                tabindex="-1"
+                title="Drag to resize"
+                onmousedown={startResize}
+                class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {dragging
+                  ? 'bg-[var(--color-brand)]'
+                  : ''}"
+              ></div>
+              <div class="min-w-0 flex-1 overflow-hidden">
+                <ResponsePanel />
+              </div>
             </div>
           {/if}
         </div>
