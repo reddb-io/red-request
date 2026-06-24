@@ -280,8 +280,16 @@
         <span class="text-red-400">{r.error.message}</span>
       {/if}
       {#if ws.unresolved.length}
-        <span class="text-amber-400" title="unresolved variables">
-          ⚠ {ws.unresolved.join(", ")}
+        {@const failed = ws.unresolved.filter((n) =>
+          ws.secretDecryptFailures.includes(n)
+        )}
+        <span
+          class="text-amber-400"
+          title={failed.length
+            ? `couldn't decrypt secret(s): ${failed.join(", ")} — re-enter them in this environment (secrets are encrypted per-machine, so a sealed value from another machine or a missing/locked OS keychain can't be opened)`
+            : "unresolved variables"}
+        >
+          ⚠ {ws.unresolved.join(", ")}{failed.length ? " 🔒" : ""}
         </span>
       {/if}
       <Button

@@ -43,6 +43,15 @@
   // inline request rename
   let renamingId = $state<string | null>(null);
   let renameValue = $state("");
+  let renameEl = $state<HTMLInputElement | null>(null);
+  // Focus + select the whole name as soon as the rename input mounts (entering rename mode
+  // or creating a new request), so the user can type a name immediately. autofocus only
+  // focuses; .select() highlights the text so typing replaces it.
+  $effect(() => {
+    void renamingId;
+    renameEl?.focus();
+    renameEl?.select();
+  });
   function startRename(req: LoadedCollection["requests"][number]) {
     renamingId = req.id;
     renameValue = req.name;
@@ -50,6 +59,14 @@
   async function commitRename() {
     if (renamingId) await ws.renameRequest(renamingId, renameValue);
     renamingId = null;
+  }
+  // Create a request and drop straight into rename mode (with the name selected).
+  async function addAndRename(folder: string) {
+    const id = await ws.addRequest(folder);
+    if (id) {
+      renameValue = "New Request";
+      renamingId = id;
+    }
   }
 
   // inline collection rename
@@ -144,7 +161,7 @@
 </script>
 
 <aside
-  class="flex h-full w-64 shrink-0 flex-col border-r border-border bg-[var(--color-bg-1)]"
+  class="flex h-full w-full flex-col bg-[var(--color-bg-1)]"
 >
   <div class="flex items-center gap-2 px-4 py-3">
     <div class="flex min-w-0 flex-1 flex-col leading-tight">
@@ -207,6 +224,7 @@
         {#if renamingId === req.id}
           <!-- svelte-ignore a11y_autofocus -->
           <Input
+            bind:ref={renameEl}
             bind:value={renameValue}
             autofocus
             onclick={(e) => e.stopPropagation()}
@@ -317,7 +335,7 @@
           <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
               {#snippet children(p)}
-                <Button {...p} onclick={() => ws.addRequest("")} variant="ghost" size="icon-xs">＋</Button>
+                <Button {...p} onclick={() => addAndRename("")} variant="ghost" size="icon-xs">＋</Button>
               {/snippet}
             </Tooltip>
             <Tooltip text="New folder">
@@ -410,7 +428,7 @@
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
               <Tooltip text="New request here">
                 {#snippet children(p)}
-                  <Button {...p} onclick={() => ws.addRequest(f.name)} variant="ghost" size="icon-xs">＋</Button>
+                  <Button {...p} onclick={() => addAndRename(f.name)} variant="ghost" size="icon-xs">＋</Button>
                 {/snippet}
               </Tooltip>
               <Tooltip text="Delete folder (requests move to root)">

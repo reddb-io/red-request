@@ -71,6 +71,28 @@
     window.addEventListener("mouseup", onUp);
   }
 
+  // Resizable split between the sidebar (request list) and the middle column — mirrors the
+  // request/response divider above, but the sidebar is sized in pixels (a fixed-ish rail).
+  let sidebarWrapEl = $state<HTMLDivElement | undefined>();
+  let sidebarPx = $state(256); // matches the old hard-coded w-64
+  let sidebarDragging = $state(false);
+  function startSidebarResize(e: MouseEvent) {
+    e.preventDefault();
+    sidebarDragging = true;
+    const onMove = (ev: MouseEvent) => {
+      if (!sidebarWrapEl) return;
+      const left = sidebarWrapEl.getBoundingClientRect().left;
+      sidebarPx = Math.min(560, Math.max(180, ev.clientX - left));
+    };
+    const onUp = () => {
+      sidebarDragging = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function reportLazyLoadFailure(label: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     lazyLoadError = `Could not load ${label}.`;
@@ -171,7 +193,24 @@
               {/if}
             </div>
           {:else}
-            <Sidebar />
+            <div
+              bind:this={sidebarWrapEl}
+              class="shrink-0 overflow-hidden"
+              style="width: {sidebarPx}px"
+            >
+              <Sidebar />
+            </div>
+            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              tabindex="-1"
+              title="Drag to resize"
+              onmousedown={startSidebarResize}
+              class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {sidebarDragging
+                ? 'bg-[var(--color-brand)]'
+                : ''}"
+            ></div>
             <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
               <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
                 <RequestPanel />

@@ -461,7 +461,14 @@ class Workspace {
     void this.refreshReqHistory();
   }
 
+  /** Secrets that failed to DECRYPT on the last buildVariables() (e.g. the master key
+   *  in the OS keychain is missing/locked, or the sealed value came from another machine).
+   *  These names stay unresolved → a {{secret}} is sent literally → the server 401s. Tracked
+   *  so the UI can say "couldn't decrypt X" instead of a silent failure. */
+  secretDecryptFailures = $state<string[]>([]);
+
   private async buildVariables(): Promise<Record<string, string>> {
+    const failures: string[] = [];
     const open = async (env: StoredEnvironment | null) => {
       const out: Record<string, string> = {};
       if (env) {
@@ -469,7 +476,9 @@ class Workspace {
           try {
             out[name] = await secrets.open(sealed);
           } catch {
-            /* leave unresolved if it can't be opened */
+            // Can't decrypt — leave unresolved, but remember it so the UI can explain the
+            // resulting 401 instead of the value silently vanishing into a literal {{name}}.
+            failures.push(name);
           }
         }
       }
@@ -480,6 +489,7 @@ class Workspace {
       open(env),
       open(this.globals),
     ]);
+    this.secretDecryptFailures = [...new Set(failures)];
     // Precedence (earlier wins): env secret > env var > global secret > global var.
     return mergeScopes([
       envSecrets,
@@ -487,6 +497,14 @@ class Workspace {
       globalSecrets,
       this.globals.vars,
     ]);
+  }
+
+  /** Full resolved variable scope (vars + DECRYPTED secrets) for the current env. Used by
+   *  the code-snippet generator so {{secret}} placeholders render as their real values — a
+   *  generated curl/snippet is meant to be runnable. (The actual dispatch already uses this
+   *  same scope, so the snippet matches what gets sent.) */
+  async resolveScope(): Promise<Record<string, string>> {
+    return this.buildVariables();
   }
 
   /** Resolve `request` for the "request" tab, but with secret values masked: secret
@@ -1313,9 +1331,9 @@ class Workspace {
   }
 
   /** Create a new request (optionally inside a folder) and select it. */
-  async addRequest(folder = ""): Promise<void> {
+  async addRequest(folder = ""): Promise<string | null> {
     const col = this.activeCollection;
-    if (!col || !this.activeColId) return;
+    if (!col || !this.activeColId) return null;
     const id = `req-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 1296
     ).toString(36)}`;
@@ -1329,6 +1347,7 @@ class Workspace {
     col.requests.push(req);
     col.collection.order.push(id);
     this.selectRequest(this.activeColId, id);
+    return id;
   }
 
   /** Import a curl command as a new request and select it. */

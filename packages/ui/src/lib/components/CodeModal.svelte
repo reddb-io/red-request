@@ -1,6 +1,8 @@
 <script lang="ts">
-  // "Code" — generate a runnable snippet for the active request. Non-secret vars are
-  // resolved (so {{host}} → real value); secrets stay as {{NAME}} so nothing leaks.
+  // "Code" — generate a runnable snippet for the active request. ALL variables are resolved
+  // (incl. decrypted secrets) so the snippet is actually runnable — e.g. Basic auth's base64
+  // is computed from the real password, not from a literal `{{password}}` (which produced an
+  // invalid credential). Same scope the real dispatch uses, so the snippet matches what's sent.
   import Modal from "./ui/Modal.svelte";
   import Select from "./ui/Select.svelte";
   import { Button } from "./ui/button/index.js";
@@ -18,17 +20,25 @@
   let lang = $state<SnippetLang>("curl");
   let copied = $state(false);
 
-  const lookup = $derived(
-    Object.fromEntries(
-      Object.entries(ws.varInfo)
-        .filter(([, info]) => !info.secret)
-        .map(([k, info]) => [k, info.value])
-    )
-  );
-  const snippet = $derived.by(() => {
-    if (!ws.activeReq) return "";
-    const snap = $state.snapshot(ws.activeReq) as RequestDefinition;
-    return generateSnippet(resolveRequest(snap, lookup).request, lang);
+  // Resolving secrets needs async decryption, so compute the snippet in an effect.
+  let snippet = $state("");
+  $effect(() => {
+    const req = ws.activeReq;
+    const l = lang;
+    void ws.varInfo; // re-run when the active environment / vars change
+    if (!req) {
+      snippet = "";
+      return;
+    }
+    const snap = $state.snapshot(req) as RequestDefinition;
+    let cancelled = false;
+    void ws.resolveScope().then((scope) => {
+      if (!cancelled)
+        snippet = generateSnippet(resolveRequest(snap, scope).request, l);
+    });
+    return () => {
+      cancelled = true;
+    };
   });
 
   async function copy() {
