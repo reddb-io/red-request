@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import type { AddressInfo } from "node:net";
-import { wsOpen, wsSend, wsClose } from "./stream.js";
+import { wsOpen, wsSend, wsClose, gqlWsOpen, gqlWsClose } from "./stream.js";
 import { newRequest } from "@red-request/core";
 
 let wss: WebSocketServer;
@@ -428,5 +428,236 @@ describe("wsOpen frame correlation", () => {
     );
     expect(welcome).toBeDefined();
     expect((welcome!.data as any).correlationId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GraphQL over WebSocket (graphql-transport-ws)
+// ---------------------------------------------------------------------------
+
+describe("gqlWsOpen — graphql-transport-ws subscription", () => {
+  it("streams next payloads and completes", async () => {
+    // Stand up a loopback server that speaks graphql-ws:
+    //   client connection_init → server connection_ack
+    //   client subscribe       → server next × 2 → server complete
+    const gqlServer = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => gqlServer.once("listening", r));
+    const gqlPort = (gqlServer.address() as AddressInfo).port;
+
+    gqlServer.on("connection", (sock) => {
+      sock.on("message", (raw) => {
+        let msg: any;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+
+        if (msg.type === "connection_init") {
+          sock.send(JSON.stringify({ type: "connection_ack" }));
+        } else if (msg.type === "subscribe") {
+          const subId = msg.id;
+          sock.send(
+            JSON.stringify({
+              id: subId,
+              type: "next",
+              payload: { data: { count: 1 } },
+            })
+          );
+          sock.send(
+            JSON.stringify({
+              id: subId,
+              type: "next",
+              payload: { data: { count: 2 } },
+            })
+          );
+          sock.send(JSON.stringify({ id: subId, type: "complete" }));
+        }
+      });
+    });
+
+    const id = "test-gql-ws-sub";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${gqlPort}`,
+    };
+
+    const cap = captureStdout();
+    gqlWsOpen(id, req, {}, "subscription { count }");
+
+    // Wait for both next payloads to arrive.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for gql.next events")),
+        3000
+      );
+      const poll = setInterval(() => {
+        const nexts = parseNotifications(cap.lines()).filter(
+          (m) => m.stream === id && m.event === "gql.next"
+        );
+        if (nexts.length >= 2) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    await new Promise<void>((r) => gqlServer.close(() => r()));
+
+    const msgs = parseNotifications(cap.lines());
+
+    // open event with graphql-transport-ws subprotocol
+    const openEvt = msgs.find((m) => m.stream === id && m.event === "open");
+    expect(openEvt).toBeDefined();
+    expect((openEvt!.data as any).subprotocol).toBe("graphql-transport-ws");
+
+    // connection_init was sent
+    const initSent = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "out" &&
+        (m.data as any).data?.includes("connection_init")
+    );
+    expect(initSent).toBeDefined();
+
+    // subscribe was sent after ack
+    const subSent = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "out" &&
+        (m.data as any).data?.includes('"subscribe"')
+    );
+    expect(subSent).toBeDefined();
+
+    // two gql.next events with the right payloads
+    const nextEvts = msgs.filter(
+      (m) => m.stream === id && m.event === "gql.next"
+    );
+    expect(nextEvts).toHaveLength(2);
+    expect((nextEvts[0]!.data as any).payload).toEqual({ data: { count: 1 } });
+    expect((nextEvts[1]!.data as any).payload).toEqual({ data: { count: 2 } });
+  });
+
+  it("gqlWsClose sends complete and closes the connection", async () => {
+    const gqlServer2 = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => gqlServer2.once("listening", r));
+    const gqlPort2 = (gqlServer2.address() as AddressInfo).port;
+
+    let gotComplete = false;
+    gqlServer2.on("connection", (sock) => {
+      sock.on("message", (raw) => {
+        let msg: any;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        if (msg.type === "connection_init") {
+          sock.send(JSON.stringify({ type: "connection_ack" }));
+        } else if (msg.type === "complete") {
+          gotComplete = true;
+        }
+      });
+    });
+
+    const id = "test-gql-ws-close";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${gqlPort2}`,
+    };
+
+    const cap = captureStdout();
+    gqlWsOpen(id, req, {}, "subscription { ping }");
+
+    // Wait for connection_ack (subscribe frame sent after ack)
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for connection_ack")),
+        3000
+      );
+      const poll = setInterval(() => {
+        const msgs = parseNotifications(cap.lines());
+        const ackReceived = msgs.some(
+          (m) =>
+            m.stream === id &&
+            m.event === "message" &&
+            (m.data as any).dir === "out" &&
+            (m.data as any).data?.includes('"subscribe"')
+        );
+        if (ackReceived) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    const result = gqlWsClose(id);
+    cap.stop();
+    await new Promise<void>((r) => gqlServer2.close(() => r()));
+
+    expect(result.ok).toBe(true);
+    expect(gotComplete).toBe(true);
+  });
+
+  it("handles ping/pong keepalive", async () => {
+    const gqlServer3 = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => gqlServer3.once("listening", r));
+    const gqlPort3 = (gqlServer3.address() as AddressInfo).port;
+
+    let gotPong = false;
+    gqlServer3.on("connection", (sock) => {
+      sock.on("message", (raw) => {
+        let msg: any;
+        try {
+          msg = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        if (msg.type === "connection_init") {
+          sock.send(JSON.stringify({ type: "connection_ack" }));
+          sock.send(JSON.stringify({ type: "ping" }));
+        } else if (msg.type === "pong") {
+          gotPong = true;
+        }
+      });
+    });
+
+    const id = "test-gql-ws-ping";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${gqlPort3}`,
+    };
+
+    const cap = captureStdout();
+    gqlWsOpen(id, req, {}, "subscription { noop }");
+
+    // Wait long enough for ping→pong roundtrip
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for pong")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (gotPong) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    gqlWsClose(id);
+    await new Promise<void>((r) => gqlServer3.close(() => r()));
+
+    expect(gotPong).toBe(true);
   });
 });

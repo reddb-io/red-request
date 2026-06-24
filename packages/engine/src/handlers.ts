@@ -13,6 +13,8 @@ import {
   grpcMethodsParamsSchema,
   grpcCallParamsSchema,
   proxyProbeParamsSchema,
+  gqlWsOpenParamsSchema,
+  gqlWsCloseParamsSchema,
   resolveRequest,
   resolveTemplate,
   type HttpSendResult,
@@ -26,7 +28,15 @@ import reckerPkg from "recker/package.json" with { type: "json" };
 import { dispatch, oauth2Token, oidcDiscover } from "./recker.js";
 import { runPipeline } from "./pipeline.js";
 import { runLoop } from "./runner.js";
-import { wsOpen, wsSend, wsClose, sseOpen, sseClose } from "./stream.js";
+import {
+  wsOpen,
+  wsSend,
+  wsClose,
+  sseOpen,
+  sseClose,
+  gqlWsOpen,
+  gqlWsClose,
+} from "./stream.js";
 import { clearJar } from "./cookies.js";
 import { grpcListMethods, grpcCall } from "./grpc.js";
 import { probeProxy } from "./proxy-dispatch.js";
@@ -149,5 +159,23 @@ export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.proxyProbe]: async (raw): Promise<ProxyProbeResult> => {
     const { proxyUrl, timeoutMs } = proxyProbeParamsSchema.parse(raw);
     return probeProxy(proxyUrl, timeoutMs);
+  },
+
+  [ENGINE_METHODS.gqlWsOpen]: async (raw): Promise<{ ok: boolean }> => {
+    const { id, request, variables, query, gqlVariables, operationName } =
+      gqlWsOpenParamsSchema.parse(raw);
+    return gqlWsOpen(
+      id,
+      request,
+      variables,
+      query,
+      gqlVariables,
+      operationName
+    );
+  },
+
+  [ENGINE_METHODS.gqlWsClose]: async (raw): Promise<{ ok: boolean }> => {
+    const { id } = gqlWsCloseParamsSchema.parse(raw);
+    return gqlWsClose(id);
   },
 };

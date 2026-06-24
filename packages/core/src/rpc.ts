@@ -58,6 +58,8 @@ export const ENGINE_METHODS = {
   importParse: "import.parse",
   codegen: "codegen",
   proxyProbe: "proxy.probe",
+  gqlWsOpen: "gql.ws.open",
+  gqlWsClose: "gql.ws.close",
 } as const;
 export type EngineMethod = (typeof ENGINE_METHODS)[keyof typeof ENGINE_METHODS];
 
