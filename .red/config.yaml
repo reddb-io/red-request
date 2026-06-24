@@ -11,90 +11,93 @@ plugins:
     enabled: true # the engineering stack (/afk, /triage, /ship, …)
     lock:
       primary-branch: true
-  #     branch: my-branch         # static base lock: AFK bases/merges here (ADR 0031);
-  #                               # the runtime /branch-lock overrides it per session
+    #   branch: my-branch         # static base lock: AFK bases/merges here (ADR 0031);
+    #                             # the runtime /branch-lock overrides it per session
+    afk:
+      merge:
+        ci_aware: true # poll PR for mergeStateStatus==CLEAN before admin-merge (#812).
+        #              # Avoids the immediate-admin-merge race that mislabels clean
+        #              # work as merge-conflict on a base whose CI is still settling.
+      #   default_runner: claude        # fallback runner when no explicit signal
+      #   models:                       # per-runner AFK tier table (ADR 0049)
+      #     claude:
+      #       validate:
+      #         model: claude-haiku-4-5
+      #         effort: low
+      #       simple:
+      #         model: claude-sonnet-4-6
+      #         effort: high
+      #       complex:
+      #         model: claude-opus-4-8
+      #         effort: medium
+      #       think:                    # default until the AFK classifier lands
+      #         model: claude-opus-4-8
+      #         effort: high
+      #     codex:
+      #       validate:
+      #         model: gpt-5.5
+      #         effort: low
+      #       simple:
+      #         model: gpt-5.5
+      #         effort: high
+      #       complex:
+      #         model: gpt-5.5
+      #         effort: medium
+      #       think:
+      #         model: gpt-5.5
+      #         effort: high
+      #     opencode:                   # ADR 0059 — endpoint-agnostic; slug = <provider>/<model>
+      #       base:                     # auto-populates EVERY tier of this runner. Set the model
+      #         model: minimax/MiniMax-M3   # once to point the whole runner at one provider/model;
+      #         effort: medium          # `base.effort` is optional (omit it to keep per-tier defaults).
+      #       think:                    # specialize a single tier — overrides `base` for that tier only
+      #         model: minimax/MiniMax-M3
+      #   fleet:
+      #     target: 2                   # default supervisor worker target
+      #   release:                      # bundle release channel (ADR 0058)
+      #     channel: canary             # `stable` (default = today's version-pinned
+      #                                 # release) or `canary` (the floating pre-release
+      #                                 # tag). The launcher reads this or the
+      #                                 # `RED_SKILLS_CHANNEL` env var (env wins); absent
+      #                                 # config keeps tracking stable. Promotion
+      #                                 # canary→stable is a tag move (scripts/afk-promote-channel.sh),
+      #                                 # gated on the proof-by-drain telemetry.
+      backpressure: # extra merge gates run on every successful iteration (DONE +
+        # salvaged no-sentinel), after the built-in feedback gate. Any non-zero exit
+        # blocks the merge and parks the issue to ready-for-human, exactly like a
+        # feedback failure. (#430 / PRD #429)
+        #
+        # Mirrors the CI `js` job (.github/workflows/ci.yml) verbatim, in order:
+        # build runs FIRST because engine/ui typecheck against @red-request/core's
+        # built .d.ts. This also fills the harness blind spot — this repo's typecheck
+        # is the `check` script, which the built-in per-scope feedback gate (which
+        # only knows `test`/`typecheck`/`lint`/`build`) never runs.
+        - pnpm brand:sync
+        - pnpm build
+        - pnpm check
+        - pnpm test
+      hooks:
+        # pre_merge gates run in the worktree before landing, on every iteration.
+        # red-rust-fmt.sh self-guards (exits 0 when cargo is absent / no src-tauri),
+        # so JS-only iterations are never blocked; it mirrors CI's rust-fmt job so
+        # AFK edits to the Tauri Rust crate can't merge unformatted.
+        pre_merge:
+          - bash .red/hooks/pre_merge/red-rust-fmt.sh
+        # defaults:                   # built-in isolation hooks (separate from the lists above)
+        #   cargo: true               # ship cargo isolation on Rust projects
+        #   gradle: true              # ship gradle isolation when GRADLE_USER_HOME_BASE is set
+      #   trust-gate:                 # "executable issue" trust gate (#621, ADR 0056)
+      #     allowlist: alice,bob      # comma/space-separated GitHub logins. An issue is
+      #                               # executable only when its AUTHOR is in this list AND
+      #                               # `ready-for-agent` was applied by a listed actor
+      #                               # (read from the issue timeline, not the label set).
+      #                               # ABSENT/empty (the default) → PERMISSIVE: the gate
+      #                               # never fires and every ready-for-agent issue is
+      #                               # claimable, exactly as today. Setting it switches the
+      #                               # repo to STRICT mode; a ready-for-agent applied by a
+      #                               # non-listed actor is skipped at claim and may be
+      #                               # stripped by a sweep with an audit comment.
   # memory:
   #   enabled: true               # then run /memory:init to pick a storage mode
   # brain:
   #   enabled: true               # the agentic command-center context
-
-afk:
-  #   default_runner: claude        # fallback runner when no explicit signal
-  #   models:                       # per-runner AFK tier table (ADR 0049)
-  #     claude:
-  #       validate:
-  #         model: claude-haiku-4-5
-  #         effort: low
-  #       simple:
-  #         model: claude-sonnet-4-6
-  #         effort: high
-  #       complex:
-  #         model: claude-opus-4-8
-  #         effort: medium
-  #       think:                    # default until the AFK classifier lands
-  #         model: claude-opus-4-8
-  #         effort: high
-  #     codex:
-  #       validate:
-  #         model: gpt-5.5
-  #         effort: low
-  #       simple:
-  #         model: gpt-5.5
-  #         effort: high
-  #       complex:
-  #         model: gpt-5.5
-  #         effort: medium
-  #       think:
-  #         model: gpt-5.5
-  #         effort: high
-  #     opencode:                   # ADR 0059 — endpoint-agnostic; slug = <provider>/<model>
-  #       base:                     # auto-populates EVERY tier of this runner. Set the model
-  #         model: minimax/MiniMax-M3   # once to point the whole runner at one provider/model;
-  #         effort: medium          # `base.effort` is optional (omit it to keep per-tier defaults).
-  #       think:                    # specialize a single tier — overrides `base` for that tier only
-  #         model: minimax/MiniMax-M3
-  #   fleet:
-  #     target: 2                   # default supervisor worker target
-  #   release:                      # bundle release channel (ADR 0058)
-  #     channel: canary             # `stable` (default = today's version-pinned
-  #                                 # release) or `canary` (the floating pre-release
-  #                                 # tag). The launcher reads this or the
-  #                                 # `RED_SKILLS_CHANNEL` env var (env wins); absent
-  #                                 # config keeps tracking stable. Promotion
-  #                                 # canary→stable is a tag move (scripts/afk-promote-channel.sh),
-  #                                 # gated on the proof-by-drain telemetry.
-  backpressure: # extra merge gates run on every successful iteration (DONE +
-    # salvaged no-sentinel), after the built-in feedback gate. Any non-zero exit
-    # blocks the merge and parks the issue to ready-for-human, exactly like a
-    # feedback failure. (#430 / PRD #429)
-    #
-    # Mirrors the CI `js` job (.github/workflows/ci.yml) verbatim, in order:
-    # build runs FIRST because engine/ui typecheck against @red-request/core's
-    # built .d.ts. This also fills the harness blind spot — this repo's typecheck
-    # is the `check` script, which the built-in per-scope feedback gate (which
-    # only knows `test`/`typecheck`/`lint`/`build`) never runs.
-    - pnpm brand:sync
-    - pnpm build
-    - pnpm check
-    - pnpm test
-  hooks:
-    # pre_merge gates run in the worktree before landing, on every iteration.
-    # red-rust-fmt.sh self-guards (exits 0 when cargo is absent / no src-tauri),
-    # so JS-only iterations are never blocked; it mirrors CI's rust-fmt job so
-    # AFK edits to the Tauri Rust crate can't merge unformatted.
-    pre_merge:
-      - bash .red/hooks/pre_merge/red-rust-fmt.sh
-    # defaults:                   # built-in isolation hooks (separate from the lists above)
-    #   cargo: true               # ship cargo isolation on Rust projects
-    #   gradle: true              # ship gradle isolation when GRADLE_USER_HOME_BASE is set
-#   trust-gate:                   # "executable issue" trust gate (#621, ADR 0056)
-#     allowlist: alice,bob        # comma/space-separated GitHub logins. An issue is
-#                                 # executable only when its AUTHOR is in this list AND
-#                                 # `ready-for-agent` was applied by a listed actor
-#                                 # (read from the issue timeline, not the label set).
-#                                 # ABSENT/empty (the default) → PERMISSIVE: the gate
-#                                 # never fires and every ready-for-agent issue is
-#                                 # claimable, exactly as today. Setting it switches the
-#                                 # repo to STRICT mode; a ready-for-agent applied by a
-#                                 # non-listed actor is skipped at claim and may be
-#                                 # stripped by a sweep with an audit comment.
