@@ -280,6 +280,8 @@
     el.focus();
   }
 
+  const MENU_NAV_KEYS = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"];
+
   function onKeydown(e: KeyboardEvent) {
     if (!showMenu) return;
     if (e.key === "ArrowDown") {
@@ -296,6 +298,22 @@
       e.preventDefault();
     }
   }
+
+  // Refresh the menu as the caret moves on keyup — but NOT for the menu-navigation
+  // keys, whose keydown already moved the selection. Refreshing on those rebuilt the
+  // list and reset menuIndex to 0, which made ArrowDown snap back to the first item.
+  function onKeyup(e: KeyboardEvent) {
+    if (showMenu && MENU_NAV_KEYS.includes(e.key)) return;
+    refreshMenu();
+  }
+
+  // Keep the highlighted item visible while navigating with the keyboard.
+  let menuEl = $state<HTMLUListElement | undefined>();
+  $effect(() => {
+    if (!showMenu || !menuEl) return;
+    const active = menuEl.children[menuIndex] as HTMLElement | undefined;
+    active?.scrollIntoView({ block: "nearest" });
+  });
 
   const pad = $derived(dense ? "px-2" : "px-2.5");
   const metrics = $derived(
@@ -344,7 +362,7 @@
       spellcheck="false"
       class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
-      onkeyup={refreshMenu}
+      onkeyup={onKeyup}
       onclick={refreshMenu}
       onkeydown={onKeydown}
       onscroll={syncScroll}
@@ -364,7 +382,7 @@
       spellcheck="false"
       class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
-      onkeyup={refreshMenu}
+      onkeyup={onKeyup}
       onclick={refreshMenu}
       onkeydown={onKeydown}
       onscroll={syncScroll}
@@ -381,7 +399,8 @@
 {#snippet menu()}
   {#if showMenu}
     <ul
-      class="panel absolute top-full left-1 z-50 mt-1 max-h-48 w-52 overflow-auto py-1 shadow-xl"
+      bind:this={menuEl}
+      class="panel absolute top-full left-1 z-50 mt-1 max-h-72 w-72 overflow-y-auto py-1 shadow-xl"
     >
       {#each menuItems as item, i (item.label)}
         <li>

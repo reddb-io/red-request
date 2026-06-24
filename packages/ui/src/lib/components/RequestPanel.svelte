@@ -276,13 +276,6 @@
           >{ws.sending ? "…" : "Send"}</Button
         >
       {/if}
-      <Button
-        onclick={() => ws.save()}
-        variant="outline"
-        size="xs"
-        class="shrink-0"
-        >Save</Button
-      >
       {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
         <Button
           onclick={() => void openRunner()}
