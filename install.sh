@@ -166,17 +166,18 @@ clear_appimage_shadow() {
   have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
 }
 
-# The .deb ships red-request/red/red-request-engine in /usr/bin but no `rr`
-# alias (it was historically AppImage-only). Always (re)create it pointing at
-# the system binary, and ensure $INSTALL_DIR is on PATH, so `rr` works the same
-# for both build forms — including a fresh .deb install after an uninstall.
+# The .deb ships red-request/red/red-request-engine in /usr/bin but no `rr` alias
+# (historically AppImage-only). (Re)create it as a symlink in /usr/local/bin — that dir is
+# on PATH for every shell (bash/zsh/fish) out of the box, so `rr` just works with no rc-file
+# edits, unlike ~/.local/bin. Points at the system binary so `rr` tracks upgrades.
 ensure_deb_shortcut() {
-  local deb_bin; deb_bin="$(deb_binary_path)"
+  local deb_bin sudo="" dst="/usr/local/bin/$SHORTCUT"
+  deb_bin="$(deb_binary_path)"
   [[ -n "$deb_bin" ]] || { warn "could not locate the installed $BIN_NAME binary; skipping $SHORTCUT alias"; return 0; }
-  mkdir -p "$INSTALL_DIR"
-  ln -sf "$deb_bin" "$INSTALL_DIR/$SHORTCUT"
-  ok "linked $SHORTCUT → $deb_bin"
-  ensure_path
+  [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
+  $sudo mkdir -p /usr/local/bin && $sudo ln -sf "$deb_bin" "$dst" \
+    && ok "linked $SHORTCUT → $deb_bin ($dst)" \
+    || warn "could not create the $SHORTCUT symlink in /usr/local/bin"
 }
 
 install_deb() {
@@ -211,6 +212,7 @@ install_deb() {
   ok "${cur:+upgraded to }Red Request $tag installed (.deb)"
   clear_appimage_shadow
   ensure_deb_shortcut
+  verify_install "$(deb_binary_path)"
   say "launch it from your app menu, or run:  $BIN_NAME   (or  $SHORTCUT .  to open the current folder)"
 }
 
@@ -221,6 +223,7 @@ rc_file() {
   case "${SHELL##*/}" in
     zsh)  printf '%s' "${ZDOTDIR:-$HOME}/.zshrc" ;;
     bash) [[ -f "$HOME/.bashrc" ]] && printf '%s' "$HOME/.bashrc" || printf '%s' "$HOME/.profile" ;;
+    fish) printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
     *)    printf '%s' "$HOME/.profile" ;;
   esac
 }
@@ -232,12 +235,23 @@ ensure_path() {
     return 0
   fi
   local rc; rc="$(rc_file)"
+  mkdir -p "$(dirname "$rc")"
   if [[ -f "$rc" ]] && grep -q '# >>> red-request >>>' "$rc"; then return 0; fi
-  {
-    printf '\n# >>> red-request >>>\n'
-    printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR"
-    printf '# <<< red-request <<<\n'
-  } >> "$rc"
+  # fish doesn't read .profile and uses its own PATH syntax — write the right one for the
+  # user's shell so the line actually takes effect (a bash `export` in config.fish is inert).
+  if [[ "${SHELL##*/}" == "fish" ]]; then
+    {
+      printf '\n# >>> red-request >>>\n'
+      printf 'fish_add_path %s\n' "$INSTALL_DIR"
+      printf '# <<< red-request <<<\n'
+    } >> "$rc"
+  else
+    {
+      printf '\n# >>> red-request >>>\n'
+      printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+      printf '# <<< red-request <<<\n'
+    } >> "$rc"
+  fi
   ok "added $INSTALL_DIR to PATH in $rc — open a new shell or: source $rc"
 }
 
@@ -292,6 +306,7 @@ install_appimage() {
   ensure_path
 
   ok "${cur:+upgraded to }Red Request $tag → $INSTALL_DIR/$BIN_NAME"
+  verify_install "$INSTALL_DIR/$BIN_NAME"
   say "run it:  $BIN_NAME        (or  $SHORTCUT .  to open the current folder as a project)"
 }
 
@@ -306,6 +321,32 @@ install_gui() {
   printf '   checksums:        %s\n' "$(checksum_url "$tag")"
   [[ "$OS" == "darwin" ]] && say "first launch: right-click the app → Open (unsigned build)."
   return 0
+}
+
+# Post-install sanity check: print the binary versions so a broken sidecar (e.g. a glibc-
+# incompatible `red`) surfaces here, at install time, instead of as a blank window on first
+# launch. $1 is the red-request binary path (it may not be on PATH in this shell yet).
+verify_install() { # red_request_path
+  local rr="$1" red v
+  say "verifying…"
+  if [[ -x "$rr" ]]; then
+    # --version is headless on current builds; `timeout` guards older builds that ignore the
+    # flag (it would otherwise launch the GUI and hang the installer).
+    v="$(timeout 10 "$rr" --version 2>/dev/null | head -n1 || true)"
+    [[ -n "$v" ]] && ok "$v" || warn "$BIN_NAME --version produced no output (build older than this installer expects)"
+  else
+    warn "$BIN_NAME not found at $rr"
+  fi
+  # The .deb installs a standalone /usr/bin/red; the AppImage bundles it (nothing on disk).
+  red="$(command -v red 2>/dev/null || true)"
+  if [[ -n "$red" ]]; then
+    if v="$("$red" --version 2>&1)"; then
+      ok "$v"
+    else
+      warn "the embedded reddb sidecar (red) failed to run: $v"
+      warn "the app would open to a blank screen — re-run with --force, or report: $red --version"
+    fi
+  fi
 }
 
 main() {
