@@ -94,6 +94,24 @@ export type WsSendParams = z.infer<typeof wsSendParamsSchema>;
 export const wsCloseParamsSchema = z.object({ id: z.string() });
 export type WsCloseParams = z.infer<typeof wsCloseParamsSchema>;
 
+// --- GraphQL over WebSocket (graphql-transport-ws subprotocol) --------------
+
+export const gqlWsOpenParamsSchema = z.object({
+  id: z.string(),
+  request: requestDefinitionSchema,
+  variables: z.record(z.string(), z.string()).default({}),
+  /** GraphQL subscription document (operation text). */
+  query: z.string(),
+  /** GraphQL variables for the operation (JSON-serializable object). */
+  gqlVariables: z.record(z.string(), z.unknown()).optional(),
+  /** Named operation within the document, if multiple operations are present. */
+  operationName: z.string().optional(),
+});
+export type GqlWsOpenParams = z.infer<typeof gqlWsOpenParamsSchema>;
+
+export const gqlWsCloseParamsSchema = z.object({ id: z.string() });
+export type GqlWsCloseParams = z.infer<typeof gqlWsCloseParamsSchema>;
+
 export const oauth2TokenParamsSchema = z.object({
   grantType: z
     .enum([
