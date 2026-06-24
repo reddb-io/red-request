@@ -131,6 +131,39 @@
     }
   }
 
+  // Backups (full-store snapshots next to the .rdb).
+  let backups = $state<Awaited<ReturnType<typeof ws.listBackups>>>([]);
+  async function loadBackups() {
+    backups = await ws.listBackups().catch(() => []);
+  }
+  onMount(loadBackups);
+  function prettyBackup(name: string): string {
+    const m = name.match(/^backup-(.+)\.json$/);
+    if (!m) return name;
+    const iso = m[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, "T$1:$2:$3.$4Z");
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? name : d.toLocaleString();
+  }
+  const backupNow = () =>
+    withStatus("Backup", async () => {
+      const p = await ws.createBackup();
+      await loadBackups();
+      return p ? "Backup saved" : "Store is empty — nothing to back up";
+    });
+  function restoreBackup(path: string, label: string) {
+    void confirm(
+      `Restore "${label}"?\n\nThis overwrites the current requests, environments and settings with the backup's contents.`,
+      { title: "Restore backup", kind: "warning" }
+    ).then((ok) => {
+      if (!ok) return;
+      void withStatus("Restore", async () => {
+        await ws.restoreFromBackup(path);
+        await loadBackups();
+        return "Restored from backup";
+      });
+    });
+  }
+
   const exportYaml = () =>
     withStatus("Export", async () => {
       const path = await yamlio.exportAll(
@@ -379,6 +412,39 @@
 
     {#if dataStatus}
       <div class="hint mt-3 truncate text-fg-subtle" title={dataStatus}>{dataStatus}</div>
+    {/if}
+  </div>
+
+  <!-- Backups --------------------------------------------------------------->
+  <div class="panel mb-4 p-4">
+    <div class="mb-2 flex items-center justify-between">
+      <h2 class="label">Backups</h2>
+      <Button onclick={backupNow} disabled={dataBusy} variant="outline" size="xs"
+        >Backup now</Button
+      >
+    </div>
+    <p class="hint mb-3 text-fg-subtle">
+      A full snapshot of this store is saved to <span class="mono">backups/</span> once per launch
+      and whenever you click Backup now. Restoring overwrites the current data.
+    </p>
+    {#if backups.length === 0}
+      <div class="text-xs text-fg-faint">No backups yet.</div>
+    {:else}
+      <ul class="flex flex-col gap-1">
+        {#each backups as b (b.path)}
+          <li
+            class="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-[var(--color-bg-2)]"
+          >
+            <span class="truncate text-xs text-fg" title={b.path}>{prettyBackup(b.name)}</span>
+            <Button
+              onclick={() => restoreBackup(b.path, prettyBackup(b.name))}
+              disabled={dataBusy}
+              variant="ghost"
+              size="xs">Restore</Button
+            >
+          </li>
+        {/each}
+      </ul>
     {/if}
   </div>
 
