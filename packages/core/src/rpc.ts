@@ -60,6 +60,8 @@ export const ENGINE_METHODS = {
   proxyProbe: "proxy.probe",
   gqlWsOpen: "gql.ws.open",
   gqlWsClose: "gql.ws.close",
+  phxJoin: "phx.join",
+  phxLeave: "phx.leave",
 } as const;
 export type EngineMethod = (typeof ENGINE_METHODS)[keyof typeof ENGINE_METHODS];
 

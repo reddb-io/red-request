@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import type { AddressInfo } from "node:net";
-import { wsOpen, wsSend, wsClose, gqlWsOpen, gqlWsClose } from "./stream.js";
+import {
+  wsOpen,
+  wsSend,
+  wsClose,
+  gqlWsOpen,
+  gqlWsClose,
+  phxJoin,
+  phxLeave,
+} from "./stream.js";
 import { newRequest } from "@red-request/core";
 
 let wss: WebSocketServer;
@@ -659,5 +667,201 @@ describe("gqlWsOpen — graphql-transport-ws subscription", () => {
     await new Promise<void>((r) => gqlServer3.close(() => r()));
 
     expect(gotPong).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phoenix Channels (topic-based rooms: join / leave / per-frame room)
+// ---------------------------------------------------------------------------
+
+describe("phxJoin / phxLeave — Phoenix Channels rooms", () => {
+  it("joins a room, tags inbound frames with the room, and leaves", async () => {
+    // Loopback server speaking Phoenix Channels wire format:
+    //   [join_ref, ref, topic, event, payload]
+    //   phx_join  → reply ok, then push a topic-tagged message
+    //   phx_leave → reply ok
+    const phxServer = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((r) => phxServer.once("listening", r));
+    const phxPort = (phxServer.address() as AddressInfo).port;
+
+    const received: any[] = [];
+    let gotLeave = false;
+    phxServer.on("connection", (sock) => {
+      sock.on("message", (raw) => {
+        let frame: any;
+        try {
+          frame = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        received.push(frame);
+        const [joinRef, ref, topic, event] = frame;
+        if (event === "phx_join") {
+          // Ack the join.
+          sock.send(
+            JSON.stringify([
+              joinRef,
+              ref,
+              topic,
+              "phx_reply",
+              { status: "ok", response: {} },
+            ])
+          );
+          // Push a room-scoped message (server-initiated, ref=null).
+          sock.send(
+            JSON.stringify([
+              joinRef,
+              null,
+              topic,
+              "new_msg",
+              { body: "hello room" },
+            ])
+          );
+        } else if (event === "phx_leave") {
+          gotLeave = true;
+          sock.send(
+            JSON.stringify([
+              joinRef,
+              ref,
+              topic,
+              "phx_reply",
+              { status: "ok", response: {} },
+            ])
+          );
+        }
+      });
+    });
+
+    const id = "test-phx-room";
+    const topic = "room:42";
+    const req = {
+      ...newRequest(id),
+      kind: "ws" as const,
+      url: `ws://127.0.0.1:${phxPort}`,
+    };
+
+    const cap = captureStdout();
+    wsOpen(id, req, {});
+
+    // Wait for the connection to open.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for open")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (
+          parseNotifications(cap.lines()).some(
+            (m) => m.stream === id && m.event === "open"
+          )
+        ) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    const joinResult = phxJoin(id, topic);
+    expect(joinResult.ok).toBe(true);
+
+    // Wait for the reply + the pushed message to come back.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for inbound frames")),
+        3000
+      );
+      const poll = setInterval(() => {
+        const inbound = parseNotifications(cap.lines()).filter(
+          (m) =>
+            m.stream === id &&
+            m.event === "message" &&
+            (m.data as any).dir === "in"
+        );
+        if (inbound.some((m) => (m.data as any).event === "new_msg")) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    const leaveResult = phxLeave(id, topic);
+    expect(leaveResult.ok).toBe(true);
+
+    // Wait for the server to register the leave.
+    await new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(
+        () => reject(new Error("timeout waiting for leave")),
+        3000
+      );
+      const poll = setInterval(() => {
+        if (gotLeave) {
+          clearInterval(poll);
+          clearTimeout(deadline);
+          resolve();
+        }
+      }, 10);
+    });
+
+    cap.stop();
+    wsClose(id);
+    await new Promise<void>((r) => phxServer.close(() => r()));
+
+    const msgs = parseNotifications(cap.lines());
+
+    // The join frame was sent as [join_ref, ref, topic, "phx_join", {}].
+    const joinSent = received.find((f) => f[3] === "phx_join");
+    expect(joinSent).toBeDefined();
+    expect(joinSent[2]).toBe(topic);
+    expect(joinSent[4]).toEqual({});
+
+    // The leave frame was sent.
+    const leaveSent = received.find((f) => f[3] === "phx_leave");
+    expect(leaveSent).toBeDefined();
+    expect(leaveSent[2]).toBe(topic);
+
+    // The pushed message is tagged with its room (the topic).
+    const pushed = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "in" &&
+        (m.data as any).event === "new_msg"
+    );
+    expect(pushed).toBeDefined();
+    expect((pushed!.data as any).room).toBe(topic);
+
+    // The phx_reply surfaces the ok status, also tagged with the room.
+    const reply = msgs.find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "in" &&
+        (m.data as any).event === "phx_reply"
+    );
+    expect(reply).toBeDefined();
+    expect((reply!.data as any).room).toBe(topic);
+    expect((reply!.data as any).status).toBe("ok");
+  });
+
+  it("emits an error frame when joining without a live connection", () => {
+    const id = "test-phx-not-connected";
+    const cap = captureStdout();
+    const result = phxJoin(id, "room:1");
+    cap.stop();
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
+
+    const out = parseNotifications(cap.lines()).find(
+      (m) =>
+        m.stream === id &&
+        m.event === "message" &&
+        (m.data as any).dir === "out"
+    );
+    expect(out).toBeDefined();
+    expect((out!.data as any).status).toBe("error");
+    expect((out!.data as any).event).toBe("phx_join");
   });
 });

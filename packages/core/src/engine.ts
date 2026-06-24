@@ -112,6 +112,22 @@ export type GqlWsOpenParams = z.infer<typeof gqlWsOpenParamsSchema>;
 export const gqlWsCloseParamsSchema = z.object({ id: z.string() });
 export type GqlWsCloseParams = z.infer<typeof gqlWsCloseParamsSchema>;
 
+// --- Phoenix Channels (topic-based rooms over a live ws connection) ---------
+
+export const phxJoinParamsSchema = z.object({
+  /** Connection id of an already-open ws connection. */
+  id: z.string(),
+  /** Phoenix topic to join (the room), e.g. `"room:42"`. */
+  topic: z.string(),
+});
+export type PhxJoinParams = z.infer<typeof phxJoinParamsSchema>;
+
+export const phxLeaveParamsSchema = z.object({
+  id: z.string(),
+  topic: z.string(),
+});
+export type PhxLeaveParams = z.infer<typeof phxLeaveParamsSchema>;
+
 export const oauth2TokenParamsSchema = z.object({
   grantType: z
     .enum([
