@@ -170,18 +170,22 @@
         bind:value={ws.activeReq.name}
         class="flex-1 bg-transparent text-sm font-medium text-fg outline-none"
       />
-      <Select
-        value={ws.activeReq.folder}
-        items={[
-          { value: "", label: "(root)" },
-          ...(ws.activeCollection?.collection.folders ?? []).map((f) => ({
-            value: f,
-          })),
-        ]}
-        onChange={(v) => ws.moveRequest(ws.activeReq!.id, v)}
-        ariaLabel="Folder"
-        class="w-auto text-xs text-fg-muted"
-      />
+      <!-- Folder picker: only meaningful when the collection actually has folders,
+           so hide the otherwise-confusing "(root)"-only dropdown. -->
+      {#if (ws.activeCollection?.collection.folders?.length ?? 0) > 0}
+        <Select
+          value={ws.activeReq.folder}
+          items={[
+            { value: "", label: "(no folder)" },
+            ...(ws.activeCollection?.collection.folders ?? []).map((f) => ({
+              value: f,
+            })),
+          ]}
+          onChange={(v) => ws.moveRequest(ws.activeReq!.id, v)}
+          ariaLabel="Folder"
+          class="w-auto text-xs text-fg-muted"
+        />
+      {/if}
       {#if ws.profiles.length && (ws.activeReq.kind === "http" || ws.activeReq.kind === "grpc")}
         {@const pid = ws.activeReq.profileId || ws.activeCollection?.collection.defaultProfileId || ""}
         {@const fromDefault = !ws.activeReq.profileId && !!pid}
