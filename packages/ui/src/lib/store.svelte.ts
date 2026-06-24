@@ -8,6 +8,7 @@ import {
   collectionFileSchema,
   proxyToUrl,
   resolveTemplate,
+  resolveRequest,
   type AuthConfig,
   type Oauth2TokenResult,
   type BodyType,
@@ -100,6 +101,9 @@ class Workspace {
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);
+  /** The request as actually sent — vars resolved, secret values redacted — shown
+   *  in the response "request" tab. Null until a send happens. */
+  renderedRequest = $state<RequestDefinition | null>(null);
   /** When set, the response panel shows this saved example instead of the live response. */
   exampleView = $state<ResponseResult | null>(null);
   unresolved = $state<string[]>([]);
@@ -485,6 +489,39 @@ class Workspace {
     ]);
   }
 
+  /** Resolve `request` for the "request" tab, but with secret values masked: secret
+   *  variables resolve to ••••••, and inherently-sensitive resolved fields (auth
+   *  credentials, Authorization-style headers) are masked even if typed directly. */
+  private redactRendered(
+    request: RequestDefinition,
+    variables: Record<string, string>
+  ): RequestDefinition {
+    const MASK = "••••••";
+    const secretNames = new Set([
+      ...Object.keys(this.globals?.secrets ?? {}),
+      ...Object.keys(this.activeEnv?.secrets ?? {}),
+    ]);
+    const redacted: Record<string, string> = { ...variables };
+    for (const n of secretNames) if (n in redacted) redacted[n] = MASK;
+    const r = resolveRequest(request, redacted).request as RequestDefinition;
+    const SENSITIVE =
+      /^(authorization|proxy-authorization|cookie|x-api-key|api-key|x-auth-token)$/i;
+    r.headers = r.headers.map((h) =>
+      SENSITIVE.test(h.name) && h.value ? { ...h, value: MASK } : h
+    );
+    const a = r.auth as Record<string, unknown>;
+    for (const k of [
+      "token",
+      "password",
+      "clientSecret",
+      "secretAccessKey",
+      "key",
+    ]) {
+      if (typeof a?.[k] === "string" && a[k]) a[k] = MASK;
+    }
+    return r;
+  }
+
   async send(): Promise<void> {
     if (!this.activeReq || this.sending) return;
     this.sending = true;
@@ -511,6 +548,7 @@ class Workspace {
           structuredClone($state.snapshot(this.activeReq)) as RequestDefinition
         )
       );
+      this.renderedRequest = this.redactRendered(request, variables);
       const result = await httpSend({
         request,
         variables,

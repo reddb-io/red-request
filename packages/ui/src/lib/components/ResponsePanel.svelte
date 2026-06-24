@@ -10,7 +10,9 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
-  let tab = $state<"body" | "headers" | "timings" | "tls" | "tests">("body");
+  let tab = $state<
+    "body" | "request" | "headers" | "timings" | "tls" | "tests"
+  >("body");
   let bodyQuery = $state("");
   let saved = $state(false);
 
@@ -337,7 +339,7 @@
       <div
         class="flex shrink-0 flex-col gap-0.5 border-r border-border px-1.5 py-2 text-sm"
       >
-        {#each ["body", "headers", "timings"] as const as t (t)}
+        {#each ["body", "request", "headers", "timings"] as const as t (t)}
           <button
             onclick={() => (tab = t)}
             class="tab w-full rounded text-left"
@@ -490,6 +492,47 @@
           </div>
           {/if}
         {/if}
+        {/if}
+      {:else if tab === "request"}
+        {#if ws.renderedRequest}
+          {@const rr = ws.renderedRequest}
+          <div class="flex flex-col gap-3 text-xs">
+            <div class="flex items-center gap-2">
+              <span
+                class="mono rounded bg-[var(--color-bg-2)] px-2 py-0.5 font-bold text-fg-strong"
+                >{rr.method}</span
+              >
+              <span class="mono break-all text-fg">{rr.url}</span>
+            </div>
+            {#each [{ label: "headers", items: rr.headers.filter((h) => h.enabled) }, { label: "query", items: rr.query.filter((q) => q.enabled) }] as grp (grp.label)}
+              {#if grp.items.length}
+                <div>
+                  <div class="label mb-1">{grp.label}</div>
+                  <table class="mono w-full">
+                    <tbody>
+                      {#each grp.items as kv (kv.name)}
+                        <tr class="border-b border-[var(--color-bg-2)]">
+                          <td class="py-1 pr-4 text-fg-muted">{kv.name}</td>
+                          <td class="py-1 break-all text-fg">{kv.value}</td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              {/if}
+            {/each}
+            {#if rr.body?.content?.trim()}
+              <div>
+                <div class="label mb-1">body</div>
+                <pre
+                  class="mono rounded bg-[var(--color-bg-1)] p-2 break-all whitespace-pre-wrap text-fg">{rr.body
+                    .content}</pre>
+              </div>
+            {/if}
+            <p class="text-fg-faint">Secret values are redacted (••••••).</p>
+          </div>
+        {:else}
+          <div class="text-fg-faint">Send the request to see what was sent.</div>
         {/if}
       {:else if tab === "headers"}
         <table class="mono w-full text-xs">
