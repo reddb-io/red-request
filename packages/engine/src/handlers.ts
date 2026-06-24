@@ -15,6 +15,8 @@ import {
   proxyProbeParamsSchema,
   gqlWsOpenParamsSchema,
   gqlWsCloseParamsSchema,
+  phxJoinParamsSchema,
+  phxLeaveParamsSchema,
   resolveRequest,
   resolveTemplate,
   type HttpSendResult,
@@ -36,6 +38,8 @@ import {
   sseClose,
   gqlWsOpen,
   gqlWsClose,
+  phxJoin,
+  phxLeave,
 } from "./stream.js";
 import { clearJar } from "./cookies.js";
 import { grpcListMethods, grpcCall } from "./grpc.js";
@@ -177,5 +181,19 @@ export const handlers: Record<string, Handler> = {
   [ENGINE_METHODS.gqlWsClose]: async (raw): Promise<{ ok: boolean }> => {
     const { id } = gqlWsCloseParamsSchema.parse(raw);
     return gqlWsClose(id);
+  },
+
+  [ENGINE_METHODS.phxJoin]: async (
+    raw
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const { id, topic } = phxJoinParamsSchema.parse(raw);
+    return phxJoin(id, topic);
+  },
+
+  [ENGINE_METHODS.phxLeave]: async (
+    raw
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const { id, topic } = phxLeaveParamsSchema.parse(raw);
+    return phxLeave(id, topic);
   },
 };
