@@ -333,17 +333,20 @@
       </div>
     {/if}
 
-    <div class="flex gap-1 border-b border-border px-3 py-1 text-sm">
-      {#each ["body", "headers", "timings"] as const as t (t)}
-        <button
-          onclick={() => (tab = t)}
-          class="tab"
-          class:is-active={tab === t}>{t}</button
-        >
-      {/each}
+    <div class="flex min-h-0 flex-1 overflow-hidden">
+      <div
+        class="flex shrink-0 flex-col gap-0.5 border-r border-border px-1.5 py-2 text-sm"
+      >
+        {#each ["body", "headers", "timings"] as const as t (t)}
+          <button
+            onclick={() => (tab = t)}
+            class="tab w-full rounded text-left"
+            class:is-active={tab === t}>{t}</button
+          >
+        {/each}
       <button
         onclick={() => (tab = "tls")}
-        class="tab"
+        class="tab w-full rounded text-left"
         class:is-active={tab === "tls"}
         title="TLS / encryption details"
       >
@@ -354,7 +357,7 @@
       {#if hasScripts}
         <button
           onclick={() => (tab = "tests")}
-          class="tab"
+          class="tab w-full rounded text-left"
           class:is-active={tab === "tests"}
         >
           tests
@@ -578,6 +581,7 @@
           {/if}
         </div>
       {/if}
+    </div>
     </div>
   {/if}
 </section>
