@@ -4,7 +4,9 @@
 // The desktop app cannot be packaged for Linux/Windows unless the pinned RedDB
 // release exposes the prebuilt `red-<os>-<arch>` assets that fetch-reddb.mjs
 // downloads. Check that up front so release jobs fail before runner setup,
-// dependency install, and Tauri packaging work.
+// dependency install, and Tauri packaging work. Mirrors fetch-reddb.mjs's
+// candidate logic: linux x86_64/aarch64 prefer the static (musl) `-static` asset
+// and fall back to the glibc one, so the preflight passes iff the fetch will.
 //
 //   REDDB_VERSION=v1.11.0 node scripts/check-reddb-release-assets.mjs \
 //     x86_64-unknown-linux-gnu x86_64-pc-windows-msvc
@@ -12,7 +14,8 @@ import { env, exit } from "node:process";
 
 const REPO = "reddb-io/reddb";
 
-function assetName(triple) {
+// Candidate asset names for this triple in preference order (see fetch-reddb.mjs).
+function assetCandidates(triple) {
   const [arch] = triple.split("-");
   const os = triple.includes("linux")
     ? "linux"
@@ -23,7 +26,10 @@ function assetName(triple) {
         : null;
   if (!os) throw new Error(`unsupported target triple: ${triple}`);
   const ext = os === "windows" ? ".exe" : "";
-  return `red-${os}-${arch}${ext}`;
+  const glibc = `red-${os}-${arch}${ext}`;
+  const preferStatic =
+    os === "linux" && (arch === "x86_64" || arch === "aarch64");
+  return preferStatic ? [`red-${os}-${arch}-static`, glibc] : [glibc];
 }
 
 async function ghJson(path) {
@@ -52,7 +58,6 @@ if (targets.length === 0) {
   exit(2);
 }
 
-const required = targets.map(assetName);
 const tag = env.REDDB_VERSION;
 
 let release;
@@ -69,13 +74,21 @@ try {
 }
 
 const available = new Set((release.assets ?? []).map((asset) => asset.name));
-const missing = required.filter((name) => !available.has(name));
+// Each target is satisfied if ANY of its candidates is published; record the one
+// fetch-reddb.mjs would actually download (the first available, static-preferred).
+const resolved = targets.map((triple) => {
+  const names = assetCandidates(triple);
+  return { triple, names, chosen: names.find((n) => available.has(n)) ?? null };
+});
+const missing = resolved.filter((r) => r.chosen === null);
 
 if (missing.length > 0) {
   console.error(
     `RedDB ${release.tag_name} is missing required release assets:`
   );
-  for (const name of missing) console.error(`  - ${name}`);
+  for (const { triple, names } of missing) {
+    console.error(`  - ${triple} (need one of: ${names.join(", ")})`);
+  }
   console.error("");
   console.error("Available assets:");
   for (const name of [...available].sort()) console.error(`  - ${name}`);
@@ -83,5 +96,5 @@ if (missing.length > 0) {
 }
 
 console.log(
-  `RedDB ${release.tag_name} has required assets: ${required.join(", ")}`
+  `RedDB ${release.tag_name} has required assets: ${resolved.map((r) => r.chosen).join(", ")}`
 );
