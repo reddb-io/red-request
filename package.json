@@ -1,6 +1,6 @@
 {
   "name": "red-request",
-  "version": "0.22.1",
+  "version": "0.22.2",
   "private": true,
   "type": "module",
   "description": "Open-source, white-label API client (Bruno/Insomnia alternative) powered by recker, shipped as a Tauri 2 desktop app.",
