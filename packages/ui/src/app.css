@@ -151,12 +151,27 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-bg-3, #26262d);
-  border-radius: 6px;
+  /* Visible against the dark bg (the old bg-3 thumb was nearly invisible). */
+  background: #4a4a55;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5f5f6d;
+  background-clip: padding-box;
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a55 transparent;
 }
 
 /* ---------------------------------------------------------------------------
