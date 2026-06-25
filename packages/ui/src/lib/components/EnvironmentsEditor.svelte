@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import type { Kv, StoredEnvironment } from "@red-request/core";
   import { ws } from "../store.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
@@ -48,11 +49,49 @@
     loadVars(env);
   }
 
-  async function saveVars() {
+  // Autosave variables — no manual "save". Mirrors the request autosave: a debounced
+  // effect persists the rows shortly after the last edit. Secrets already persist
+  // immediately on Set/remove, so the whole editor is save-button-free.
+  let varsTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastVarsKey = "";
+  let lastVarsSnap = "";
+  function scheduleVarsSave() {
+    if (varsTimer) clearTimeout(varsTimer);
+    varsTimer = setTimeout(() => {
+      varsTimer = null;
+      if (!selected) return;
+      selected.vars = recordFromRows(varRows);
+      void ws.saveEnvVars(selected);
+    }, 500);
+  }
+  /** Flush a pending vars autosave now (on close/unmount) so a fast edit isn't lost. */
+  function flushVarsSave() {
+    if (!varsTimer) return;
+    clearTimeout(varsTimer);
+    varsTimer = null;
     if (!selected) return;
     selected.vars = recordFromRows(varRows);
-    await ws.saveEnvVars(selected);
+    void ws.saveEnvVars(selected);
   }
+  $effect(() => {
+    const env = selected;
+    const snap = JSON.stringify(varRows); // deep-tracks every row/field
+    const key = onGlobals ? "Globals" : (env?.name ?? "");
+    if (!env) {
+      lastVarsKey = "";
+      lastVarsSnap = "";
+      return;
+    }
+    if (key !== lastVarsKey) {
+      // env switch — re-baseline, never save
+      lastVarsKey = key;
+      lastVarsSnap = snap;
+      return;
+    }
+    if (snap === lastVarsSnap) return;
+    lastVarsSnap = snap;
+    scheduleVarsSave();
+  });
 
   async function addEnv() {
     if (!newEnvName.trim()) return;
@@ -90,6 +129,9 @@
     secretName = "";
     secretValue = "";
   }
+
+  // Persist any pending variable edit when the editor goes away (modal close / nav).
+  onDestroy(flushVarsSave);
 </script>
 
 {#snippet body()}
@@ -167,12 +209,7 @@
           <section>
             <div class="mb-2 flex items-center justify-between">
               <h3 class="label">Variables</h3>
-              <Button
-                onclick={saveVars}
-                variant="outline"
-                size="xs"
-                >Save vars</Button
-              >
+              <span class="hint">saved automatically</span>
             </div>
             <KeyValueEditor bind:items={varRows} placeholder="VAR_NAME" />
           </section>
