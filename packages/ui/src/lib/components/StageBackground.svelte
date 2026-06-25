@@ -7,22 +7,22 @@
   let canvas: HTMLCanvasElement;
 
   const palette = [
-    "239,68,68", // vermelho
-    "249,115,22", // laranja
-    "153,27,27", // vermelho escuro
-    "194,65,12", // laranja escuro
-    "114,47,55", // vinho
-    "226,114,91", // terracota
+    "239,68,68", // red
+    "249,115,22", // orange
+    "153,27,27", // dark red
+    "194,65,12", // dark orange
+    "114,47,55", // wine
+    "226,114,91", // terracotta
     "150,79,76", // marsala
-    "220,20,60", // carmim
-    "227,66,52", // vermelhão
-    "128,0,32", // borgonha
-    "128,0,0", // grená
-    "183,65,14", // ferrugem
+    "220,20,60", // carmine
+    "227,66,52", // vermilion
+    "128,0,32", // burgundy
+    "128,0,0", // garnet
+    "183,65,14", // rust
     "240,128,128", // coral
-    "192,64,0", // mogno
-    "74,4,4", // sangue de boi
-    "178,34,34", // tijolo
+    "192,64,0", // mahogany
+    "74,4,4", // oxblood
+    "178,34,34", // brick
   ];
 
   onMount(() => {
