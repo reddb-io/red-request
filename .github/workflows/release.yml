@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  # Dispatched by the auto-release workflow (red-release.yml) after it tags a version.
+  # No `push: tags` trigger — that double-fired the whole matrix (tag push + dispatch)
+  # and piled up concurrent runs.
   workflow_dispatch:
     inputs:
       tag:
@@ -48,14 +49,13 @@ jobs:
           node-version: "22"
 
       - name: Check RedDB sidecar release assets
-        # reddb v1.15+ publishes sidecars for every platform we ship (linux x86_64/aarch64,
-        # macOS x86_64/aarch64, windows x86_64). Verify all are present at REDDB_VERSION
-        # before spending matrix time.
+        # Verify the reddb sidecar exists for every platform we build (below) at
+        # REDDB_VERSION before spending matrix time. macOS is Apple Silicon only for now
+        # (GitHub's Intel macos-13 runners are scarce and leave the run queued forever).
         run: >-
           node scripts/check-reddb-release-assets.mjs
           x86_64-unknown-linux-gnu
           aarch64-unknown-linux-gnu
-          x86_64-apple-darwin
           aarch64-apple-darwin
           x86_64-pc-windows-msvc
         env:
@@ -87,15 +87,10 @@ jobs:
               osname: linux,
               arch: aarch64,
             }
-          # macOS: .dmg on native runners (Intel = macos-13, Apple Silicon = macos-14).
-          - {
-              os: macos-13,
-              target: x86_64-apple-darwin,
-              label: macos-x86_64,
-              args: "--bundles dmg",
-              osname: darwin,
-              arch: x86_64,
-            }
+          # macOS: Apple Silicon .dmg on macos-14. Intel (x86_64) is dropped for now —
+          # GitHub's macos-13 Intel runners are scarce, so that leg sat queued forever and
+          # never completed. Re-add via cross-compile (x86_64-apple-darwin on this arm
+          # runner) when Intel coverage is needed.
           - {
               os: macos-14,
               target: aarch64-apple-darwin,
@@ -214,7 +209,7 @@ jobs:
 
             **Windows** — download `red-request-windows-x86_64-setup.exe` below and run it.
 
-            Builds for **linux** (x86_64 · aarch64), **macOS** (Intel · Apple Silicon) and
+            Builds for **linux** (x86_64 · aarch64), **macOS** (Apple Silicon) and
             **windows** (x86_64). Every asset's sha256 is in `checksums.txt`. Unsigned for now —
             macOS: right-click → Open; Windows: "More info → Run anyway" past SmartScreen.
           releaseDraft: false
