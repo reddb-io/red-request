@@ -19,15 +19,19 @@ Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</cod
 ## Install
 
 ```bash
-# Linux — one line. Re-run any time to auto-upgrade.
+# Linux / macOS — one line. Auto-detects your OS + arch; re-run any time to auto-upgrade.
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
 ```
 
-On Linux this installs the **`.deb`** (verifying its `sha256` against the release
-`checksums.txt` first) — it links the system's WebKitGTK/glibc so the app and its bundled
-sidecars start reliably. Needs apt/sudo; re-run any time to upgrade. Prefer the portable
-single-file build? Add `--appimage` to drop a no-sudo AppImage on your PATH at `~/.local/bin`
-(note: an AppImage built on an older glibc can be unstable on newer hosts).
+The script detects your platform and installs the matching release (verifying its `sha256`
+against `checksums.txt`):
+
+- **Linux** — installs the **`.deb`** (links the system's WebKitGTK/glibc so the app and its
+  bundled sidecars start reliably; needs apt/sudo) and drops `red-request` + an `rr` shortcut
+  on your PATH. Prefer the portable single-file build? Add `--appimage` (no sudo; note an
+  AppImage built on an older glibc can be unstable on newer hosts).
+- **macOS** (Apple Silicon) — downloads + verifies the `.dmg` into `~/Downloads` for you to open.
+- **Windows** — grab `red-request-windows-x86_64-setup.exe` from the [latest release](https://github.com/reddb-io/red-request/releases/latest) and run it.
 
 When a newer release exists the script upgrades automatically. If you're **already on the
 latest tag** it no-ops (`… is already the latest — nothing to do`). To reinstall the same
