@@ -6,13 +6,13 @@
 #   curl -fsSL .../install.sh | bash -s -- --version v0.1.0
 #   curl -fsSL .../install.sh | bash -s -- --appimage      # single-file AppImage instead
 #
-# Linux installs the **.deb** by default — it links the system's WebKitGTK/glibc, so the
-# bundled engine/red sidecars start cleanly (the AppImage, built on an older glibc, can
-# segfault those sidecars on newer hosts). Needs apt/sudo. Pass --appimage for the portable
-# single-file build (no sudo, but see the glibc caveat above).
-#
-# Either way the asset's sha256 is verified against the release checksums.txt. macOS/Windows
-# ship GUI installers; the script verifies + hands you the file to open. Remove with uninstall.sh.
+# OS- and arch-agnostic: it detects your platform (linux/macOS/windows · x86_64/aarch64) and
+# installs the matching release asset, verifying its sha256 against checksums.txt.
+#   • Linux   → the **.deb** by default (system WebKitGTK/glibc, so the bundled engine/red
+#               sidecars start cleanly). --appimage for the portable single-file build.
+#   • macOS / Windows → downloads + verifies the GUI installer (.dmg / .exe) and hands it to
+#               you to open (GUI installers need a click).
+# A platform with no published build yet degrades to a clear message. Remove with uninstall.sh.
 set -euo pipefail
 
 REPO="reddb-io/red-request"
@@ -310,17 +310,33 @@ install_appimage() {
   say "run it:  $BIN_NAME        (or  $SHORTCUT .  to open the current folder as a project)"
 }
 
-# ── macOS / Windows: verify + hand off the GUI installer ───────────────────
+# ── macOS / Windows: download + verify, then hand off the GUI installer ─────
+# GUI installers (.dmg / .exe) need a human to click through, so we fetch + verify
+# the right asset for this os/arch and drop it where the user can find it, instead of
+# installing headless. Degrades gracefully when that platform isn't published yet.
 install_gui() {
-  local tag asset url
+  local tag asset tmp ck_text dest
   tag="$(resolve_tag)" || err "could not resolve the latest release tag"
   asset="$(asset_name)"
-  url="$(asset_url "$tag" "$asset")"
-  say "Red Request $tag ships a GUI installer for $OS."
-  printf '   download & open:  %s\n' "$url"
-  printf '   checksums:        %s\n' "$(checksum_url "$tag")"
-  [[ "$OS" == "darwin" ]] && say "first launch: right-click the app → Open (unsigned build)."
-  return 0
+  say "Red Request $tag · $OS/$ARCH"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
+  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
+
+  if ! download "$(asset_url "$tag" "$asset")" "$tmp/$asset" 2>/dev/null; then
+    warn "no $OS/$ARCH build published in $tag yet."
+    say  "browse all assets: https://github.com/$REPO/releases/tag/$tag"
+    return 0
+  fi
+  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout 2>/dev/null || true)"
+  [[ -n "$ck_text" ]] && verify_sha256 "$tmp/$asset" "$ck_text" "$asset"
+
+  dest="$HOME/Downloads"; [[ -d "$dest" ]] || dest="$PWD"
+  mv -f "$tmp/$asset" "$dest/$asset"
+  ok "downloaded + verified → $dest/$asset"
+  case "$OS" in
+    darwin)  say "open it, drag Red Request to Applications. First launch: right-click → Open (unsigned build)." ;;
+    windows) say "run $asset to install." ;;
+  esac
 }
 
 # Post-install sanity check: print the binary versions so a broken sidecar (e.g. a glibc-
