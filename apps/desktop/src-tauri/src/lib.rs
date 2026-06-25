@@ -1883,9 +1883,14 @@ pub fn run() {
         .manage(EmbeddedDb::default())
         .manage(OauthState::default())
         .on_window_event(|window, event| {
-            // Closing the window (native title-bar close included) reaps our sidecars too,
-            // not just the process-exit path — so no orphaned `red server` is left behind.
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            // Reap on Destroyed (not CloseRequested) so the webview can flush a pending
+            // autosave to reddb on close *before* the sidecar is torn down. The frontend
+            // intercepts CloseRequested, flushes the active request, then destroys the
+            // window — which lands here. Reaping on CloseRequested instead SIGTERM'd reddb
+            // mid-flush and dropped the last edit. RunEvent::Exit also reaps (idempotent),
+            // so a window closed without the frontend handler still cleans up — no orphaned
+            // `red server` is left behind on the .rdb lock.
+            if let tauri::WindowEvent::Destroyed = event {
                 reap_sidecars(window.app_handle());
             }
         })

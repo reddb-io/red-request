@@ -1189,7 +1189,7 @@ class Workspace {
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
       void this.save();
-    }, 500);
+    }, 300);
   }
 
   /** Flush a pending autosave immediately — call before switching project or
