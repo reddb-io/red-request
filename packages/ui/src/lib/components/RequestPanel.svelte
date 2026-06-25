@@ -25,6 +25,8 @@
   let HistoryModalComponent = $state<ModalComponent | null>(null);
   let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
+  // Soft-wrap long lines in the body editor (drops the line-number gutter while on).
+  let bodyWrap = $state(false);
 
   function reportLazyLoadFailure(label: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -495,6 +497,14 @@
                 >Prettify</Button
               >
             {/if}
+            {#if ws.activeReq.body.type !== "none" && ws.activeReq.body.type !== "form" && ws.activeReq.body.type !== "multipart"}
+              <label
+                class="ml-auto flex items-center gap-1.5 text-xs text-fg-muted"
+                title="Soft-wrap long lines (hides line numbers while on)"
+              >
+                <input type="checkbox" bind:checked={bodyWrap} class="accent-accent" /> wrap
+              </label>
+            {/if}
           </div>
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
@@ -517,6 +527,7 @@
                 gqlSchema={ws.activeGqlSchema}
                 multiline
                 lineNumbers
+                wrap={bodyWrap}
                 rows={13}
                 ariaLabel="GraphQL query"
                 placeholder={"query {\n  viewer { id name }\n}"}
@@ -532,6 +543,7 @@
                 values={ws.varTitles}
                 multiline
                 lineNumbers
+                wrap={bodyWrap}
                 rows={12}
                 ariaLabel="GraphQL variables"
                 placeholder={'{\n  "id": 1\n}'}
@@ -547,6 +559,7 @@
               values={ws.varTitles}
               multiline
               lineNumbers
+              wrap={bodyWrap}
               rows={12}
               ariaLabel="Request body"
               placeholder={"request body (vars via {{NAME}})"}

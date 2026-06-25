@@ -29,6 +29,9 @@
     ariaLabel?: string;
     /** Code-editor mode (multiline only): line-number gutter + current-line highlight, no wrap. */
     lineNumbers?: boolean;
+    /** Soft-wrap long lines (multiline). Wrapping drops the line-number gutter, which can't
+     * stay aligned once a logical line spans several visual rows. */
+    wrap?: boolean;
     /** When provided, offer GraphQL field/argument autocomplete from this introspected schema. */
     gqlSchema?: GqlSchema | null;
   };
@@ -45,6 +48,7 @@
     flush = false,
     ariaLabel = "",
     lineNumbers = false,
+    wrap = false,
     gqlSchema = null,
   }: Props = $props();
 
@@ -54,7 +58,10 @@
 
   // Code-editor gutter (multiline + lineNumbers): line metrics measured from the textarea
   // so the numbers + current-line band line up exactly, whatever the density.
-  const gutterMode = $derived(multiline && lineNumbers);
+  // Wrapping and the line-number gutter are mutually exclusive: numbers can't track a logical
+  // line once it spills onto several visual rows, so enabling wrap falls back to the plain
+  // multiline layout (which already soft-wraps).
+  const gutterMode = $derived(multiline && lineNumbers && !wrap);
   let caretLine = $state(0);
   let scrollTop = $state(0);
   let lineH = $state(17.5);
@@ -319,14 +326,14 @@
   const metrics = $derived(
     multiline ? "py-1.5 leading-5" : dense ? "h-6 leading-6" : "h-7 leading-7"
   );
-  const wrap = $derived(
+  const wrapCls = $derived(
     gutterMode
       ? "whitespace-pre"
       : multiline
         ? "whitespace-pre-wrap break-words"
         : "whitespace-pre"
   );
-  const shared = $derived(`mono ${pad} ${metrics} ${wrap} text-sm`);
+  const shared = $derived(`mono ${pad} ${metrics} ${wrapCls} text-sm`);
   const frame = $derived(
     flush
       ? "bg-transparent"
