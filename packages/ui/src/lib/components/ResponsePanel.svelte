@@ -5,6 +5,7 @@
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import JsonTree from "./JsonTree.svelte";
+  import XmlTree from "./XmlTree.svelte";
   import HexViewer from "./HexViewer.svelte";
   import TlsPanel from "./TlsPanel.svelte";
   import { save } from "@tauri-apps/plugin-dialog";
@@ -123,6 +124,35 @@
   });
   const bodyLines = $derived(prettyBody.split("\n"));
 
+  // Body zoom: bump the font size of the rendered body (raw text, tree views, search hits) so
+  // it stays readable when sharing a screen. Shared inline style keeps the line-number gutter
+  // aligned with the <pre>. Persists across responses; reset returns to the default.
+  const DEFAULT_FONT_PX = 12;
+  let bodyFontPx = $state(DEFAULT_FONT_PX);
+  function zoom(delta: number) {
+    bodyFontPx = Math.min(28, Math.max(8, bodyFontPx + delta));
+  }
+  const bodyStyle = $derived(
+    `font-size:${bodyFontPx}px; line-height:${Math.round(bodyFontPx * 1.5)}px`
+  );
+
+  // XML tree: parse once with DOMParser so structured XML bodies get the same collapsible
+  // chevrons as JSON. Returns the document element, or null on non-XML / parse errors.
+  const parsedXmlRoot = $derived.by<Element | null>(() => {
+    if (!r) return null;
+    const ct = r.contentType ?? "";
+    if (!ct.includes("xml")) return null;
+    try {
+      const doc = new DOMParser().parseFromString(r.bodyText, "application/xml");
+      if (doc.getElementsByTagName("parsererror").length > 0) return null;
+      return doc.documentElement;
+    } catch {
+      return null;
+    }
+  });
+  const isXml = $derived(parsedXmlRoot !== null);
+  let xmlView = $state<"raw" | "tree">("raw");
+
   // Rich preview for HTML / image responses (toggle to source for HTML).
   let preview = $state(true);
   const ct = $derived(r?.contentType ?? "");
@@ -168,6 +198,10 @@
     return cur;
   }
   let jsonView = $state<"raw" | "tree">("raw");
+  // Whichever structured format is showing its collapsible tree (hides raw-only controls).
+  const showingTree = $derived(
+    (!!json && jsonView === "tree") || (isXml && xmlView === "tree")
+  );
   let xPath = $state("");
   let xVar = $state("");
   let xSaved = $state(false);
@@ -440,13 +474,32 @@
                     >tree</button
                   >
                 </div>
+              {:else if isXml}
+                <div class="flex gap-1">
+                  <button class="seg" class:is-active={xmlView === "raw"} onclick={() => (xmlView = "raw")}
+                    >raw</button
+                  >
+                  <button class="seg" class:is-active={xmlView === "tree"} onclick={() => (xmlView = "tree")}
+                    >tree</button
+                  >
+                </div>
               {/if}
-              {#if jsonView === "raw"}
+              {#if !showingTree}
                 <Input bind:value={bodyQuery} placeholder="Search in body…" class="h-6 flex-1" />
                 {#if bodyQuery.trim()}
                   <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
                 {/if}
               {/if}
+              <div class="ml-auto flex shrink-0 items-center gap-1">
+                <button class="seg" title="Zoom out" aria-label="Zoom out" onclick={() => zoom(-1)}>A−</button>
+                <button
+                  class="seg tabular-nums"
+                  title="Reset zoom"
+                  aria-label="Reset zoom"
+                  onclick={() => (bodyFontPx = DEFAULT_FONT_PX)}>{bodyFontPx}px</button
+                >
+                <button class="seg" title="Zoom in" aria-label="Zoom in" onclick={() => zoom(1)}>A+</button>
+              </div>
             </div>
           {/if}
           {#if json}
@@ -470,33 +523,37 @@
           </div>
         {/if}
         {#if json && jsonView === "tree"}
-          <div class="overflow-auto pl-1 text-xs leading-5">
+          <div class="overflow-auto pl-1" style={bodyStyle}>
             <JsonTree data={json} onpick={(p) => (xPath = p)} />
+          </div>
+        {:else if isXml && xmlView === "tree"}
+          <div class="overflow-auto pl-1" style={bodyStyle}>
+            <XmlTree node={parsedXmlRoot!} />
           </div>
         {:else}
         {#if matches}
           {#if matches.length === 0}
             <div class="hint p-4 text-center">No matches.</div>
           {:else}
-            <div class="flex text-xs">
+            <div class="flex" style={bodyStyle}>
               <div
                 class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
                 aria-hidden="true"
               >
-                {#each matches as m (m.n)}<div class="leading-5">{m.n}</div>{/each}
+                {#each matches as m (m.n)}<div>{m.n}</div>{/each}
               </div>
-              <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
+              <pre class="mono flex-1 pl-2 whitespace-pre text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
             </div>
           {/if}
         {:else}
-          <div class="flex text-xs">
+          <div class="flex" style={bodyStyle}>
             <div
               class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
               aria-hidden="true"
             >
-              {#each bodyLines as _, i (i)}<div class="leading-5">{i + 1}</div>{/each}
+              {#each bodyLines as _, i (i)}<div>{i + 1}</div>{/each}
             </div>
-            <pre class="mono flex-1 pl-2 leading-5 whitespace-pre text-fg">{prettyBody}</pre>
+            <pre class="mono flex-1 pl-2 whitespace-pre text-fg">{prettyBody}</pre>
           </div>
           {/if}
         {/if}
