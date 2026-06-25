@@ -1,6 +1,6 @@
 // YAML export/import — the git-friendly artifact layer over the RedDB store.
 //
-// Export writes a plain-text tree (one request per file) under `<collections>/_exports`;
+// Export writes a plain-text tree (one request per file) under `<collections>/exports`;
 // secret VALUES are never written (only their names, via environmentToFile). Import reads
 // that tree back into RedDB. This keeps the Bruno-style git workflow while RedDB stays the
 // live store.
@@ -16,14 +16,15 @@ import {
 import * as fs from "./fs";
 import * as repo from "./repo";
 
-const EXPORTS = "_exports";
-// Project-level environments + globals live in a reserved sibling of the collections
-// (the `_` prefix keeps it out of the per-collection import loop).
+const EXPORTS = "exports";
+// Project-level environments + globals live in a reserved sibling of the collections,
+// inside the exports dir (the `_` prefix keeps it out of the per-collection import loop,
+// since collection ids never start with `_`).
 const PROJECT = "_project";
 const join = (...p: string[]) => p.join("/");
 
 /** Write every collection plus the project-level environments (incl. the reserved
- *  "Globals" base env) to `<collections_root>/_exports/`. Returns that folder path.
+ *  "Globals" base env) to `<collections_root>/exports/`. Returns that folder path.
  *  Secret values are never written — only their names (via environmentToFile). */
 export async function exportAll(
   collections: LoadedCollection[],
@@ -55,7 +56,7 @@ export async function exportAll(
   return outRoot;
 }
 
-/** Read the `_exports` tree back into RedDB. Secrets come in empty (values aren't in YAML). */
+/** Read the `exports` tree back into RedDB. Secrets come in empty (values aren't in YAML). */
 export async function importAll(): Promise<number> {
   const { parse } = await import("yaml");
   const root = await fs.collectionsRoot();
