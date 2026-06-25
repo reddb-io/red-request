@@ -189,3 +189,146 @@ export async function migrationSummary(): Promise<{
   }
   return out;
 }
+
+// --- RedDB-native VCS ("Git for Data") -------------------------------------
+// reddb ≥1.15 retains MVCC history for KV collections opted into versioning, so
+// `SELECT ... AS OF COMMIT '<hash>'` time-travels each key. Writes go through the
+// gRPC `red connect` conduit (autocommit connection 0); a commit is an HTTP
+// `POST /repo/commits {connection_id:0}` on the SAME embedded server — it pins the
+// current global snapshot (root_xid), so AS OF reads of prior versions resolve.
+// Validated against reddb 1.15.0; commit needs author+email and AS OF needs the full
+// 64-char hash. Commits are best-effort: the data is already persisted by the write,
+// so a failed commit only costs a missing restore point (never data).
+
+/** Raw request to the embedded reddb HTTP/repo API, via the Rust `reddb_request`
+ *  proxy (sidesteps the webview mixed-content block, frames Content-Length). */
+async function reddbHttp(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<{ ok: boolean; status: number; json: unknown }> {
+  try {
+    const reply = await invoke<HttpReply>("reddb_request", {
+      method,
+      path,
+      body: body === undefined ? null : JSON.stringify(body),
+    });
+    let json: unknown = null;
+    try {
+      json = JSON.parse(reply.body);
+    } catch {
+      /* non-JSON body */
+    }
+    return {
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      json,
+    };
+  } catch {
+    return { ok: false, status: 0, json: null };
+  }
+}
+
+/** Opt a KV collection into MVCC versioning (idempotent). Required before commits
+ *  can time-travel its keys. Safe on populated collections — flips a catalog flag;
+ *  history starts from this point forward. Tolerant of "already versioned". */
+export async function setVersioned(collection: string): Promise<void> {
+  await rql(`ALTER TABLE ${collection} SET VERSIONED = true`).catch(() => {});
+}
+
+/** A commit in the store's history — one restore point across every versioned
+ *  collection. */
+export interface VcsCommit {
+  hash: string;
+  message: string;
+  author: string;
+  timestampMs: number;
+}
+
+const COMMIT_AUTHOR = "red-request";
+const COMMIT_EMAIL = "app@red-request.local";
+
+/** Create a commit pinning the current snapshot. Returns the full commit hash, or
+ *  null when nothing changed / the server declined (non-fatal). */
+export async function commit(message: string): Promise<string | null> {
+  const r = await reddbHttp("POST", "/repo/commits", {
+    connection_id: 0,
+    message,
+    author: COMMIT_AUTHOR,
+    email: COMMIT_EMAIL,
+    allow_empty: false,
+  });
+  if (!r.ok) return null;
+  const hash = (r.json as { result?: { hash?: string } })?.result?.hash;
+  return typeof hash === "string" ? hash : null;
+}
+
+let commitTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingMessage = "edit";
+/** Debounced auto-commit: coalesces a burst of edits into one restore point. Call
+ *  freely from write paths; the actual commit fires `delayMs` after the last call. */
+export function commitSoon(message = "edit", delayMs = 1500): void {
+  pendingMessage = message;
+  if (commitTimer) clearTimeout(commitTimer);
+  commitTimer = setTimeout(() => {
+    commitTimer = null;
+    void commit(pendingMessage);
+  }, delayMs);
+}
+
+/** Recent commits, newest first. */
+export async function listCommits(limit = 50): Promise<VcsCommit[]> {
+  const r = await reddbHttp("GET", `/repo/commits?limit=${limit}`);
+  if (!r.ok) return [];
+  // Accept either {result:{commits:[...]}} or {result:[...]} or a bare array.
+  const root = r.json as
+    | { result?: { commits?: unknown[] } | unknown[] }
+    | unknown[]
+    | null;
+  const raw = Array.isArray(root)
+    ? root
+    : Array.isArray((root as { result?: unknown[] })?.result)
+      ? ((root as { result: unknown[] }).result as unknown[])
+      : (((root as { result?: { commits?: unknown[] } })?.result?.commits ??
+          []) as unknown[]);
+  const out: VcsCommit[] = [];
+  for (const c of raw) {
+    const o = c as Record<string, unknown>;
+    const hash = o.hash;
+    if (typeof hash !== "string") continue;
+    const author = o.author as { name?: string } | string | undefined;
+    out.push({
+      hash,
+      message: typeof o.message === "string" ? o.message : "",
+      author:
+        typeof author === "string" ? author : (author?.name ?? COMMIT_AUTHOR),
+      timestampMs:
+        typeof o.timestamp_ms === "number"
+          ? o.timestamp_ms
+          : typeof o.timestampMs === "number"
+            ? o.timestampMs
+            : 0,
+    });
+  }
+  return out;
+}
+
+/** Time-travel read: the JSON value of a KV `key` as of `commitHash` (full 64-char
+ *  hash). Returns null when the key had no snapshot-visible version at that commit. */
+export async function kvGetAsOf<T>(
+  collection: string,
+  key: string,
+  commitHash: string
+): Promise<T | null> {
+  const r = await rql(
+    `SELECT value FROM ${collection} AS OF COMMIT '${esc(commitHash)}' WHERE key = '${esc(key)}'`
+  );
+  if (!r.ok || r.records.length === 0) return null;
+  const v = r.records[0]!.value;
+  if (typeof v !== "string") return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
+}
