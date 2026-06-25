@@ -26,10 +26,12 @@ function assetCandidates(triple) {
         : null;
   if (!os) throw new Error(`unsupported target triple: ${triple}`);
   const ext = os === "windows" ? ".exe" : "";
-  const glibc = `red-${os}-${arch}${ext}`;
+  // reddb publishes darwin sidecars as `red-macos-<arch>`, not `red-darwin-<arch>`.
+  const assetOs = os === "darwin" ? "macos" : os;
+  const glibc = `red-${assetOs}-${arch}${ext}`;
   const preferStatic =
     os === "linux" && (arch === "x86_64" || arch === "aarch64");
-  return preferStatic ? [`red-${os}-${arch}-static`, glibc] : [glibc];
+  return preferStatic ? [`red-${assetOs}-${arch}-static`, glibc] : [glibc];
 }
 
 async function ghJson(path) {

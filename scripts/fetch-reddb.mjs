@@ -58,10 +58,12 @@ function assetCandidates(triple) {
         : null;
   if (!os) throw new Error(`Unsupported target triple: ${triple}`);
   const ext = os === "windows" ? ".exe" : "";
-  const glibc = `red-${os}-${arch}${ext}`;
+  // reddb publishes darwin sidecars as `red-macos-<arch>`, not `red-darwin-<arch>`.
+  const assetOs = os === "darwin" ? "macos" : os;
+  const glibc = `red-${assetOs}-${arch}${ext}`;
   // The static variant is published only for the linux x86_64 / aarch64 sidecars.
   const preferStatic = os === "linux" && (arch === "x86_64" || arch === "aarch64");
-  const names = preferStatic ? [`red-${os}-${arch}-static`, glibc] : [glibc];
+  const names = preferStatic ? [`red-${assetOs}-${arch}-static`, glibc] : [glibc];
   return { names, ext, os };
 }
 

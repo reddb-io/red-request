@@ -48,10 +48,16 @@ jobs:
           node-version: "22"
 
       - name: Check RedDB sidecar release assets
-        # Linux-only for now: RedDB publishes only the linux sidecar (red-linux-x86_64).
-        # Re-add x86_64-pc-windows-msvc here (and the windows matrix leg below) once reddb
-        # ships red-windows-x86_64.exe.
-        run: node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu
+        # reddb v1.15+ publishes sidecars for every platform we ship (linux x86_64/aarch64,
+        # macOS x86_64/aarch64, windows x86_64). Verify all are present at REDDB_VERSION
+        # before spending matrix time.
+        run: >-
+          node scripts/check-reddb-release-assets.mjs
+          x86_64-unknown-linux-gnu
+          aarch64-unknown-linux-gnu
+          x86_64-apple-darwin
+          aarch64-apple-darwin
+          x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -64,18 +70,49 @@ jobs:
       matrix:
         include:
           # Linux ships BOTH the AppImage (single-file, what install.sh pulls) and the .deb
-          # (apt crowd). AppImage tooling runs without FUSE via APPIMAGE_EXTRACT_AND_RUN
-          # (set in env above). ubuntu-22.04 GitHub-hosted.
+          # (apt crowd). AppImage tooling runs without FUSE via APPIMAGE_EXTRACT_AND_RUN.
           - {
               os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
               args: "--bundles deb,appimage",
+              osname: linux,
+              arch: x86_64,
             }
-          # macOS (build-from-source) and Windows (reddb:fetch) legs are temporarily
-          # dropped: reddb publishes only the linux sidecar, so the windows leg fails
-          # preflight and blocks the whole publish. Restore both legs once reddb ships
-          # red-windows-x86_64.exe (and a darwin binary, to swap macOS off the source build).
+          - {
+              os: ubuntu-22.04-arm,
+              target: aarch64-unknown-linux-gnu,
+              label: linux-aarch64,
+              args: "--bundles deb,appimage",
+              osname: linux,
+              arch: aarch64,
+            }
+          # macOS: .dmg on native runners (Intel = macos-13, Apple Silicon = macos-14).
+          - {
+              os: macos-13,
+              target: x86_64-apple-darwin,
+              label: macos-x86_64,
+              args: "--bundles dmg",
+              osname: darwin,
+              arch: x86_64,
+            }
+          - {
+              os: macos-14,
+              target: aarch64-apple-darwin,
+              label: macos-aarch64,
+              args: "--bundles dmg",
+              osname: darwin,
+              arch: aarch64,
+            }
+          # Windows: NSIS setup .exe.
+          - {
+              os: windows-latest,
+              target: x86_64-pc-windows-msvc,
+              label: windows-x86_64,
+              args: "--bundles nsis",
+              osname: windows,
+              arch: x86_64,
+            }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -129,22 +166,12 @@ jobs:
       - name: Build engine sidecar (Bun → externalBin)
         run: pnpm engine:build
 
-      # Linux/Windows: download the prebuilt `red` from reddb's releases.
+      # Download the prebuilt `red` sidecar for this runner's host triple from reddb's
+      # releases (reddb v1.15+ publishes linux/macOS/windows × x86_64/aarch64).
       - name: Provision RedDB sidecar (download)
-        if: runner.os != 'macOS'
         run: pnpm reddb:fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # macOS: reddb doesn't publish darwin binaries yet, so build `red` from source at the
-      # pinned tag (Apple Silicon). reddb's gRPC build needs protoc. Swap to reddb:fetch once
-      # reddb ships darwin binaries.
-      - name: Provision RedDB sidecar (build from source)
-        if: runner.os == 'macOS'
-        run: |
-          brew install protobuf
-          git clone --depth 1 --branch "$REDDB_VERSION" https://github.com/reddb-io/reddb.git "$RUNNER_TEMP/reddb"
-          REDDB_SRC="$RUNNER_TEMP/reddb" pnpm reddb:sync
 
       # linuxdeploy runs `ldd` on every bundled ELF, including the externalBin sidecars
       # (`red` from reddb, `red-request-engine` from Bun --compile). Those are effectively
@@ -175,17 +202,18 @@ jobs:
           releaseBody: |
             ## Install
 
-            **Linux** — one line; auto-upgrades on re-run, removes cleanly with the uninstaller:
+            **Linux / macOS** — one line; auto-detects your OS + arch, auto-upgrades on re-run:
             ```
             curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
             ```
-            Pulls the single-file `red-request-linux-x86_64.AppImage`, verifies its sha256 against
-            `checksums.txt`, and drops `red-request` (+ an `rr` shortcut) on your PATH. Prefer apt?
-            Grab the `.deb`.
+            On Linux it installs the `.deb` (or `--appimage`) and puts `red-request` (+ an `rr`
+            shortcut) on your PATH; on macOS it downloads + verifies the `.dmg` for you to open.
 
-            _macOS and Windows builds are paused while the RedDB sidecar ships Linux-only; they'll return in a later release._
+            **Windows** — download `red-request-windows-x86_64-setup.exe` below and run it.
 
-            Every asset's sha256 is in `checksums.txt`. Unsigned builds for now.
+            Builds for **linux** (x86_64 · aarch64), **macOS** (Intel · Apple Silicon) and
+            **windows** (x86_64). Every asset's sha256 is in `checksums.txt`. Unsigned for now —
+            macOS: right-click → Open; Windows: "More info → Run anyway" past SmartScreen.
           releaseDraft: false
           prerelease: false
 
@@ -205,12 +233,12 @@ jobs:
           }
           case "${{ runner.os }}" in
             Linux)
-              stage "$BR/appimage/*.AppImage" "red-request-linux-x86_64.AppImage"
-              stage "$BR/deb/*.deb"           "red-request-linux-x86_64.deb" ;;
+              stage "$BR/appimage/*.AppImage" "red-request-linux-${{ matrix.arch }}.AppImage"
+              stage "$BR/deb/*.deb"           "red-request-linux-${{ matrix.arch }}.deb" ;;
             macOS)
-              stage "$BR/dmg/*.dmg"           "red-request-darwin-aarch64.dmg" ;;
+              stage "$BR/dmg/*.dmg"           "red-request-darwin-${{ matrix.arch }}.dmg" ;;
             Windows)
-              stage "$BR/nsis/*-setup.exe"    "red-request-windows-x86_64-setup.exe" ;;
+              stage "$BR/nsis/*-setup.exe"    "red-request-windows-${{ matrix.arch }}-setup.exe" ;;
           esac
           ls -la "$OUT"
 
