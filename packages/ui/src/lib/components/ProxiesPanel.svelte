@@ -11,6 +11,7 @@
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import { ws } from "../store.svelte";
   import { USER_AGENTS } from "@red-request/core/constants";
+  import { onDestroy } from "svelte";
 
   // Which panels to render. Defaults to both (legacy); Settings renders one at a time.
   let { show = "both" }: { show?: "proxies" | "profiles" | "both" } = $props();
@@ -21,6 +22,9 @@
   ];
 
   const save = () => ws.saveProxiesProfiles();
+  // Inputs persist on blur; also flush on unmount so a field edited and left focused
+  // when the panel/app closes can't be lost — making network settings autosave too.
+  onDestroy(save);
 
   const TYPES = [
     { value: "http", label: "HTTP" },
