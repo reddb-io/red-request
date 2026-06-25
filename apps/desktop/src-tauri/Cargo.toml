@@ -1,6 +1,6 @@
 [package]
 name = "red-request"
-version = "0.29.0"
+version = "0.30.0"
 description = "Open-source white-label API client (recker-powered)"
 authors = ["RedDB.io"]
 edition = "2021"
