@@ -163,6 +163,19 @@
       });
     });
   }
+  function deleteBackup(path: string, label: string) {
+    void confirm(`Delete backup "${label}"?\n\nThis cannot be undone.`, {
+      title: "Delete backup",
+      kind: "warning",
+    }).then((ok) => {
+      if (!ok) return;
+      void withStatus("Delete", async () => {
+        await ws.deleteBackup(path);
+        await loadBackups();
+        return "Backup deleted";
+      });
+    });
+  }
 
   const exportYaml = () =>
     withStatus("Export", async () => {
@@ -436,12 +449,22 @@
             class="flex items-center justify-between gap-3 rounded px-2 py-1 hover:bg-[var(--color-bg-2)]"
           >
             <span class="truncate text-xs text-fg" title={b.path}>{prettyBackup(b.name)}</span>
-            <Button
-              onclick={() => restoreBackup(b.path, prettyBackup(b.name))}
-              disabled={dataBusy}
-              variant="ghost"
-              size="xs">Restore</Button
-            >
+            <div class="flex shrink-0 items-center gap-1">
+              <Button
+                onclick={() => restoreBackup(b.path, prettyBackup(b.name))}
+                disabled={dataBusy}
+                variant="ghost"
+                size="xs">Restore</Button
+              >
+              <Button
+                onclick={() => deleteBackup(b.path, prettyBackup(b.name))}
+                disabled={dataBusy}
+                variant="ghost"
+                size="xs"
+                aria-label="Delete backup"
+                title="Delete backup">Delete</Button
+              >
+            </div>
           </li>
         {/each}
       </ul>

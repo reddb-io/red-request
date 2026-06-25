@@ -193,6 +193,24 @@ fn fs_remove(app: tauri::AppHandle, path: String) -> Result<(), String> {
     }
 }
 
+// External read/write for paths the user explicitly chose via the OS open/save
+// dialog (Postman/Insomnia export, file import). Deliberately NOT sandboxed to the
+// collections root — the native dialog IS the user's consent boundary, and the whole
+// point is to write/read outside the store (Downloads, Documents, …). The guarded
+// `fs_*` commands above stay for the internal `_exports`/backups tree.
+#[tauri::command]
+fn fs_read_external(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn fs_write_external(path: String, contents: String) -> Result<(), String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FileMeta {
@@ -1996,6 +2014,8 @@ pub fn run() {
             fs_write_text,
             fs_mkdirp,
             fs_remove,
+            fs_read_external,
+            fs_write_external,
             file_meta,
             engine_call,
             reddb_url,
