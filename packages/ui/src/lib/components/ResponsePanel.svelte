@@ -11,10 +11,11 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
-  let tab = $state<
-    "body" | "request" | "headers" | "timings" | "tls" | "tests"
-  >("body");
+  let tab = $state<"body" | "request" | "timings" | "tls" | "tests">("body");
   let bodyQuery = $state("");
+  // Response headers now live in a collapsible accordion at the top of the body tab, so the
+  // body gets the full panel when collapsed. Persists across responses.
+  let headersOpen = $state(true);
   let saved = $state(false);
 
   function extFor(ct: string): string {
@@ -394,7 +395,7 @@
           >request</button
         >
         <span class="mt-2 px-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-fg-faint uppercase">Response</span>
-        {#each ["body", "headers", "timings"] as const as t (t)}
+        {#each ["body", "timings"] as const as t (t)}
           <button
             onclick={() => (tab = t)}
             class="tab w-full rounded text-left"
@@ -425,6 +426,34 @@
 
     <div class="flex-1 overflow-auto p-3">
       {#if tab === "body"}
+        {@const headerCount = Object.keys(r.headers).length}
+        {#if headerCount}
+          <div class="mb-2 rounded border border-border">
+            <button
+              onclick={() => (headersOpen = !headersOpen)}
+              class="flex w-full items-center gap-2 px-2 py-1 text-xs text-fg-muted hover:text-fg"
+              title="Response headers"
+            >
+              <span class="text-fg-subtle">{headersOpen ? "▾" : "▸"}</span>
+              <span class="label">Headers</span>
+              <span class="hint">{headerCount}</span>
+            </button>
+            {#if headersOpen}
+              <div class="max-h-48 overflow-auto border-t border-border px-2 py-1">
+                <table class="mono w-full text-xs">
+                  <tbody>
+                    {#each Object.entries(r.headers) as [k, v] (k)}
+                      <tr class="border-b border-[var(--color-bg-2)]">
+                        <td class="py-1 pr-4 align-top text-fg-muted">{k}</td>
+                        <td class="py-1 break-all text-fg">{v}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </div>
+        {/if}
         {#if r.meta}
           <div class="mb-2 flex flex-wrap gap-2 text-xs text-fg-muted">
             {#each Object.entries(r.meta) as [k, v] (k)}
@@ -624,17 +653,6 @@
         {:else}
           <div class="text-fg-faint">Send the request to see what was sent.</div>
         {/if}
-      {:else if tab === "headers"}
-        <table class="mono w-full text-xs">
-          <tbody>
-            {#each Object.entries(r.headers) as [k, v] (k)}
-              <tr class="border-b border-[var(--color-bg-2)]">
-                <td class="py-1 pr-4 text-fg-muted">{k}</td>
-                <td class="py-1 break-all text-fg">{v}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
       {:else if tab === "timings"}
         <div class="flex flex-col gap-4">
           <div>
