@@ -325,3 +325,15 @@ export async function ensureSample(): Promise<void> {
     })
   );
 }
+
+// --- Native VCS: request history / time-travel -----------------------------
+// Commits are whole-store restore points (a commit pins the global MVCC snapshot);
+// `requestAsOf` reads one request's value as it was at a given commit.
+export type { VcsCommit } from "./reddb";
+
+/** Recent store commits (restore points), newest first. */
+export const listCommits = (limit = 50) => db.listCommits(limit);
+
+/** A request's definition as it was at `commitHash`, or null if it didn't exist then. */
+export const requestAsOf = (colId: string, reqId: string, commitHash: string) =>
+  db.kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash);
