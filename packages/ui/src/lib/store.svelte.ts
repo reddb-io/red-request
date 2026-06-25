@@ -1384,6 +1384,20 @@ class Workspace {
     this.selectRequest(this.activeColId, id);
   }
 
+  /** Restore the active request to a past version (from the VCS history modal). The
+   *  restore is itself a new commit, so it also becomes the newest version. */
+  async restoreRequestVersion(req: RequestDefinition): Promise<void> {
+    if (!this.activeColId) return;
+    const col = this.activeCollection;
+    if (col) {
+      const i = col.requests.findIndex((r) => r.id === req.id);
+      if (i >= 0) col.requests[i] = req;
+      else col.requests.push(req);
+    }
+    await repo.saveRequest(this.activeColId, req);
+    this.selectRequest(this.activeColId, req.id);
+  }
+
   /**
    * Smart paste import: a structured doc becomes a whole new collection — OpenAPI/Swagger
    * (`paths`), a HAR file (`log.entries`), or a Postman v2.1 collection (`info`+`item`).

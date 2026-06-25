@@ -18,9 +18,11 @@
   let showRunner = $state(false);
   let showCode = $state(false);
   let showSchema = $state(false);
+  let showHistory = $state(false);
   type ModalComponent = Component<{ onClose: () => void }>;
   let RunnerPanelComponent = $state<ModalComponent | null>(null);
   let CodeModalComponent = $state<ModalComponent | null>(null);
+  let HistoryModalComponent = $state<ModalComponent | null>(null);
   let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
 
@@ -52,6 +54,18 @@
       }
     }
     showCode = true;
+  }
+
+  async function openHistory() {
+    if (!HistoryModalComponent) {
+      try {
+        HistoryModalComponent = (await import("./HistoryModal.svelte")).default;
+      } catch (error) {
+        reportLazyLoadFailure("History", error);
+        return;
+      }
+    }
+    showHistory = true;
   }
 
   async function openSchema() {
@@ -298,6 +312,13 @@
           title="Generate code (curl, fetch, python…)">Code</Button
         >
       {/if}
+      <Button
+        onclick={() => void openHistory()}
+        variant="outline"
+        size="xs"
+        class="shrink-0"
+        title="View and restore past versions of this request">History</Button
+      >
     </div>
 
     {#if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
@@ -536,6 +557,9 @@
 
   {#if showCode && CodeModalComponent}
     <CodeModalComponent onClose={() => (showCode = false)} />
+  {/if}
+  {#if showHistory && HistoryModalComponent}
+    <HistoryModalComponent onClose={() => (showHistory = false)} />
   {/if}
   {#if showSchema && GraphQlSchemaComponent}
     <GraphQlSchemaComponent onClose={() => (showSchema = false)} />

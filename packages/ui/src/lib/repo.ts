@@ -92,6 +92,10 @@ export function slugify(name: string): string {
 const reqKey = (colId: string, reqId: string) => `${colId}.${reqId}`;
 const ownedBy = (colId: string, key: string) => key.startsWith(`${colId}.`);
 
+/** The "document" collections whose edits we version + time-travel (native VCS).
+ *  HIST (response runs, pruned) and OAUTH (ephemeral tokens) stay last-writer-wins. */
+export const VERSIONED_COLLECTIONS = [COL, REQ, ENV, SETTINGS] as const;
+
 export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(COL);
   await db.ensureKvCollection(REQ);
@@ -99,6 +103,9 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(HIST);
   await db.ensureKvCollection(SETTINGS);
   await db.ensureKvCollection(OAUTH);
+  // Opt the document collections into MVCC versioning so commits time-travel.
+  // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
+  for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
 }
 
 const NETWORK_KEY = "network";
@@ -107,8 +114,10 @@ export async function loadNetwork(): Promise<NetworkSettings> {
   const raw = await db.kvGet<unknown>(SETTINGS, NETWORK_KEY).catch(() => null);
   return networkSettingsSchema.parse(raw ?? {});
 }
-export const saveNetwork = (settings: NetworkSettings) =>
-  db.kvPut(SETTINGS, NETWORK_KEY, settings);
+export const saveNetwork = async (settings: NetworkSettings) => {
+  await db.kvPut(SETTINGS, NETWORK_KEY, settings);
+  db.commitSoon("update network settings");
+};
 
 /** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */
 export async function saveHistory(entry: HistoryEntry): Promise<void> {
@@ -209,23 +218,35 @@ export async function loadGlobals(): Promise<Record<string, string> | null> {
     .catch(() => null);
   return raw ?? null;
 }
-export const saveGlobals = (vars: Record<string, string>) =>
-  db.kvPut(SETTINGS, GLOBALS_KEY, vars);
+export const saveGlobals = async (vars: Record<string, string>) => {
+  await db.kvPut(SETTINGS, GLOBALS_KEY, vars);
+  db.commitSoon("update globals");
+};
 
-export const saveCollectionMeta = (colId: string, c: CollectionFile) =>
-  db.kvPut(COL, colId, c);
+export const saveCollectionMeta = async (colId: string, c: CollectionFile) => {
+  await db.kvPut(COL, colId, c);
+  db.commitSoon(`save collection ${c.name ?? colId}`);
+};
 
-export const saveRequest = (colId: string, req: RequestDefinition) =>
-  db.kvPut(REQ, reqKey(colId, req.id), req);
+export const saveRequest = async (colId: string, req: RequestDefinition) => {
+  await db.kvPut(REQ, reqKey(colId, req.id), req);
+  db.commitSoon(`save request ${req.name ?? req.id}`);
+};
 
-export const deleteRequest = (colId: string, reqId: string) =>
-  db.kvDelete(REQ, reqKey(colId, reqId));
+export const deleteRequest = async (colId: string, reqId: string) => {
+  await db.kvDelete(REQ, reqKey(colId, reqId));
+  db.commitSoon("delete request");
+};
 
-export const saveEnvironment = (env: StoredEnvironment) =>
-  db.kvPut(ENV, slugify(env.name), env);
+export const saveEnvironment = async (env: StoredEnvironment) => {
+  await db.kvPut(ENV, slugify(env.name), env);
+  db.commitSoon(`save environment ${env.name}`);
+};
 
-export const deleteEnvironment = (name: string) =>
-  db.kvDelete(ENV, slugify(name));
+export const deleteEnvironment = async (name: string) => {
+  await db.kvDelete(ENV, slugify(name));
+  db.commitSoon(`delete environment ${name}`);
+};
 
 /** Delete a whole collection: its meta + every owned request and history row.
  *  Environments are project-level now, so they are not touched. */
@@ -243,6 +264,7 @@ export async function deleteCollection(colId: string): Promise<void> {
       .map((h) => db.kvDelete(HIST, h.key)),
   ]);
   await db.kvDelete(COL, colId);
+  db.commitSoon("delete collection");
 }
 
 /** Seed a runnable example collection the first time the store is empty. */
@@ -303,3 +325,15 @@ export async function ensureSample(): Promise<void> {
     })
   );
 }
+
+// --- Native VCS: request history / time-travel -----------------------------
+// Commits are whole-store restore points (a commit pins the global MVCC snapshot);
+// `requestAsOf` reads one request's value as it was at a given commit.
+export type { VcsCommit } from "./reddb";
+
+/** Recent store commits (restore points), newest first. */
+export const listCommits = (limit = 50) => db.listCommits(limit);
+
+/** A request's definition as it was at `commitHash`, or null if it didn't exist then. */
+export const requestAsOf = (colId: string, reqId: string, commitHash: string) =>
+  db.kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash);
