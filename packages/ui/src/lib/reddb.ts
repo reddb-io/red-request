@@ -254,8 +254,8 @@ export async function commit(message: string): Promise<string | null> {
   const r = await reddbHttp("POST", "/repo/commits", {
     connection_id: 0,
     message,
-    author: COMMIT_AUTHOR,
-    email: COMMIT_EMAIL,
+    // reddb's /repo/commits wants author as an object {name,email}.
+    author: { name: COMMIT_AUTHOR, email: COMMIT_EMAIL },
     allow_empty: false,
   });
   if (!r.ok) return null;
