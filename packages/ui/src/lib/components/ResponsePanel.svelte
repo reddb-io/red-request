@@ -135,6 +135,10 @@
   const bodyStyle = $derived(
     `font-size:${bodyFontPx}px; line-height:${Math.round(bodyFontPx * 1.5)}px`
   );
+  // Soft-wrap long body lines. Wrapping drops the line-number gutter (numbers can't track a
+  // logical line once it spills onto several visual rows) and breaks anywhere to stay in view.
+  let bodyWrap = $state(false);
+  const preWrap = $derived(bodyWrap ? "whitespace-pre-wrap break-all" : "whitespace-pre");
 
   // XML tree: parse once with DOMParser so structured XML bodies get the same collapsible
   // chevrons as JSON. Returns the document element, or null on non-XML / parse errors.
@@ -490,7 +494,15 @@
                   <span class="hint shrink-0">{matchCount} match{matchCount === 1 ? "" : "es"}</span>
                 {/if}
               {/if}
-              <div class="ml-auto flex shrink-0 items-center gap-1">
+              {#if !showingTree}
+                <label
+                  class="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-fg-muted"
+                  title="Soft-wrap long lines (hides line numbers while on)"
+                >
+                  <input type="checkbox" bind:checked={bodyWrap} class="accent-accent" /> wrap
+                </label>
+              {/if}
+              <div class="flex shrink-0 items-center gap-1 {showingTree ? 'ml-auto' : ''}">
                 <button class="seg" title="Zoom out" aria-label="Zoom out" onclick={() => zoom(-1)}>A−</button>
                 <button
                   class="seg tabular-nums"
@@ -536,24 +548,28 @@
             <div class="hint p-4 text-center">No matches.</div>
           {:else}
             <div class="flex" style={bodyStyle}>
-              <div
-                class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
-                aria-hidden="true"
-              >
-                {#each matches as m (m.n)}<div>{m.n}</div>{/each}
-              </div>
-              <pre class="mono flex-1 pl-2 whitespace-pre text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
+              {#if !bodyWrap}
+                <div
+                  class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+                  aria-hidden="true"
+                >
+                  {#each matches as m (m.n)}<div>{m.n}</div>{/each}
+                </div>
+              {/if}
+              <pre class="mono flex-1 pl-2 {preWrap} text-fg">{#each matches as m (m.n)}<div>{#each splitLine(m.line) as p}{#if p.hit}<mark class="rounded-sm bg-[var(--color-brand)]/30 text-fg-strong">{p.text}</mark>{:else}{p.text}{/if}{/each}</div>{/each}</pre>
             </div>
           {/if}
         {:else}
           <div class="flex" style={bodyStyle}>
-            <div
-              class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
-              aria-hidden="true"
-            >
-              {#each bodyLines as _, i (i)}<div>{i + 1}</div>{/each}
-            </div>
-            <pre class="mono flex-1 pl-2 whitespace-pre text-fg">{prettyBody}</pre>
+            {#if !bodyWrap}
+              <div
+                class="mono sticky left-0 shrink-0 border-r border-border bg-[var(--color-bg-0)] pr-2 pl-1 text-right text-fg-faint select-none"
+                aria-hidden="true"
+              >
+                {#each bodyLines as _, i (i)}<div>{i + 1}</div>{/each}
+              </div>
+            {/if}
+            <pre class="mono flex-1 pl-2 {preWrap} text-fg">{prettyBody}</pre>
           </div>
           {/if}
         {/if}
