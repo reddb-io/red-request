@@ -18,14 +18,15 @@ concurrency:
 
 env:
   # RedDB sidecar pinned for reproducible builds — bump when adopting a newer reddb.
-  # v1.13.1: first stable to publish the fully *static* (musl) `red-linux-<arch>-static`
-  # assets, which fetch-reddb.mjs now prefers. The dynamic `red-linux-x86_64` links the
-  # build host's glibc and fails to start on older distros ("GLIBC_2.39 not found") → the
-  # reddb sidecar crash-loops and the app hangs on a black/loading screen. The static build
-  # runs on any glibc. v1.13.x also persists collection contracts (declared_model) so KV
-  # collections survive a server restart (reddb fix a8139467); v1.11.0 lost the model on
-  # reopen → "model mismatch: expected kv, got table".
-  REDDB_VERSION: v1.13.1
+  # v1.15.0: multi-model MVCC history (reddb PR #1383) — versioned KV/document. REQUIRED
+  # for the app's native VCS (request history / time-travel / restore): earlier releases
+  # pinned v1.13.1, which lacks versioned KV, so VCS silently no-opped in shipped builds
+  # even though it worked against latest reddb in dev. Keeps the static (musl)
+  # `red-linux-<arch>-static` assets fetch-reddb.mjs prefers (the dynamic `red-linux-x86_64`
+  # links the build host's glibc and crash-loops on older distros, "GLIBC_2.39 not found",
+  # → black/loading screen). Also persists collection contracts so KV collections survive a
+  # server restart (reddb fix a8139467).
+  REDDB_VERSION: v1.15.0
   # Run AppImage tooling (linuxdeploy) without FUSE, which CI runners lack.
   APPIMAGE_EXTRACT_AND_RUN: "1"
   # linuxdeploy's strip pass chokes on some shared objects under the no-FUSE extract path
