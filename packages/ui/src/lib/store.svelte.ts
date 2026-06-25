@@ -29,6 +29,7 @@ import {
 } from "@red-request/core";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
+import * as backup from "./backup";
 import {
   httpSend,
   runnerRun,
@@ -336,6 +337,21 @@ class Workspace {
     this.backToSelector();
   }
 
+  // ---- Backups (manual; an auto-backup also runs once per launch in loadStore) ----
+  /** Write a backup of the current store to `backups/`; returns the path (null if the store is empty). */
+  async createBackup(): Promise<string | null> {
+    return backup.createBackup();
+  }
+  /** Backup files for the active store, newest first. */
+  listBackups(): Promise<import("./fs").DirEntry[]> {
+    return backup.listBackups();
+  }
+  /** Restore a backup (overwrites live values) and reload the store into the UI. */
+  async restoreFromBackup(path: string): Promise<void> {
+    await backup.restoreBackup(path);
+    await this.loadStore();
+  }
+
   /** (Re)load the store; sets loadError on failure. Used by init and Retry.
    *  `canHeal` allows one automatic recovery from incompatible on-disk data
    *  (a collection in the wrong model) — back it up + recreate, then retry once. */
@@ -357,6 +373,9 @@ class Workspace {
       appLog("debug", "loadStore: reloadEnvironments…");
       await this.reloadEnvironments();
       appLog("debug", "loadStore: done");
+      // Snapshot the good loaded state once per launch — a safety net next to the .rdb while
+      // native VCS commit lands (reddb-io/reddb#1382). No-op if the store is empty.
+      void backup.autoBackup();
       // Persist this project's request count for the selector cards.
       if (this.project?.is_project && this.project.project_dir) {
         const total = this.collections.reduce(
