@@ -177,13 +177,17 @@
     });
   }
 
+  let includeSecrets = $state(false);
   const exportYaml = () =>
     withStatus("Export", async () => {
       const path = await yamlio.exportAll(
         $state.snapshot(ws.collections) as LoadedCollection[],
-        [$state.snapshot(ws.globals), ...$state.snapshot(ws.environments)]
+        [$state.snapshot(ws.globals), ...$state.snapshot(ws.environments)],
+        { includeSecrets }
       );
-      return `Exported YAML tree → ${path}`;
+      return includeSecrets
+        ? `Exported YAML tree with PLAINTEXT secrets → ${path}`
+        : `Exported YAML tree → ${path}`;
     });
   const importYaml = () =>
     withStatus("Import", async () => {
@@ -418,8 +422,15 @@
           disabled={dataBusy}
           variant="outline"
           size="xs"
-          title="Write a git-friendly YAML tree (no secret values)">YAML tree</Button
+          title="Write a git-friendly YAML tree">YAML tree</Button
         >
+        <label
+          class="flex cursor-pointer items-center gap-1.5 pl-1 text-xs text-fg-subtle"
+          title="When on, the YAML export also writes decrypted secret values in PLAINTEXT — for migrating to another machine. Never commit that to git or share it."
+        >
+          <input type="checkbox" bind:checked={includeSecrets} class="accent-accent" />
+          include secrets {#if includeSecrets}<span class="text-amber-500">(plaintext!)</span>{/if}
+        </label>
       </div>
     </div>
 

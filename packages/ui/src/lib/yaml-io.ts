@@ -15,6 +15,7 @@ import {
 } from "@red-request/core";
 import * as fs from "./fs";
 import * as repo from "./repo";
+import * as secrets from "./secrets";
 
 const EXPORTS = "exports";
 // Project-level environments + globals live in a reserved sibling of the collections,
@@ -25,10 +26,13 @@ const join = (...p: string[]) => p.join("/");
 
 /** Write every collection plus the project-level environments (incl. the reserved
  *  "Globals" base env) to `<collections_root>/exports/`. Returns that folder path.
- *  Secret values are never written — only their names (via environmentToFile). */
+ *  By default secret VALUES are never written — only their names (via environmentToFile).
+ *  Pass `{ includeSecrets: true }` to also write decrypted secret values in PLAINTEXT
+ *  (for migrating to another machine) — the caller must warn the user first. */
 export async function exportAll(
   collections: LoadedCollection[],
-  environments: StoredEnvironment[] = []
+  environments: StoredEnvironment[] = [],
+  opts: { includeSecrets?: boolean } = {}
 ): Promise<string> {
   const { stringify } = await import("yaml");
   const root = await fs.collectionsRoot();
@@ -48,9 +52,23 @@ export async function exportAll(
   const projDir = join(outRoot, PROJECT);
   await fs.mkdirp(join(projDir, "environments"));
   for (const env of environments) {
+    const file: Record<string, unknown> = { ...environmentToFile(env) };
+    if (opts.includeSecrets) {
+      // Decrypt each sealed secret to plaintext (best-effort: skip any that won't
+      // open, e.g. sealed on another machine). Marked clearly in the file.
+      const plain: Record<string, string> = {};
+      for (const [name, sealed] of Object.entries(env.secrets ?? {})) {
+        try {
+          plain[name] = await secrets.open(sealed);
+        } catch {
+          /* undecryptable on this machine — leave it out */
+        }
+      }
+      file.secretsPlaintext = plain;
+    }
     await fs.writeText(
       join(projDir, "environments", `${repo.slugify(env.name)}.yaml`),
-      stringify(environmentToFile(env))
+      stringify(file)
     );
   }
   return outRoot;
