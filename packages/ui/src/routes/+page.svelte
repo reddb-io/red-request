@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, type Component } from "svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { ws } from "$lib/store.svelte";
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
@@ -23,6 +24,46 @@
 
   onMount(() => {
     void ws.init();
+
+    // Durability net for the debounced autosave: a pending edit must reach reddb before
+    // the app loses focus, hides, or closes — otherwise closing within the debounce
+    // window drops it. flushSave() is a no-op when nothing is pending, so these are cheap.
+    const flush = () => void ws.flushSave();
+    const onVisibility = () => {
+      if (document.hidden) flush();
+    };
+    window.addEventListener("blur", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    // Intercept the window close so the flush lands while reddb is still alive (the Rust
+    // side now reaps the sidecar on Destroyed, not CloseRequested). Race a timeout so a
+    // hung save can never wedge the window shut.
+    let unlistenClose: (() => void) | undefined;
+    try {
+      const win = getCurrentWindow();
+      void win
+        .onCloseRequested(async (event) => {
+          event.preventDefault();
+          try {
+            await Promise.race([
+              ws.flushSave(),
+              new Promise((r) => setTimeout(r, 2000)),
+            ]);
+          } catch {
+            /* never block the close on a save error */
+          }
+          await win.destroy();
+        })
+        .then((u) => (unlistenClose = u));
+    } catch {
+      /* not running inside the Tauri shell (browser dev) — no window to guard */
+    }
+
+    return () => {
+      window.removeEventListener("blur", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      unlistenClose?.();
+    };
   });
 
   // Autosave: persist the active request a short beat after the user stops
