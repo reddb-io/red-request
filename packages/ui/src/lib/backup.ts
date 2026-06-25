@@ -95,6 +95,18 @@ async function pruneBackups(keep: number): Promise<void> {
   for (const old of all.slice(keep)) await remove(old.path).catch(() => {});
 }
 
+/** Delete a single backup file. Its path lives under the guarded `backups/` dir, so the
+ *  sandboxed `fs.remove` accepts it. Refuses anything that isn't a `backup-*.json`. */
+export async function deleteBackup(path: string): Promise<void> {
+  const name = path.slice(
+    Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1
+  );
+  if (!name.startsWith("backup-") || !name.endsWith(".json"))
+    throw new Error("refusing to delete a non-backup file");
+  await remove(path);
+  appLog("info", `backup: deleted ${path}`);
+}
+
 /** One rotating backup per app launch (after the store loads), so every session's good state is
  *  captured before any later mishap. Idempotent within a session; keep ~20 launches of history. */
 let backedUpThisSession = false;

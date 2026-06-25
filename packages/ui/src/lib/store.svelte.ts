@@ -351,6 +351,10 @@ class Workspace {
     await backup.restoreBackup(path);
     await this.loadStore();
   }
+  /** Delete a single backup file from `backups/`. */
+  async deleteBackup(path: string): Promise<void> {
+    await backup.deleteBackup(path);
+  }
 
   /** (Re)load the store; sets loadError on failure. Used by init and Retry.
    *  `canHeal` allows one automatic recovery from incompatible on-disk data
@@ -1489,7 +1493,9 @@ class Workspace {
       filters: [{ name: "Collections", extensions: ["json", "yaml", "yml"] }],
     });
     if (typeof picked !== "string") return null;
-    const text = await fs.readText(picked);
+    // The user picked this path via the OS dialog — read it directly, not through the
+    // collections-root sandbox (which would reject anything outside the store).
+    const text = await fs.readTextExternal(picked);
     return this.importText(text);
   }
 
@@ -1506,7 +1512,7 @@ class Workspace {
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request export"
     );
-    await fs.writeText(path, JSON.stringify(data, null, 2));
+    await fs.writeTextExternal(path, JSON.stringify(data, null, 2));
     return path;
   }
 
@@ -1523,7 +1529,7 @@ class Workspace {
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request"
     );
-    await fs.writeText(path, JSON.stringify(data, null, 2));
+    await fs.writeTextExternal(path, JSON.stringify(data, null, 2));
     return path;
   }
 

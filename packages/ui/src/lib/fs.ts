@@ -23,3 +23,14 @@ export const mkdirp = (path: string): Promise<void> =>
 
 export const remove = (path: string): Promise<void> =>
   invoke<void>("fs_remove", { path });
+
+// External read/write for OS-dialog-chosen paths (export/import to/from anywhere on
+// disk). NOT sandboxed to the collections root — the native dialog is the user's
+// consent boundary. Use these only with a path returned by an open/save dialog.
+export const readTextExternal = (path: string): Promise<string> =>
+  invoke<string>("fs_read_external", { path });
+
+export const writeTextExternal = (
+  path: string,
+  contents: string
+): Promise<void> => invoke<void>("fs_write_external", { path, contents });
