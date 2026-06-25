@@ -1353,10 +1353,15 @@ class Workspace {
     }
   }
 
-  /** Create a new request (optionally inside a folder) and select it. */
-  async addRequest(folder = ""): Promise<string | null> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId) return null;
+  /**
+   * Create a new request (optionally inside a folder) and select it. `colId` targets a
+   * specific collection (defaults to the active one) so the sidebar's per-collection "+"
+   * adds to the collection it was clicked on, not whichever happens to be active.
+   */
+  async addRequest(folder = "", colId?: string): Promise<string | null> {
+    const targetColId = colId ?? this.activeColId;
+    const col = this.collections.find((c) => c.id === targetColId);
+    if (!col || !targetColId) return null;
     const id = `req-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 1296
     ).toString(36)}`;
@@ -1366,10 +1371,10 @@ class Workspace {
       folder,
       url: "https://",
     };
-    await repo.saveRequest(this.activeColId, req);
+    await repo.saveRequest(targetColId, req);
     col.requests.push(req);
     col.collection.order.push(id);
-    this.selectRequest(this.activeColId, id);
+    this.selectRequest(targetColId, id);
     return id;
   }
 
@@ -1543,10 +1548,12 @@ class Workspace {
     return path;
   }
 
-  /** Duplicate a request (same folder) and select the copy. */
+  /** Duplicate a request (same collection + folder) and select the copy. */
   async duplicateRequest(reqId: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId) return;
+    const col = this.collections.find((c) =>
+      c.requests.some((r) => r.id === reqId)
+    );
+    if (!col) return;
     const src = col.requests.find((r) => r.id === reqId);
     if (!src) return;
     const id = `req-${Date.now().toString(36)}-${Math.floor(
@@ -1557,122 +1564,188 @@ class Workspace {
       id,
       name: `${src.name} (copy)`,
     };
-    await repo.saveRequest(this.activeColId, copy);
+    await repo.saveRequest(col.id, copy);
     col.requests.push(copy);
     col.collection.order.push(id);
-    this.selectRequest(this.activeColId, id);
+    this.selectRequest(col.id, id);
   }
 
-  async addFolder(name: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !name.trim()) return;
+  async addFolder(name: string, colId?: string): Promise<void> {
+    const targetColId = colId ?? this.activeColId;
+    const col = this.collections.find((c) => c.id === targetColId);
+    if (!col || !targetColId || !name.trim()) return;
     if (col.collection.folders.includes(name)) return;
     col.collection.folders.push(name);
-    await this.persistCollection();
+    await repo.saveCollectionMeta(
+      targetColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
   }
 
   /** Delete a folder; its requests move back to the collection root. */
-  async deleteFolder(name: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId) return;
+  async deleteFolder(name: string, colId?: string): Promise<void> {
+    const targetColId = colId ?? this.activeColId;
+    const col = this.collections.find((c) => c.id === targetColId);
+    if (!col || !targetColId) return;
     col.collection.folders = col.collection.folders.filter((f) => f !== name);
     for (const r of col.requests) {
       if (r.folder === name) {
         r.folder = "";
         await repo.saveRequest(
-          this.activeColId,
+          targetColId,
           $state.snapshot(r) as RequestDefinition
         );
       }
     }
-    await this.persistCollection();
-  }
-
-  /** Move a request to a folder ("" = root), appended at the folder's end. */
-  async moveRequest(reqId: string, folder: string): Promise<void> {
-    await this.reorderRequest(reqId, folder, null);
+    await repo.saveCollectionMeta(
+      targetColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
   }
 
   /**
-   * Reposition a request via drag-and-drop. `folder` is the destination ("" = root)
-   * and `beforeId` is the sibling it should land *before* (null → append to the end
-   * of that folder). Updates `collection.order` (the single source of sidebar order),
-   * re-sorts the in-memory request array so the move shows immediately, and persists
-   * both the request (if its folder changed) and the collection meta.
+   * Move a request to a folder ("" = root), appended at the folder's end. `targetColId`
+   * moves it into another collection (defaults to the request's current collection).
+   */
+  async moveRequest(
+    reqId: string,
+    folder: string,
+    targetColId?: string
+  ): Promise<void> {
+    await this.reorderRequest(reqId, folder, null, targetColId);
+  }
+
+  /**
+   * Reposition a request via drag-and-drop. `folder` is the destination ("" = root) and
+   * `beforeId` is the sibling it should land *before* (null → append to the end of that
+   * folder). `targetColId` moves the request into another collection (defaults to its
+   * current one). The source collection is discovered from `dragId`, so this works
+   * regardless of which collection is active. Updates `collection.order` (the single
+   * source of sidebar order), re-sorts the in-memory request array so the move shows
+   * immediately, and persists the request plus the affected collection meta.
    */
   async reorderRequest(
     dragId: string,
     folder: string,
-    beforeId: string | null
+    beforeId: string | null,
+    targetColId?: string
   ): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId) return;
     if (beforeId === dragId) return; // dropped onto itself → no-op
-    const req = col.requests.find((r) => r.id === dragId);
-    if (!req) return;
+    // The request's current collection — found from the id, not from `activeColId`.
+    const src = this.collections.find((c) =>
+      c.requests.some((r) => r.id === dragId)
+    );
+    if (!src) return;
+    const dest = targetColId
+      ? (this.collections.find((c) => c.id === targetColId) ?? src)
+      : src;
 
-    const folderChanged = (req.folder ?? "") !== folder;
+    // Place dragId inside `dest`'s order array, before `beforeId` or at the end of `folder`.
+    const placeInOrder = (orderIn: string[]): string[] => {
+      const order = orderIn.filter((id) => id !== dragId);
+      if (beforeId) {
+        const idx = order.indexOf(beforeId);
+        if (idx < 0) order.push(dragId);
+        else order.splice(idx, 0, dragId);
+      } else {
+        let insertAt = order.length;
+        for (let i = order.length - 1; i >= 0; i--) {
+          const r = dest.requests.find((x) => x.id === order[i]);
+          if (r && (r.folder ?? "") === folder) {
+            insertAt = i + 1;
+            break;
+          }
+        }
+        order.splice(insertAt, 0, dragId);
+      }
+      return order;
+    };
+
+    if (dest.id === src.id) {
+      const req = src.requests.find((r) => r.id === dragId);
+      if (!req) return;
+      const folderChanged = (req.folder ?? "") !== folder;
+      req.folder = folder;
+      if (this.activeReq?.id === dragId) this.activeReq.folder = folder;
+
+      const order = placeInOrder(src.collection.order);
+      src.collection.order = order;
+      src.requests = [...src.requests].sort(
+        (a, b) => order.indexOf(a.id) - order.indexOf(b.id)
+      );
+
+      if (folderChanged) {
+        await repo.saveRequest(
+          src.id,
+          $state.snapshot(req) as RequestDefinition
+        );
+      }
+      await repo.saveCollectionMeta(
+        src.id,
+        $state.snapshot(src.collection) as typeof src.collection
+      );
+      return;
+    }
+
+    // Cross-collection move: detach from `src`, attach to `dest`, restitch storage.
+    const req = src.requests.find((r) => r.id === dragId);
+    if (!req) return;
     req.folder = folder;
     if (this.activeReq?.id === dragId) this.activeReq.folder = folder;
 
-    // Reposition dragId in the global order array.
-    const order = col.collection.order.filter((id) => id !== dragId);
-    if (beforeId) {
-      const idx = order.indexOf(beforeId);
-      if (idx < 0) order.push(dragId);
-      else order.splice(idx, 0, dragId);
-    } else {
-      // Append after the last id currently living in `folder`.
-      let insertAt = order.length;
-      for (let i = order.length - 1; i >= 0; i--) {
-        const r = col.requests.find((x) => x.id === order[i]);
-        if (r && (r.folder ?? "") === folder) {
-          insertAt = i + 1;
-          break;
-        }
-      }
-      order.splice(insertAt, 0, dragId);
-    }
-    col.collection.order = order;
-    // Re-sort the live array so the sidebar reflects the new order without a reload.
-    col.requests = [...col.requests].sort(
+    src.requests = src.requests.filter((r) => r.id !== dragId);
+    src.collection.order = src.collection.order.filter((id) => id !== dragId);
+    dest.requests.push(req);
+    const order = placeInOrder(dest.collection.order);
+    dest.collection.order = order;
+    dest.requests = [...dest.requests].sort(
       (a, b) => order.indexOf(a.id) - order.indexOf(b.id)
     );
 
-    if (folderChanged) {
-      await repo.saveRequest(
-        this.activeColId,
-        $state.snapshot(req) as RequestDefinition
-      );
-    }
-    await this.persistCollection();
+    await repo.deleteRequest(src.id, dragId);
+    await repo.saveRequest(dest.id, $state.snapshot(req) as RequestDefinition);
+    await repo.saveCollectionMeta(
+      src.id,
+      $state.snapshot(src.collection) as typeof src.collection
+    );
+    await repo.saveCollectionMeta(
+      dest.id,
+      $state.snapshot(dest.collection) as typeof dest.collection
+    );
+    // Keep the open request reachable: if it was selected, follow it into its new home.
+    if (this.activeReq?.id === dragId) this.activeColId = dest.id;
   }
 
   /** Rename a request and persist. */
   async renameRequest(reqId: string, name: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId || !name.trim()) return;
+    if (!name.trim()) return;
+    const col = this.collections.find((c) =>
+      c.requests.some((r) => r.id === reqId)
+    );
+    if (!col) return;
     const req = col.requests.find((r) => r.id === reqId);
     if (!req) return;
     req.name = name.trim();
     if (this.activeReq?.id === reqId) this.activeReq.name = name.trim();
-    await repo.saveRequest(
-      this.activeColId,
-      $state.snapshot(req) as RequestDefinition
-    );
+    await repo.saveRequest(col.id, $state.snapshot(req) as RequestDefinition);
   }
 
   async deleteRequest(reqId: string): Promise<void> {
-    const col = this.activeCollection;
-    if (!col || !this.activeColId) return;
-    await repo.deleteRequest(this.activeColId, reqId);
+    const col = this.collections.find((c) =>
+      c.requests.some((r) => r.id === reqId)
+    );
+    if (!col) return;
+    await repo.deleteRequest(col.id, reqId);
     col.requests = col.requests.filter((r) => r.id !== reqId);
     col.collection.order = col.collection.order.filter((id) => id !== reqId);
-    await this.persistCollection();
+    await repo.saveCollectionMeta(
+      col.id,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
     if (this.activeReq?.id === reqId) {
       this.activeReq = null;
       const first = col.requests[0];
-      if (first) this.selectRequest(this.activeColId, first.id);
+      if (first) this.selectRequest(col.id, first.id);
     }
   }
 

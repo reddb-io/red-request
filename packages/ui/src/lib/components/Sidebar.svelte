@@ -60,9 +60,10 @@
     if (renamingId) await ws.renameRequest(renamingId, renameValue);
     renamingId = null;
   }
-  // Create a request and drop straight into rename mode (with the name selected).
-  async function addAndRename(folder: string) {
-    const id = await ws.addRequest(folder);
+  // Create a request and drop straight into rename mode (with the name selected). `colId`
+  // targets the collection whose "+" was clicked, not whichever is currently active.
+  async function addAndRename(folder: string, colId: string) {
+    const id = await ws.addRequest(folder, colId);
     if (id) {
       renameValue = "New Request";
       renamingId = id;
@@ -81,12 +82,16 @@
     renamingColId = null;
   }
 
-  // drag-and-drop: reorder requests and move them across folders (within a collection).
-  // `dropTarget` is the live insertion point — the folder and the sibling id to land
-  // *before* (null → end of that folder). `dropFolderHeader`/`dropRootHeader` light up
-  // a header when you hover it to drop "into" that container at its end.
+  // drag-and-drop: reorder requests and move them across folders AND collections.
+  // `dropTarget` is the live insertion point — the target collection, the folder, and the
+  // sibling id to land *before* (null → end of that folder). `dropFolderHeader`/
+  // `dropRootHeader` light up a header when you hover it to drop "into" that container.
   let draggingId = $state<string | null>(null);
-  let dropTarget = $state<{ folder: string; beforeId: string | null } | null>(null);
+  let dropTarget = $state<{
+    colId: string;
+    folder: string;
+    beforeId: string | null;
+  } | null>(null);
   let dropFolderHeader = $state<string | null>(null);
   let dropRootHeader = $state<string | null>(null);
 
@@ -99,7 +104,13 @@
 
   // Top half of a row → insert before it; bottom half → insert after (before `nextId`,
   // or end of folder when `nextId` is null).
-  function onRowDragOver(e: DragEvent, folder: string, reqId: string, nextId: string | null) {
+  function onRowDragOver(
+    e: DragEvent,
+    colId: string,
+    folder: string,
+    reqId: string,
+    nextId: string | null
+  ) {
     if (!draggingId) return;
     e.preventDefault();
     e.stopPropagation();
@@ -108,20 +119,31 @@
     const before = e.clientY - rect.top < rect.height / 2;
     dropFolderHeader = null;
     dropRootHeader = null;
-    dropTarget = { folder, beforeId: before ? reqId : nextId };
+    dropTarget = { colId, folder, beforeId: before ? reqId : nextId };
   }
 
   function commitDrop() {
     if (draggingId && dropTarget) {
-      void ws.reorderRequest(draggingId, dropTarget.folder, dropTarget.beforeId);
+      void ws.reorderRequest(
+        draggingId,
+        dropTarget.folder,
+        dropTarget.beforeId,
+        dropTarget.colId
+      );
     }
     resetDrag();
   }
 
-  const lineBefore = (folder: string, reqId: string) =>
-    !!dropTarget && dropTarget.folder === folder && dropTarget.beforeId === reqId;
-  const lineEnd = (folder: string) =>
-    !!dropTarget && dropTarget.folder === folder && dropTarget.beforeId === null;
+  const lineBefore = (colId: string, folder: string, reqId: string) =>
+    !!dropTarget &&
+    dropTarget.colId === colId &&
+    dropTarget.folder === folder &&
+    dropTarget.beforeId === reqId;
+  const lineEnd = (colId: string, folder: string) =>
+    !!dropTarget &&
+    dropTarget.colId === colId &&
+    dropTarget.folder === folder &&
+    dropTarget.beforeId === null;
 
   function toggle(key: string) {
     if (collapsed.has(key)) collapsed.delete(key);
@@ -147,7 +169,7 @@
   }
 
   async function submitFolder(colId: string) {
-    if (folderName.trim()) await ws.addFolder(folderName.trim());
+    if (folderName.trim()) await ws.addFolder(folderName.trim(), colId);
     folderName = "";
     addingFolderFor = null;
   }
@@ -191,17 +213,17 @@
     <div
       class="group/req relative"
       class:opacity-40={draggingId === req.id}
-      ondragover={(e) => onRowDragOver(e, folder, req.id, nextId)}
+      ondragover={(e) => onRowDragOver(e, col.id, folder, req.id, nextId)}
       ondrop={(e) => {
         e.preventDefault();
         e.stopPropagation();
         commitDrop();
       }}
     >
-      {#if lineBefore(folder, req.id)}
+      {#if lineBefore(col.id, folder, req.id)}
         <div class="drop-line" style="top: -1px"></div>
       {/if}
-      {#if isLast && lineEnd(folder)}
+      {#if isLast && lineEnd(col.id, folder)}
         <div class="drop-line" style="bottom: -1px"></div>
       {/if}
       <button
@@ -284,11 +306,11 @@
           class:ring-1={dropRootHeader === col.id}
           class:ring-[var(--color-brand)]={dropRootHeader === col.id}
           ondragover={(e) => {
-            if (!draggingId || ws.activeColId !== col.id) return;
+            if (!draggingId) return;
             e.preventDefault();
             dropFolderHeader = null;
             dropRootHeader = col.id;
-            dropTarget = { folder: "", beforeId: null };
+            dropTarget = { colId: col.id, folder: "", beforeId: null };
           }}
           ondragleave={() => (dropRootHeader = null)}
           ondrop={(e) => {
@@ -335,7 +357,7 @@
           <span class="flex shrink-0 items-center gap-1 text-fg-subtle">
             <Tooltip text="New request">
               {#snippet children(p)}
-                <Button {...p} onclick={() => addAndRename("")} variant="ghost" size="icon-xs">＋</Button>
+                <Button {...p} onclick={() => addAndRename("", col.id)} variant="ghost" size="icon-xs">＋</Button>
               {/snippet}
             </Tooltip>
             <Tooltip text="New folder">
@@ -408,7 +430,7 @@
               e.stopPropagation();
               dropRootHeader = null;
               dropFolderHeader = key;
-              dropTarget = { folder: f.name, beforeId: null };
+              dropTarget = { colId: col.id, folder: f.name, beforeId: null };
             }}
             ondragleave={() => (dropFolderHeader = null)}
             ondrop={(e) => {
@@ -428,12 +450,12 @@
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
               <Tooltip text="New request here">
                 {#snippet children(p)}
-                  <Button {...p} onclick={() => addAndRename(f.name)} variant="ghost" size="icon-xs">＋</Button>
+                  <Button {...p} onclick={() => addAndRename(f.name, col.id)} variant="ghost" size="icon-xs">＋</Button>
                 {/snippet}
               </Tooltip>
               <Tooltip text="Delete folder (requests move to root)">
                 {#snippet children(p)}
-                  <Button {...p} onclick={() => ws.deleteFolder(f.name)} variant="ghost" size="icon-xs" class="hover:text-red-400">✕</Button>
+                  <Button {...p} onclick={() => ws.deleteFolder(f.name, col.id)} variant="ghost" size="icon-xs" class="hover:text-red-400">✕</Button>
                 {/snippet}
               </Tooltip>
             </span>
@@ -452,7 +474,7 @@
                   e.stopPropagation();
                   dropFolderHeader = null;
                   dropRootHeader = null;
-                  dropTarget = { folder: f.name, beforeId: null };
+                  dropTarget = { colId: col.id, folder: f.name, beforeId: null };
                 }}
                 ondrop={(e) => {
                   e.preventDefault();
@@ -460,7 +482,7 @@
                   commitDrop();
                 }}
               >
-                {#if lineEnd(f.name)}
+                {#if lineEnd(col.id, f.name)}
                   <div class="drop-line" style="top: 2px"></div>
                 {/if}
                 <span class="hint">empty</span>
