@@ -59,7 +59,9 @@
   async function openHistory() {
     if (!HistoryModalComponent) {
       try {
-        HistoryModalComponent = (await import("./HistoryModal.svelte")).default;
+        HistoryModalComponent = (
+          await import("./HistoryTimeline.svelte")
+        ).default;
       } catch (error) {
         reportLazyLoadFailure("History", error);
         return;

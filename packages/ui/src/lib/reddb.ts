@@ -243,6 +243,10 @@ export interface VcsCommit {
   message: string;
   author: string;
   timestampMs: number;
+  /** Parent commit hashes (0 = root, 1 = normal, 2+ = merge) — drives the graph. */
+  parents: string[];
+  /** Commit height from the root (0-based) — reddb's linear position on the branch. */
+  height: number;
 }
 
 const COMMIT_AUTHOR = "red-request";
@@ -308,6 +312,12 @@ export async function listCommits(limit = 50): Promise<VcsCommit[]> {
           : typeof o.timestampMs === "number"
             ? o.timestampMs
             : 0,
+      parents: Array.isArray(o.parents)
+        ? (o.parents as unknown[]).filter(
+            (p): p is string => typeof p === "string"
+          )
+        : [],
+      height: typeof o.height === "number" ? o.height : 0,
     });
   }
   return out;

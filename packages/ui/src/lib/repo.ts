@@ -337,3 +337,35 @@ export const listCommits = (limit = 50) => db.listCommits(limit);
 /** A request's definition as it was at `commitHash`, or null if it didn't exist then. */
 export const requestAsOf = (colId: string, reqId: string, commitHash: string) =>
   db.kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash);
+
+/** One node of a request's timeline: its value at a commit + whether it changed there. */
+export interface RequestHistoryNode {
+  commit: import("./reddb").VcsCommit;
+  value: RequestDefinition | null;
+  /** True when this commit is where an edit to THIS request landed (value differs from
+   *  the next-older commit) — i.e. a real version boundary, vs a commit that touched
+   *  other collections only. */
+  changedHere: boolean;
+}
+
+/** Full timeline of a request across the store's commits (newest first). Resolves the
+ *  request AS OF every commit and flags the commits where it actually changed. */
+export async function requestHistory(
+  colId: string,
+  reqId: string,
+  limit = 100
+): Promise<RequestHistoryNode[]> {
+  const commits = await db.listCommits(limit);
+  const key = reqKey(colId, reqId);
+  const values = await Promise.all(
+    commits.map((c) =>
+      db.kvGetAsOf<RequestDefinition>(REQ, key, c.hash).catch(() => null)
+    )
+  );
+  const json = values.map((v) => (v ? JSON.stringify(v) : null));
+  return commits.map((commit, i) => ({
+    commit,
+    value: values[i],
+    changedHere: json[i] !== (json[i + 1] ?? null),
+  }));
+}
