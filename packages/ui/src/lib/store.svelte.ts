@@ -560,7 +560,56 @@ class Workspace {
     ]) {
       if (typeof a?.[k] === "string" && a[k]) a[k] = MASK;
     }
+    this.applyAuthPreview(r, MASK);
     return r;
+  }
+
+  /** Synthesize the auth headers/query the engine injects at dispatch, so the "request"
+   *  tab shows what is actually sent — scheme/structure visible, the credential masked.
+   *  Mirrors the engine's applyAuth (basic/bearer/apiKey). oauth2 is already a Bearer by
+   *  this point (applyOAuth2); digest/awsSigV4 are computed per-request, shown as a
+   *  labelled placeholder. `inherit` resolves to the collection's auth for display. */
+  private applyAuthPreview(r: RequestDefinition, mask: string): void {
+    let auth = r.auth as AuthConfig | undefined;
+    if (auth?.type === "inherit") {
+      const colAuth = this.activeCollection?.collection.auth;
+      if (colAuth && colAuth.type !== "inherit") auth = colAuth;
+    }
+    if (!auth) return;
+    const setHeader = (name: string, value: string) => {
+      const h = r.headers.find(
+        (x) => x.name.toLowerCase() === name.toLowerCase()
+      );
+      if (h) {
+        h.value = value;
+        h.enabled = true;
+      } else r.headers.push({ name, value, enabled: true });
+    };
+    switch (auth.type) {
+      case "basic":
+        setHeader("Authorization", `Basic ${mask}`);
+        break;
+      case "bearer":
+        setHeader("Authorization", `Bearer ${mask}`);
+        break;
+      case "apiKey": {
+        const key = auth.key || "X-API-Key";
+        if (auth.in === "query") {
+          const q = r.query.find((x) => x.name === key);
+          if (q) {
+            q.value = mask;
+            q.enabled = true;
+          } else r.query.push({ name: key, value: mask, enabled: true });
+        } else setHeader(key, mask);
+        break;
+      }
+      case "digest":
+        setHeader("Authorization", `Digest ${mask}`);
+        break;
+      case "awsSigV4":
+        setHeader("Authorization", `AWS4-HMAC-SHA256 ${mask}`);
+        break;
+    }
   }
 
   async send(): Promise<void> {

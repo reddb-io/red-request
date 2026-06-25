@@ -385,7 +385,16 @@
       <div
         class="flex shrink-0 flex-col gap-0.5 border-r border-border px-1.5 py-2 text-sm"
       >
-        {#each ["body", "request", "headers", "timings"] as const as t (t)}
+        <span class="px-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-fg-faint uppercase">Request</span>
+        <button
+          onclick={() => (tab = "request")}
+          class="tab w-full rounded text-left"
+          class:is-active={tab === "request"}
+          title="The request as actually sent — headers, auth, body; vars resolved, secrets redacted"
+          >request</button
+        >
+        <span class="mt-2 px-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-fg-faint uppercase">Response</span>
+        {#each ["body", "headers", "timings"] as const as t (t)}
           <button
             onclick={() => (tab = t)}
             class="tab w-full rounded text-left"
