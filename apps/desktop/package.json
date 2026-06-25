@@ -8,9 +8,16 @@
     "dev": "tauri dev",
     "check": "echo \"(desktop: rust checks run via cargo)\" && exit 0",
     "test": "echo \"(desktop: no js tests)\" && exit 0",
-    "build:tauri": "tauri build"
+    "build:tauri": "tauri build",
+    "test:e2e": "wdio run e2e/wdio.conf.ts"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.5.0"
+    "@tauri-apps/cli": "^2.5.0",
+    "@wdio/cli": "^9.29.0",
+    "@wdio/local-runner": "^9.29.0",
+    "@wdio/mocha-framework": "^9.29.0",
+    "@wdio/spec-reporter": "^9.29.0",
+    "tsx": "^4.22.4",
+    "webdriverio": "^9.29.0"
   }
 }

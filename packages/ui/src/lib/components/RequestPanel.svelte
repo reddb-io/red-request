@@ -317,6 +317,7 @@
         variant="outline"
         size="xs"
         class="shrink-0"
+        data-testid="request-history-btn"
         title="View and restore past versions of this request">History</Button
       >
     </div>
