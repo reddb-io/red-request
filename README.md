@@ -27,7 +27,27 @@ On Linux this installs the **`.deb`** (verifying its `sha256` against the releas
 `checksums.txt` first) — it links the system's WebKitGTK/glibc so the app and its bundled
 sidecars start reliably. Needs apt/sudo; re-run any time to upgrade. Prefer the portable
 single-file build? Add `--appimage` to drop a no-sudo AppImage on your PATH at `~/.local/bin`
-(note: an AppImage built on an older glibc can be unstable on newer hosts). To remove either:
+(note: an AppImage built on an older glibc can be unstable on newer hosts).
+
+When a newer release exists the script upgrades automatically. If you're **already on the
+latest tag** it no-ops (`… is already the latest — nothing to do`). To reinstall the same
+version anyway — e.g. to re-pull the bundled RedDB sidecar after a rebuild, or to repair a
+broken install — add `--force`. Pin a specific release with `--version vX.Y.Z`:
+
+```bash
+# reinstall the current version (refreshes the bundled sidecar / repairs the install)
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash -s -- --force
+
+# install/downgrade to a specific release
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash -s -- --version v0.25.2
+```
+
+> The app always runs its **own bundled** RedDB sidecar (next to the executable), not a
+> `red` you may have on your `PATH` — so `red --version` in a terminal can differ from the
+> sidecar the app actually uses. After upgrading, the bundled sidecar is whatever that
+> release pinned.
+
+To remove either:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash
