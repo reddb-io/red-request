@@ -398,7 +398,7 @@
           disabled={dataBusy}
           variant="outline"
           size="xs"
-          title="Read the git-friendly YAML tree (_exports) back into the store"
+          title="Read the git-friendly YAML tree (exports) back into the store"
           >YAML tree</Button
         >
       </div>
