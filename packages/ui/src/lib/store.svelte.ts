@@ -1449,6 +1449,16 @@ class Workspace {
         await this.importCollection(insomniaToCollection(s));
         return "collection";
       }
+      // Parsed as a structured doc but matched no importer — surface a clear error
+      // instead of silently falling through to cURL (which makes a junk request and
+      // leaves the user with "nothing happened, no error").
+      const hint =
+        typeof s.type === "string" && s.type.includes("insomnia")
+          ? ` — this looks like a newer Insomnia export ("${s.type}"), which isn't supported yet. In Insomnia, export as "Insomnia v4 (JSON)" instead.`
+          : "";
+      throw new Error(
+        `Unrecognized collection format${hint}. Supported: OpenAPI/Swagger, HAR, Postman v2.1, Insomnia v4.`
+      );
     }
     await this.importCurl(trimmed);
     return "request";
