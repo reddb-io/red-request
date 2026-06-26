@@ -119,10 +119,10 @@ describe("Document-backed request storage", () => {
     await repo.runMigrations();
 
     const create = queries.find((query) =>
-      query.startsWith(
-        "CREATE MIGRATION 0001_request_document_search_indexes AS"
-      )
+      query.startsWith("CREATE MIGRATION request_document_search_indexes AS")
     );
+    expect(create).toBeDefined();
+    expect(create).not.toMatch(/^CREATE MIGRATION \d/);
     expect(create).toContain(
       "CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH"
     );

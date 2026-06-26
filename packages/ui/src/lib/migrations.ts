@@ -8,13 +8,17 @@
 // declare `dependsOn` when it isn't. Names must be unique and stable — never rename
 // or reorder an already-shipped migration (its applied state is keyed by name).
 //
-//   { name: "0001_add_request_tags",
+//   { name: "add_request_tags",
 //     sql: "ALTER TABLE rr_requests ADD COLUMN tags TEXT" }
+//
+// Migration names are RedDB identifiers: start with a letter/underscore, then
+// letters/digits/underscores. Use stable, descriptive names; ordering belongs in
+// dependencies, not in name prefixes.
 import type { MigrationDef } from "./reddb";
 
 export const MIGRATIONS: MigrationDef[] = [
   {
-    name: "0001_request_document_search_indexes",
+    name: "request_document_search_indexes",
     sql: `
       CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH;
       CREATE INDEX IF NOT EXISTS rr_requests_collection_id ON rr_requests (collection_id) USING HASH;

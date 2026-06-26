@@ -429,16 +429,79 @@ export interface MigrationDef {
   dependsOn?: string[];
 }
 
+interface PreparedMigrationDef {
+  name: string;
+  sql: string;
+  dependsOn: string[];
+}
+
+const REDDB_IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function assertRedDbIdentifier(value: string, label: string): string {
+  if (REDDB_IDENTIFIER_RE.test(value)) return value;
+  const digitHint = /^\d/.test(value)
+    ? " RedDB identifiers cannot start with a digit."
+    : "";
+  throw new Error(
+    `invalid RedDB ${label} "${value}": must match ${REDDB_IDENTIFIER_RE}.${digitHint}`
+  );
+}
+
+function prepareMigrationDefinitions(
+  defs: MigrationDef[]
+): PreparedMigrationDef[] {
+  const out: PreparedMigrationDef[] = [];
+  const names = new Set<string>();
+
+  for (const d of defs) {
+    const name = assertRedDbIdentifier(d.name, "migration name");
+    if (names.has(name))
+      throw new Error(`duplicate RedDB migration name "${name}"`);
+    names.add(name);
+
+    const sql = d.sql.trim();
+    if (!sql)
+      throw new Error(`invalid RedDB migration "${name}": SQL is empty`);
+    if (sql.includes("\0"))
+      throw new Error(`invalid RedDB migration "${name}": SQL contains NUL`);
+    if (/^CREATE\s+MIGRATION\b/i.test(sql))
+      throw new Error(
+        `invalid RedDB migration "${name}": sql must be the body after AS`
+      );
+
+    const dependsOn = (d.dependsOn ?? []).map((dep) =>
+      assertRedDbIdentifier(dep, "migration dependency")
+    );
+    if (dependsOn.includes(name))
+      throw new Error(`invalid RedDB migration "${name}": depends on itself`);
+    out.push({ name, sql, dependsOn });
+  }
+
+  for (const d of out) {
+    for (const dep of d.dependsOn) {
+      if (!names.has(dep))
+        throw new Error(
+          `invalid RedDB migration "${d.name}": unknown dependency "${dep}"`
+        );
+    }
+  }
+
+  return out;
+}
+
 /** Register any shipped migrations not yet in `red_migrations`, then apply all pending.
  *  Idempotent and safe to run on every boot (no-op when nothing is pending). Routes
  *  through the `red connect` RQL conduit (Phase 1 of the unified local/remote path). */
 export async function runMigrations(defs: MigrationDef[]): Promise<void> {
-  if (defs.length) {
+  const migrations = prepareMigrationDefinitions(defs);
+  if (migrations.length) {
     const existing = await rql("SELECT name FROM red_migrations");
+    if (!existing.ok)
+      throw new Error(`failed to inspect RedDB migrations: ${existing.error}`);
     const have = new Set(existing.records.map((r) => r.name as string));
-    for (const d of defs) {
+    for (const d of migrations) {
       if (have.has(d.name)) continue;
-      const dep = d.dependsOn?.length
+      const dep = d.dependsOn.length
         ? ` DEPENDS ON ${d.dependsOn.join(", ")}`
         : "";
       const r = await rql(`CREATE MIGRATION ${d.name}${dep} AS ${d.sql}`);
