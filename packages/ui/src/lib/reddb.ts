@@ -5,6 +5,11 @@
 // JSON strings. Document mutations use the embedded HTTP API so nested edits can
 // be persisted as JSON-pointer patches instead of whole-value string rewrites.
 import { invoke } from "@tauri-apps/api/core";
+import {
+  developerConsole,
+  developerConsoleDuration,
+  markDeveloperConsoleStart,
+} from "./developer-console.svelte";
 
 interface HttpReply {
   status: number;
@@ -22,6 +27,17 @@ const ident = (s: string) => {
 /** A `collection.'key'` reference — the key quoted so dots/colons stay literal. */
 const kvRef = (collection: string, key: string) =>
   `${ident(collection)}.'${esc(key)}'`;
+const plainPathSegment = (s: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(s);
+const pathSegment = (s: string) => (plainPathSegment(s) ? s : `'${esc(s)}'`);
+const pathRef = (path: string) => {
+  const segments = path.split(".");
+  if (
+    segments.length < 2 ||
+    segments.some((segment) => !plainPathSegment(segment))
+  )
+    throw new Error(`invalid RedDB path: ${path}`);
+  return segments.join(".");
+};
 
 /** Result of an RQL statement run via the `red connect` conduit. */
 export interface RqlResult {
@@ -35,17 +51,38 @@ export interface RqlResult {
 /** Run an RQL statement (RedDB's SQL) through `red connect` — the native conduit shared
  *  by local and remote (`reds://`) connections. Retries until the server is ready. */
 export async function rql(query: string): Promise<RqlResult> {
+  const started = markDeveloperConsoleStart();
   let reply: HttpReply | null = null;
+  let attempts = 0;
   for (let i = 0; i < 80; i++) {
+    attempts = i + 1;
     try {
       reply = await invoke<HttpReply>("reddb_rql", { query });
       break;
     } catch (e) {
-      if (i === 79) throw e;
+      if (i === 79) {
+        developerConsole.logReddbRql({
+          query,
+          ok: false,
+          durationMs: developerConsoleDuration(started),
+          attempts,
+          error: e instanceof Error ? e.message : String(e),
+        });
+        throw e;
+      }
       await new Promise((r) => setTimeout(r, 250));
     }
   }
-  if (!reply) return { ok: false, records: [], columns: [], error: "no reply" };
+  if (!reply) {
+    developerConsole.logReddbRql({
+      query,
+      ok: false,
+      durationMs: developerConsoleDuration(started),
+      attempts,
+      error: "no reply",
+    });
+    return { ok: false, records: [], columns: [], error: "no reply" };
+  }
   let j: {
     ok?: boolean;
     error?: string;
@@ -54,6 +91,13 @@ export async function rql(query: string): Promise<RqlResult> {
   try {
     j = JSON.parse(reply.body);
   } catch {
+    developerConsole.logReddbRql({
+      query,
+      ok: false,
+      durationMs: developerConsoleDuration(started),
+      attempts,
+      error: reply.body.slice(0, 200),
+    });
     return {
       ok: false,
       records: [],
@@ -61,16 +105,32 @@ export async function rql(query: string): Promise<RqlResult> {
       error: reply.body.slice(0, 200),
     };
   }
-  if (!j.ok)
+  if (!j.ok) {
+    developerConsole.logReddbRql({
+      query,
+      ok: false,
+      durationMs: developerConsoleDuration(started),
+      attempts,
+      error: j.error ?? "rql error",
+    });
     return {
       ok: false,
       records: [],
       columns: [],
       error: j.error ?? "rql error",
     };
+  }
+  const records = j.data?.records ?? [];
+  developerConsole.logReddbRql({
+    query,
+    ok: true,
+    durationMs: developerConsoleDuration(started),
+    attempts,
+    rows: records.length,
+  });
   return {
     ok: true,
-    records: j.data?.records ?? [],
+    records,
     columns: j.data?.columns ?? [],
   };
 }
@@ -158,6 +218,130 @@ export async function kvList<T>(
     }
   }
   return out;
+}
+
+// --- RedDB native config / secret -----------------------------------------
+
+function configLiteral(value: unknown): string {
+  if (value === null) return "NULL";
+  if (typeof value === "string") return `'${esc(value)}' WITH TYPE string`;
+  if (typeof value === "boolean") return `${value} WITH TYPE bool`;
+  if (typeof value === "number" && Number.isFinite(value))
+    return `${value} WITH TYPE ${Number.isInteger(value) ? "int" : "float"}`;
+  if (Array.isArray(value)) return `${JSON.stringify(value)} WITH TYPE array`;
+  if (isRecord(value)) return `${JSON.stringify(value)} WITH TYPE object`;
+  throw new Error(`unsupported RedDB config value: ${typeof value}`);
+}
+
+function configValue<T>(value: unknown): T {
+  if (typeof value !== "string") return value as T;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value as T;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return value as T;
+  }
+}
+
+export async function configPut(
+  collection: string,
+  key: string,
+  value: unknown
+): Promise<void> {
+  const r = await rql(
+    `PUT CONFIG ${ident(collection)} ${pathSegment(key)} = ${configLiteral(value)}`
+  );
+  if (!r.ok) throw new Error(`PUT CONFIG ${collection}/${key}: ${r.error}`);
+}
+
+export async function configPutSecretRef(
+  collection: string,
+  key: string,
+  vaultPath: string
+): Promise<void> {
+  const r = await rql(
+    `PUT CONFIG ${ident(collection)} ${pathSegment(
+      key
+    )} = SECRET_REF(vault, ${pathRef(vaultPath)})`
+  );
+  if (!r.ok)
+    throw new Error(`PUT CONFIG SECRET_REF ${collection}/${key}: ${r.error}`);
+}
+
+export async function configGet<T>(
+  collection: string,
+  key: string
+): Promise<T | null> {
+  const r = await rql(`GET CONFIG ${ident(collection)} ${pathSegment(key)}`);
+  if (!r.ok || r.records.length === 0) return null;
+  const row = r.records[0]!;
+  if (row.tombstone === true || row.value === null || row.value === undefined)
+    return null;
+  return configValue<T>(row.value);
+}
+
+export async function configResolve<T>(
+  collection: string,
+  key: string
+): Promise<T | null> {
+  const r = await rql(
+    `RESOLVE CONFIG ${ident(collection)} ${pathSegment(key)}`
+  );
+  if (!r.ok || r.records.length === 0) return null;
+  const value = r.records[0]!.value;
+  return value === null || value === undefined ? null : configValue<T>(value);
+}
+
+export async function configList<T>(
+  collection: string,
+  prefix?: string
+): Promise<Array<{ key: string; value: T }>> {
+  const r = await rql(
+    `LIST CONFIG ${ident(collection)}${
+      prefix ? ` PREFIX ${pathSegment(prefix)}` : ""
+    }`
+  );
+  if (!r.ok) return [];
+  const out: Array<{ key: string; value: T }> = [];
+  for (const row of r.records) {
+    if (typeof row.key !== "string" || row.tombstone === true) continue;
+    if (row.value === null || row.value === undefined) continue;
+    out.push({ key: row.key, value: configValue<T>(row.value) });
+  }
+  return out;
+}
+
+export async function configDelete(
+  collection: string,
+  key: string
+): Promise<void> {
+  const r = await rql(`DELETE CONFIG ${ident(collection)} ${pathSegment(key)}`);
+  if (!r.ok) throw new Error(`DELETE CONFIG ${collection}/${key}: ${r.error}`);
+}
+
+export async function ensureVaultCollection(collection: string): Promise<void> {
+  const r = await rql(
+    `CREATE VAULT IF NOT EXISTS ${ident(collection)} WITH OWN MASTER KEY`
+  );
+  if (!r.ok) throw new Error(`CREATE VAULT ${collection}: ${r.error}`);
+}
+
+export async function vaultPut(path: string, value: string): Promise<void> {
+  const r = await rql(`VAULT PUT ${pathRef(path)} = '${esc(value)}'`);
+  if (!r.ok) throw new Error(`VAULT PUT ${path}: ${r.error}`);
+}
+
+export async function vaultDelete(path: string): Promise<void> {
+  const r = await rql(`DELETE VAULT ${pathRef(path)}`);
+  if (!r.ok) throw new Error(`DELETE VAULT ${path}: ${r.error}`);
+}
+
+export async function vaultUnseal(path: string): Promise<string | null> {
+  const r = await rql(`UNSEAL VAULT ${pathRef(path)}`);
+  if (!r.ok || r.records.length === 0) return null;
+  const value = r.records[0]!.value;
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 // --- RedDB documents --------------------------------------------------------
@@ -561,11 +745,13 @@ async function reddbHttp(
   path: string,
   body?: unknown
 ): Promise<{ ok: boolean; status: number; json: unknown }> {
+  const started = markDeveloperConsoleStart();
+  const serialized = body === undefined ? null : JSON.stringify(body);
   try {
     const reply = await invoke<HttpReply>("reddb_request", {
       method,
       path,
-      body: body === undefined ? null : JSON.stringify(body),
+      body: serialized,
     });
     let json: unknown = null;
     try {
@@ -573,12 +759,29 @@ async function reddbHttp(
     } catch {
       /* non-JSON body */
     }
+    developerConsole.logReddbHttp({
+      method,
+      path,
+      ok: reply.status >= 200 && reply.status < 300,
+      status: reply.status,
+      durationMs: developerConsoleDuration(started),
+      bodyBytes: serialized?.length,
+    });
     return {
       ok: reply.status >= 200 && reply.status < 300,
       status: reply.status,
       json,
     };
-  } catch {
+  } catch (error) {
+    developerConsole.logReddbHttp({
+      method,
+      path,
+      ok: false,
+      status: 0,
+      durationMs: developerConsoleDuration(started),
+      bodyBytes: serialized?.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return { ok: false, status: 0, json: null };
   }
 }

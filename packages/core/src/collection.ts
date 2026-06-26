@@ -46,13 +46,32 @@ export const sealedSecretSchema = z.object({
 export type SealedSecret = z.infer<typeof sealedSecretSchema>;
 
 /**
- * Runtime/persisted environment (what lives in the RedDB store). Like EnvironmentFile,
- * but carries the sealed secret values keyed by name instead of bare refs.
+ * Native RedDB secret reference used by red-request's live store. The plaintext
+ * lives in RedDB's vault; configs only keep this reference metadata.
+ */
+export const nativeSecretRefSchema = z.object({
+  ref: z.string(),
+  vault: z.string().default("red_request"),
+  configKey: z.string(),
+  missing: z.boolean().default(false),
+});
+export type NativeSecretRef = z.infer<typeof nativeSecretRefSchema>;
+
+export const storedSecretSchema = z.union([
+  nativeSecretRefSchema,
+  sealedSecretSchema,
+]);
+export type StoredSecret = z.infer<typeof storedSecretSchema>;
+
+/**
+ * Runtime/persisted environment. New stores keep native RedDB secret references;
+ * the sealed-secret arm is accepted only so old rr_environments KV rows can be
+ * migrated without losing values.
  */
 export const storedEnvironmentSchema = z.object({
   name: z.string(),
   vars: z.record(z.string(), z.string()).default({}),
-  secrets: z.record(z.string(), sealedSecretSchema).default({}),
+  secrets: z.record(z.string(), storedSecretSchema).default({}),
 });
 export type StoredEnvironment = z.infer<typeof storedEnvironmentSchema>;
 

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { developerConsole } from "./developer-console.svelte";
 
 export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
 
@@ -8,6 +9,7 @@ export type LogLevel = "error" | "warn" | "info" | "debug" | "trace";
  * one place instead of an invisible webview console. Never throws.
  */
 export function appLog(level: LogLevel, message: string): void {
+  developerConsole.logApp(level, message);
   const c = console[level === "trace" ? "debug" : level] ?? console.log;
   c(`[ui] ${message}`);
   void invoke("app_log", { level, message }).catch(() => {});

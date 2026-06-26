@@ -28,12 +28,10 @@ env:
   # → black/loading screen). Also persists collection contracts so KV collections survive a
   # server restart (reddb fix a8139467).
   REDDB_VERSION: v1.15.0
-  # Build the sidecar from source while the RedDB release carrying PR #1473
-  # (native migration contract fixes: BATCH 0 rejection, EXPLAIN MIGRATION *,
-  # rollback dependency guard, VCS error propagation) is not yet available as a
-  # full multi-platform stable asset set. Once a stable RedDB release publishes
-  # all red-* assets for our matrix, clear this and bump REDDB_VERSION instead.
-  REDDB_SOURCE_REF: fb6dd5b00737ac5c093d838875c8ddb7eed4f874
+  # Empty means release builds download RedDB's prebuilt `red-*` assets through
+  # scripts/fetch-reddb.mjs. Set only for emergency validation against an
+  # unpublished RedDB commit; source builds make Linux/Windows release legs slow.
+  REDDB_SOURCE_REF: ""
   # Run AppImage tooling (linuxdeploy) without FUSE, which CI runners lack.
   APPIMAGE_EXTRACT_AND_RUN: "1"
   # linuxdeploy's strip pass chokes on some shared objects under the no-FUSE extract path

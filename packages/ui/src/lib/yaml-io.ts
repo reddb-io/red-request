@@ -15,7 +15,6 @@ import {
 } from "@red-request/core";
 import * as fs from "./fs";
 import * as repo from "./repo";
-import * as secrets from "./secrets";
 
 const EXPORTS = "exports";
 // Project-level environments + globals live in a reserved sibling of the collections,
@@ -54,14 +53,15 @@ export async function exportAll(
   for (const env of environments) {
     const file: Record<string, unknown> = { ...environmentToFile(env) };
     if (opts.includeSecrets) {
-      // Decrypt each sealed secret to plaintext (best-effort: skip any that won't
-      // open, e.g. sealed on another machine). Marked clearly in the file.
+      // Resolve each native RedDB secret to plaintext (best-effort: skip any that
+      // won't open because the vault/config ref is unavailable).
       const plain: Record<string, string> = {};
-      for (const [name, sealed] of Object.entries(env.secrets ?? {})) {
+      for (const name of Object.keys(env.secrets ?? {})) {
         try {
-          plain[name] = await secrets.open(sealed);
+          const value = await repo.resolveEnvironmentSecret(env, name);
+          if (value !== null) plain[name] = value;
         } catch {
-          /* undecryptable on this machine — leave it out */
+          /* unavailable on this machine — leave it out */
         }
       }
       file.secretsPlaintext = plain;
@@ -104,13 +104,14 @@ export async function importAll(): Promise<number> {
         parse(await fs.readText(e.path))
       );
       // Re-hydrate as a project-level stored env with empty secrets (re-enter values).
-      await repo.saveEnvironment(
-        storedEnvironmentSchema.parse({
-          name: file.name,
-          vars: file.vars,
-          secrets: {},
-        })
-      );
+      const env = storedEnvironmentSchema.parse({
+        name: file.name,
+        vars: file.vars,
+        secrets: {},
+      });
+      await repo.saveEnvironment(env);
+      for (const name of file.secretRefs)
+        await repo.saveEnvironmentMissingSecret(env, name);
     }
     imported++;
   }
@@ -123,13 +124,14 @@ export async function importAll(): Promise<number> {
     if (!e.name.endsWith(".yaml")) continue;
     const file = environmentFileSchema.parse(parse(await fs.readText(e.path)));
     // Re-hydrate with empty secrets (values aren't in YAML — re-enter them).
-    await repo.saveEnvironment(
-      storedEnvironmentSchema.parse({
-        name: file.name,
-        vars: file.vars,
-        secrets: {},
-      })
-    );
+    const env = storedEnvironmentSchema.parse({
+      name: file.name,
+      vars: file.vars,
+      secrets: {},
+    });
+    await repo.saveEnvironment(env);
+    for (const name of file.secretRefs)
+      await repo.saveEnvironmentMissingSecret(env, name);
   }
   return imported;
 }

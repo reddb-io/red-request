@@ -6,6 +6,7 @@
   import Titlebar from "$lib/components/Titlebar.svelte";
   import ClosingOverlay from "$lib/components/ClosingOverlay.svelte";
   import ProjectTransition from "$lib/components/ProjectTransition.svelte";
+  import DeveloperConsole from "$lib/components/DeveloperConsole.svelte";
   import IconBar from "$lib/components/IconBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
   import RequestPanel from "$lib/components/RequestPanel.svelte";
@@ -255,67 +256,74 @@
       {:else}
         <div class="flex h-full w-full overflow-hidden">
           <IconBar />
-          {#if ws.view === "home"}
-            <div class="flex-1 overflow-hidden"><HomeView /></div>
-          {:else if ws.view === "database" && ws.redUiEnabled}
-            <div class="flex-1 overflow-hidden">
-              {#if RedUiDatabaseViewComponent}
-                <RedUiDatabaseViewComponent />
-              {:else if lazyLoadError}
-                <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
+          <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div class="min-h-0 flex-1 overflow-hidden">
+              {#if ws.view === "home"}
+                <div class="h-full overflow-hidden"><HomeView /></div>
+              {:else if ws.view === "database" && ws.redUiEnabled}
+                <div class="h-full overflow-hidden">
+                  {#if RedUiDatabaseViewComponent}
+                    <RedUiDatabaseViewComponent />
+                  {:else if lazyLoadError}
+                    <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
+                  {:else}
+                    <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+                  {/if}
+                </div>
+              {:else if ws.view === "settings"}
+                <div class="h-full overflow-hidden">
+                  {#if SettingsViewComponent}
+                    <SettingsViewComponent />
+                  {:else if lazyLoadError}
+                    <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
+                  {:else}
+                    <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+                  {/if}
+                </div>
               {:else}
-                <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+                <div class="flex h-full overflow-hidden">
+                  <div
+                    bind:this={sidebarWrapEl}
+                    class="shrink-0 overflow-hidden"
+                    style="width: {sidebarPx}px"
+                  >
+                    <Sidebar />
+                  </div>
+                  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    tabindex="-1"
+                    title="Drag to resize"
+                    onmousedown={startSidebarResize}
+                    class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {sidebarDragging
+                      ? 'bg-[var(--color-brand)]'
+                      : ''}"
+                  ></div>
+                  <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
+                    <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
+                      <RequestPanel />
+                    </div>
+                    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+                    <div
+                      role="separator"
+                      aria-orientation="vertical"
+                      tabindex="-1"
+                      title="Drag to resize"
+                      onmousedown={startResize}
+                      class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {dragging
+                        ? 'bg-[var(--color-brand)]'
+                        : ''}"
+                    ></div>
+                    <div class="min-w-0 flex-1 overflow-hidden">
+                      <ResponsePanel />
+                    </div>
+                  </div>
+                </div>
               {/if}
             </div>
-          {:else if ws.view === "settings"}
-            <div class="flex-1 overflow-hidden">
-              {#if SettingsViewComponent}
-                <SettingsViewComponent />
-              {:else if lazyLoadError}
-                <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
-              {:else}
-                <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
-              {/if}
-            </div>
-          {:else}
-            <div
-              bind:this={sidebarWrapEl}
-              class="shrink-0 overflow-hidden"
-              style="width: {sidebarPx}px"
-            >
-              <Sidebar />
-            </div>
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              tabindex="-1"
-              title="Drag to resize"
-              onmousedown={startSidebarResize}
-              class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {sidebarDragging
-                ? 'bg-[var(--color-brand)]'
-                : ''}"
-            ></div>
-            <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
-              <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
-                <RequestPanel />
-              </div>
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <div
-                role="separator"
-                aria-orientation="vertical"
-                tabindex="-1"
-                title="Drag to resize"
-                onmousedown={startResize}
-                class="w-1 shrink-0 cursor-col-resize bg-border transition hover:bg-[var(--color-brand)] {dragging
-                  ? 'bg-[var(--color-brand)]'
-                  : ''}"
-              ></div>
-              <div class="min-w-0 flex-1 overflow-hidden">
-                <ResponsePanel />
-              </div>
-            </div>
-          {/if}
+            <DeveloperConsole />
+          </div>
         </div>
         {#if cmdOpen && CommandPaletteComponent}
           <CommandPaletteComponent bind:open={cmdOpen} />

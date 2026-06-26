@@ -94,12 +94,22 @@
   } | null>(null);
   let dropFolderHeader = $state<string | null>(null);
   let dropRootHeader = $state<string | null>(null);
+  let draggingFolder = $state<{ colId: string; name: string } | null>(null);
+  let folderDropBefore = $state<{
+    colId: string;
+    beforeName: string | null;
+  } | null>(null);
 
   function resetDrag() {
     draggingId = null;
     dropTarget = null;
     dropFolderHeader = null;
     dropRootHeader = null;
+  }
+
+  function resetFolderDrag() {
+    draggingFolder = null;
+    folderDropBefore = null;
   }
 
   // Top half of a row → insert before it; bottom half → insert after (before `nextId`,
@@ -134,6 +144,36 @@
     resetDrag();
   }
 
+  function onFolderDragOver(
+    e: DragEvent,
+    col: LoadedCollection,
+    folder: string,
+    nextFolder: string | null
+  ) {
+    if (!draggingFolder) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    if (draggingFolder.colId !== col.id) return true;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    folderDropBefore = {
+      colId: col.id,
+      beforeName: e.clientY - rect.top < rect.height / 2 ? folder : nextFolder,
+    };
+    return true;
+  }
+
+  function commitFolderDrop(col: LoadedCollection) {
+    if (draggingFolder?.colId === col.id && folderDropBefore?.colId === col.id) {
+      void ws.reorderFolder(
+        draggingFolder.name,
+        folderDropBefore.beforeName,
+        col.id
+      );
+    }
+    resetFolderDrag();
+  }
+
   const lineBefore = (colId: string, folder: string, reqId: string) =>
     !!dropTarget &&
     dropTarget.colId === colId &&
@@ -153,12 +193,12 @@
 
   function grouped(col: LoadedCollection) {
     const root = col.requests.filter((r) => !r.folder);
-    const names = [
-      ...new Set([
-        ...col.collection.folders,
-        ...col.requests.map((r) => r.folder).filter(Boolean),
-      ]),
-    ].sort((a, b) => a.localeCompare(b));
+    const ordered = [...col.collection.folders];
+    const extra = col.requests
+      .map((r) => r.folder)
+      .filter((name): name is string => !!name && !ordered.includes(name))
+      .sort((a, b) => a.localeCompare(b));
+    const names = [...ordered, ...extra];
     return {
       root,
       folders: names.map((name) => ({
@@ -417,14 +457,16 @@
           {@render reqRow(col, req, false, "", g.root[i + 1]?.id ?? null, i === g.root.length - 1)}
         {/each}
 
-        {#each g.folders as f (f.name)}
+        {#each g.folders as f, folderIndex (f.name)}
           {@const key = `${col.id}::${f.name}`}
+          {@const nextFolder = g.folders[folderIndex + 1]?.name ?? null}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="group/folder relative mt-0.5 flex items-center rounded"
             class:ring-1={dropFolderHeader === key}
             class:ring-[var(--color-brand)]={dropFolderHeader === key}
             ondragover={(e) => {
+              if (onFolderDragOver(e, col, f.name, nextFolder)) return;
               if (!draggingId) return;
               e.preventDefault();
               e.stopPropagation();
@@ -432,16 +474,34 @@
               dropFolderHeader = key;
               dropTarget = { colId: col.id, folder: f.name, beforeId: null };
             }}
-            ondragleave={() => (dropFolderHeader = null)}
+            ondragleave={() => {
+              dropFolderHeader = null;
+              folderDropBefore = null;
+            }}
             ondrop={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              commitDrop();
+              if (draggingFolder) commitFolderDrop(col);
+              else commitDrop();
             }}
           >
+            {#if folderDropBefore?.colId === col.id && folderDropBefore.beforeName === f.name}
+              <div class="drop-line" style="top: -1px"></div>
+            {/if}
+            {#if folderIndex === g.folders.length - 1 && folderDropBefore?.colId === col.id && folderDropBefore.beforeName === null}
+              <div class="drop-line" style="bottom: -1px"></div>
+            {/if}
             <button
               onclick={() => toggle(key)}
+              draggable="true"
+              ondragstart={(e) => {
+                draggingFolder = { colId: col.id, name: f.name };
+                e.dataTransfer?.setData("text/plain", f.name);
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+              }}
+              ondragend={resetFolderDrag}
               class="row flex-1 gap-1 px-2 py-1 text-xs"
+              class:opacity-50={draggingFolder?.colId === col.id && draggingFolder.name === f.name}
             >
               <span class="text-fg-subtle">{collapsed.has(key) ? "▸" : "▾"}</span>
               <span class="truncate">{f.name}</span>

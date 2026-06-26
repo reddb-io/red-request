@@ -496,10 +496,9 @@ class Workspace {
     void this.refreshReqHistory();
   }
 
-  /** Secrets that failed to DECRYPT on the last buildVariables() (e.g. the master key
-   *  in the OS keychain is missing/locked, or the sealed value came from another machine).
-   *  These names stay unresolved → a {{secret}} is sent literally → the server 401s. Tracked
-   *  so the UI can say "couldn't decrypt X" instead of a silent failure. */
+  /** Secrets that failed to open through RedDB's native vault/config layer on the
+   *  last buildVariables(). These names stay unresolved so the UI can explain the
+   *  resulting literal {{secret}} instead of silently dropping it. */
   secretDecryptFailures = $state<string[]>([]);
 
   private async buildVariables(): Promise<Record<string, string>> {
@@ -507,12 +506,12 @@ class Workspace {
     const open = async (env: StoredEnvironment | null) => {
       const out: Record<string, string> = {};
       if (env) {
-        for (const [name, sealed] of Object.entries(env.secrets)) {
+        for (const name of Object.keys(env.secrets)) {
           try {
-            out[name] = await secrets.open(sealed);
+            const value = await repo.resolveEnvironmentSecret(env, name);
+            if (value === null) failures.push(name);
+            else out[name] = value;
           } catch {
-            // Can't decrypt — leave unresolved, but remember it so the UI can explain the
-            // resulting 401 instead of the value silently vanishing into a literal {{name}}.
             failures.push(name);
           }
         }
@@ -1236,8 +1235,15 @@ class Workspace {
     const snap = structuredClone(
       $state.snapshot(this.activeReq)
     ) as RequestDefinition;
-    await repo.saveRequest(this.activeColId, snap);
-    const col = this.activeCollection;
+    await this.saveRequestSnapshot(this.activeColId, snap);
+  }
+
+  private async saveRequestSnapshot(
+    colId: string,
+    snap: RequestDefinition
+  ): Promise<void> {
+    await repo.saveRequest(colId, snap);
+    const col = this.collections.find((c) => c.id === colId);
     if (col) {
       const idx = col.requests.findIndex((r) => r.id === snap.id);
       if (idx >= 0) col.requests[idx] = snap;
@@ -1247,15 +1253,24 @@ class Workspace {
 
   /** Pending debounced autosave timer for the active request. */
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSave: { colId: string; request: RequestDefinition } | null =
+    null;
 
   /** Debounced autosave: persist the active request shortly after the last edit,
    *  so URL / params / headers / body changes survive a reload or project switch
    *  even without an explicit Ctrl-S. Driven by an effect in +page.svelte. */
   scheduleSave(): void {
+    if (!this.activeReq || !this.activeColId) return;
+    this.pendingSave = {
+      colId: this.activeColId,
+      request: structuredClone(
+        $state.snapshot(this.activeReq)
+      ) as RequestDefinition,
+    };
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
-      void this.save();
+      void this.flushSave();
     }, 300);
   }
 
@@ -1265,8 +1280,10 @@ class Workspace {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
-      await this.save();
     }
+    const pending = this.pendingSave;
+    this.pendingSave = null;
+    if (pending) await this.saveRequestSnapshot(pending.colId, pending.request);
   }
 
   /** Media type sent for each body kind (Content-Type). */
@@ -1670,6 +1687,31 @@ class Workspace {
     );
   }
 
+  async reorderFolder(
+    name: string,
+    beforeName: string | null,
+    colId?: string
+  ): Promise<void> {
+    if (name === beforeName) return;
+    const targetColId = colId ?? this.activeColId;
+    const col = this.collections.find((c) => c.id === targetColId);
+    if (!col || !targetColId) return;
+    const current = col.collection.folders.includes(name)
+      ? col.collection.folders
+      : [...col.collection.folders, name];
+    const next = current.filter((folder) => folder !== name);
+    const beforeIndex = beforeName
+      ? next.findIndex((folder) => folder === beforeName)
+      : -1;
+    if (beforeIndex >= 0) next.splice(beforeIndex, 0, name);
+    else next.push(name);
+    col.collection.folders = next;
+    await repo.saveCollectionMeta(
+      targetColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+  }
+
   /**
    * Move a request to a folder ("" = root), appended at the folder's end. `targetColId`
    * moves it into another collection (defaults to the request's current collection).
@@ -1828,6 +1870,7 @@ class Workspace {
     const env = storedEnvironmentSchema.parse({ name, vars: {}, secrets: {} });
     this.environments.push(env);
     await this.persistEnv(env);
+    await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     this.activeEnvName = name;
   }
 
@@ -1836,11 +1879,21 @@ class Workspace {
     let i = 2;
     while (this.environments.some((e) => e.name === name))
       name = `${source.name}-copy-${i++}`;
-    const env = structuredClone(
-      $state.snapshot({ ...source, name })
-    ) as StoredEnvironment;
+    const env = storedEnvironmentSchema.parse({
+      name,
+      vars: structuredClone($state.snapshot(source.vars)),
+      secrets: {},
+    });
     this.environments.push(env);
     await this.persistEnv(env);
+    for (const secretName of Object.keys(source.secrets)) {
+      const value = await repo
+        .resolveEnvironmentSecret(source, secretName)
+        .catch(() => null);
+      if (value !== null)
+        await repo.saveEnvironmentSecret(env, secretName, value);
+    }
+    await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     this.activeEnvName = name;
   }
 
@@ -1848,17 +1901,36 @@ class Workspace {
     if (!newName.trim() || newName === env.name || newName === GLOBALS_ENV)
       return;
     const oldName = env.name;
-    await repo.deleteEnvironment(oldName);
     env.name = newName;
-    await this.persistEnv(env);
+    await repo.renameEnvironment(oldName, env);
+    await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     if (this.activeEnvName === oldName) this.activeEnvName = newName;
   }
 
   async deleteEnv(env: StoredEnvironment): Promise<void> {
     await repo.deleteEnvironment(env.name);
     this.environments = this.environments.filter((e) => e !== env);
+    await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     if (this.activeEnvName === env.name)
       this.activeEnvName = this.environments[0]?.name ?? null;
+  }
+
+  async reorderEnvironment(
+    dragName: string,
+    beforeName: string | null
+  ): Promise<void> {
+    if (dragName === beforeName) return;
+    const current = [...this.environments];
+    const dragged = current.find((env) => env.name === dragName);
+    if (!dragged) return;
+    const next = current.filter((env) => env.name !== dragName);
+    const beforeIndex = beforeName
+      ? next.findIndex((env) => env.name === beforeName)
+      : -1;
+    if (beforeIndex >= 0) next.splice(beforeIndex, 0, dragged);
+    else next.push(dragged);
+    this.environments = next;
+    await repo.saveEnvironmentOrder(next.map((env) => env.name));
   }
 
   /** Persist edits to an environment's plain vars. */
@@ -1872,13 +1944,11 @@ class Workspace {
     value: string
   ): Promise<void> {
     if (!name.trim()) return;
-    env.secrets[name] = await secrets.seal(value);
-    await this.persistEnv(env);
+    await repo.saveEnvironmentSecret(env, name, value);
   }
 
   async removeSecret(env: StoredEnvironment, name: string): Promise<void> {
-    delete env.secrets[name];
-    await this.persistEnv(env);
+    await repo.removeEnvironmentSecret(env, name);
   }
 
   // --- OAuth2 / OIDC -------------------------------------------------------
