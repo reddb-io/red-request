@@ -1,16 +1,28 @@
 #!/usr/bin/env node
 // Provision the embedded RedDB sidecar binary for the desktop app.
 //
-// The binary (apps/desktop/src-tauri/binaries/red-<triple>) is gitignored, so a fresh
+// The binary (apps/desktop/src-tauri/binaries/red-<triple>[.exe]) is gitignored, so a fresh
 // clone / CI must build it from the RedDB source. This builds `red` (release) and copies
 // it next to the Tauri app under the host target triple Tauri expects for externalBin.
 //
 //   node scripts/sync-reddb.mjs                 # builds from ../reddb (or $REDDB_SRC)
 //   REDDB_SRC=/path/to/reddb node scripts/sync-reddb.mjs
+//   REDDB_SRC=/path/to/reddb REDDB_TARGET=aarch64-apple-darwin node scripts/sync-reddb.mjs
 //
 // Requires a Rust toolchain. Pin RedDB to the latest release — see the always-latest rule.
-import { execFileSync } from "node:child_process";
-import { existsSync, copyFileSync, mkdirSync, chmodSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  copyFileSync,
+  mkdirSync,
+  chmodSync,
+  mkdtempSync,
+  openSync,
+  closeSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,31 +41,53 @@ if (!existsSync(join(REDDB_SRC, "Cargo.toml"))) {
   process.exit(1);
 }
 
-// Host target triple Tauri uses to resolve the sidecar (e.g. x86_64-unknown-linux-gnu).
-const hostLine = sh("rustc", ["-vV"])
-  .split("\n")
-  .find((l) => l.startsWith("host:"));
-const triple = hostLine?.split(/\s+/)[1];
+// Target triple Tauri uses to resolve the sidecar (e.g. x86_64-unknown-linux-gnu).
+// CI passes REDDB_TARGET from the release matrix; local dev falls back to the host.
+function targetTriple() {
+  if (process.env.REDDB_TARGET) return process.env.REDDB_TARGET;
+  const hostLine = sh("rustc", ["-vV"])
+    .split("\n")
+    .find((l) => l.startsWith("host:"));
+  return hostLine?.split(/\s+/)[1];
+}
+const triple = targetTriple();
 if (!triple) {
-  console.error("Could not determine host target triple from `rustc -vV`.");
+  console.error(
+    "Could not determine target triple from REDDB_TARGET or `rustc -vV`."
+  );
   process.exit(1);
 }
-
-const version = (() => {
-  try {
-    return sh(join(REDDB_SRC, "target/release/red"), ["version"]).trim();
-  } catch {
-    return "reddb (building…)";
-  }
-})();
+const isWindows = triple.includes("windows");
+const ext = isWindows ? ".exe" : "";
 
 console.log(`Building RedDB \`red\` (release) from ${REDDB_SRC} …`);
 // --message-format=json so we can locate the artifact regardless of CARGO_TARGET_DIR.
-const out = sh(
-  "cargo",
-  ["build", "--release", "--bin", "red", "--message-format=json"],
-  { cwd: REDDB_SRC, maxBuffer: 64 * 1024 * 1024 }
-);
+// Stream stdout to a temp JSONL file instead of execFileSync's memory buffer; a full
+// RedDB release build can emit enough compiler JSON to make buffered output brittle.
+const cargoArgs = [
+  "build",
+  "--release",
+  "--bin",
+  "red",
+  "--target",
+  triple,
+  "--message-format=json",
+];
+const tmp = mkdtempSync(join(tmpdir(), "red-request-reddb-build-"));
+const jsonPath = join(tmp, "cargo.jsonl");
+const stdoutFd = openSync(jsonPath, "w");
+const built = spawnSync("cargo", cargoArgs, {
+  cwd: REDDB_SRC,
+  stdio: ["ignore", stdoutFd, "inherit"],
+});
+closeSync(stdoutFd);
+if (built.error) throw built.error;
+if (built.status !== 0) {
+  console.error(`cargo ${cargoArgs.join(" ")} exited with ${built.status}`);
+  process.exit(built.status ?? 1);
+}
+const out = readFileSync(jsonPath, "utf8");
+rmSync(tmp, { recursive: true, force: true });
 let exe;
 for (const line of out.split("\n")) {
   if (!line.startsWith("{")) continue;
@@ -61,7 +95,9 @@ for (const line of out.split("\n")) {
     const msg = JSON.parse(line);
     if (
       msg.reason === "compiler-artifact" &&
-      msg.executable?.endsWith("/red")
+      msg.target?.name === "red" &&
+      msg.target?.kind?.includes("bin") &&
+      msg.executable
     ) {
       exe = msg.executable;
     }
@@ -70,7 +106,7 @@ for (const line of out.split("\n")) {
   }
 }
 // Fallback to the conventional path if the JSON stream didn't surface it.
-exe ??= join(REDDB_SRC, "target/release/red");
+exe ??= join(REDDB_SRC, "target", triple, "release", `red${ext}`);
 if (!existsSync(exe)) {
   console.error(
     `Built but could not locate the \`red\` binary (looked at ${exe}).`
@@ -79,9 +115,15 @@ if (!existsSync(exe)) {
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
-const dest = join(OUT_DIR, `red-${triple}`);
+const dest = join(OUT_DIR, `red-${triple}${ext}`);
 copyFileSync(exe, dest);
-chmodSync(dest, 0o755);
+if (!isWindows) chmodSync(dest, 0o755);
 
-const builtVersion = sh(dest, ["version"]).trim();
+let builtVersion = `red built for ${triple}`;
+try {
+  builtVersion = sh(dest, ["version"]).trim();
+} catch {
+  // Cross-built binaries may not run on the build host; the release matrix builds native
+  // targets, so this is only a local-dev fallback.
+}
 console.log(`✔ ${builtVersion} → ${dest}`);
