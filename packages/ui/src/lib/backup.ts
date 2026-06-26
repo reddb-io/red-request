@@ -1,10 +1,19 @@
-// Backup / restore the app's RedDB store as a portable JSON file. Every rr_* KV collection is
-// read through the LIVE server (the RQL conduit, like the rest of the app) — NOT a file-level
-// `red dump`, so it never fights the embedded server's single-writer lock — and written next to
-// the .rdb under `backups/`. Restore KV PUTs every entry back. This is the durable safety net
-// while reddb's native VCS commit lands (reddb-io/reddb#1382 — commits are workset/per-connection
-// today, so per-change auto-commit can't capture our RQL-conduit writes yet).
-import { kvList, kvPut, ensureKvCollection } from "./reddb";
+// Backup / restore the app's RedDB store as a portable JSON file. Collections are read through
+// the LIVE server (the RQL/HTTP conduit, like the rest of the app) — NOT a file-level `red dump`,
+// so it never fights the embedded server's single-writer lock — and written next to the .rdb
+// under `backups/`.
+import {
+  kvList,
+  kvPut,
+  ensureKvCollection,
+  documentList,
+  documentInsert,
+  documentFindByField,
+  documentReplace,
+  ensureDocumentCollection,
+  collectionModel,
+  dropCollection,
+} from "./reddb";
 import {
   writeText,
   readText,
@@ -14,17 +23,28 @@ import {
   type DirEntry,
 } from "./fs";
 import { projectInfo } from "./project";
-import { COL, REQ, ENV, HIST, SETTINGS, OAUTH } from "./repo";
+import {
+  COL,
+  REQ,
+  ENV,
+  HIST,
+  SETTINGS,
+  OAUTH,
+  importLegacyRequestEntries,
+  legacyRequestEntry,
+} from "./repo";
 import { appLog } from "./log";
 
 /** Every collection that holds the user's work. History is included for a faithful restore. */
-const COLLECTIONS = [COL, REQ, ENV, SETTINGS, OAUTH, HIST] as const;
+const COLLECTIONS = [COL, ENV, SETTINGS, OAUTH, HIST] as const;
+const DOCUMENT_COLLECTIONS = [REQ] as const;
 
 export interface BackupFile {
   format: "red-request-backup";
-  version: 1;
+  version: 1 | 2;
   createdAt: string; // ISO 8601
   collections: Record<string, Array<{ key: string; value: unknown }>>;
+  documents?: Record<string, Array<{ body: unknown }>>;
 }
 
 function dirOf(p: string): string {
@@ -48,16 +68,26 @@ export async function snapshot(): Promise<BackupFile> {
   for (const c of COLLECTIONS) {
     collections[c] = await kvList<unknown>(c).catch(() => []);
   }
+  const documents: NonNullable<BackupFile["documents"]> = {};
+  for (const c of DOCUMENT_COLLECTIONS) {
+    documents[c] = (await documentList<unknown>(c).catch(() => [])).map(
+      (doc) => ({ body: doc.body })
+    );
+  }
   return {
     format: "red-request-backup",
-    version: 1,
+    version: 2,
     createdAt: new Date().toISOString(),
     collections,
+    documents,
   };
 }
 
 function isEmpty(b: BackupFile): boolean {
-  return Object.values(b.collections).every((rows) => rows.length === 0);
+  return (
+    Object.values(b.collections).every((rows) => rows.length === 0) &&
+    Object.values(b.documents ?? {}).every((rows) => rows.length === 0)
+  );
 }
 
 /** Write a timestamped backup to `backups/`; returns its path. Prunes to the `keep` newest.
@@ -130,7 +160,15 @@ export async function restoreBackup(
   if (data?.format !== "red-request-backup")
     throw new Error("not a Red Request backup file");
   let entries = 0;
-  const names = Object.keys(data.collections);
+  const legacyRequests = (data.collections[REQ] ?? [])
+    .map(({ key, value }) => legacyRequestEntry(key, value))
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  if (legacyRequests.length > 0) {
+    await importLegacyRequestEntries(legacyRequests);
+    entries += legacyRequests.length;
+  }
+
+  const names = Object.keys(data.collections).filter((name) => name !== REQ);
   for (const c of names) {
     await ensureKvCollection(c).catch(() => {});
     for (const { key, value } of data.collections[c] ?? []) {
@@ -138,9 +176,44 @@ export async function restoreBackup(
       entries++;
     }
   }
+  const documentNames = Object.keys(data.documents ?? {});
+  for (const c of documentNames) {
+    await ensureDocumentTarget(c);
+    for (const { body } of data.documents?.[c] ?? []) {
+      await restoreDocument(c, body);
+      entries++;
+    }
+  }
   appLog(
     "info",
-    `backup: restored ${entries} entries (${names.length} collections) from ${path}`
+    `backup: restored ${entries} entries (${names.length + documentNames.length} collections) from ${path}`
   );
-  return { collections: names.length, entries };
+  return { collections: names.length + documentNames.length, entries };
+}
+
+async function ensureDocumentTarget(collection: string): Promise<void> {
+  const model = await collectionModel(collection).catch(() => null);
+  if (model && model !== "document") await dropCollection(collection);
+  await ensureDocumentCollection(collection);
+}
+
+function documentAppKey(body: unknown): string | null {
+  if (typeof body !== "object" || body === null || Array.isArray(body))
+    return null;
+  const appKey = (body as { app_key?: unknown }).app_key;
+  return typeof appKey === "string" ? appKey : null;
+}
+
+async function restoreDocument(
+  collection: string,
+  body: unknown
+): Promise<void> {
+  const appKey = documentAppKey(body);
+  if (!appKey) {
+    await documentInsert(collection, body);
+    return;
+  }
+  const existing = await documentFindByField(collection, "app_key", appKey);
+  if (existing) await documentReplace(collection, existing.rid, body);
+  else await documentInsert(collection, body);
 }

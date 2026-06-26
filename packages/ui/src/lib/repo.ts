@@ -1,9 +1,9 @@
-// Collection repository — backed by the embedded RedDB store (KV collections).
+// Collection repository — backed by the embedded RedDB store.
 //
-//   rr_collections   key=<colId>            → CollectionFile
-//   rr_requests      key=<colId>.<reqId>    → RequestDefinition
-//   rr_environments  key=<envSlug>          → StoredEnvironment (project-level, sealed secrets)
-//   rr_settings      key="globals"          → Record<string,string> (project-level base vars)
+//   rr_collections    KV key=<colId>         → CollectionFile
+//   rr_requests       Document app_key=<colId>.<reqId> → RequestDefinition envelope
+//   rr_environments   KV key=<envSlug>       → StoredEnvironment (project-level, sealed secrets)
+//   rr_settings       KV key="globals"       → Record<string,string> (project-level base vars)
 //
 // Keys use `.` as separator; collection/request ids and env slugs are URL-safe slugs.
 // Environments and global vars are project-level (shared by every collection); a one-time
@@ -41,6 +41,16 @@ export const OAUTH = "rr_oauth_tokens";
 
 const MAX_HISTORY_PER_REQ = 50;
 
+type RequestDocumentBody = {
+  record_type: "request";
+  app_key: string;
+  collection_id: string;
+  request_id: string;
+  request_name: string;
+  request_kind: RequestDefinition["kind"];
+  request: RequestDefinition;
+};
+
 /** Cached OAuth2/OIDC token set, keyed by a connection id (hash of tokenUrl|clientId|
  *  scope|grantType). Token strings are sealed (AES-GCM) before they land here; the
  *  metadata (expiry/scope) stays in clear so the UI can show status without unsealing. */
@@ -61,15 +71,25 @@ export async function recordCounts(): Promise<{
 }> {
   const kinds: { label: string; name: string }[] = [
     { label: "collections", name: COL },
-    { label: "requests", name: REQ },
     { label: "environments", name: ENV },
     { label: "history", name: HIST },
     { label: "settings", name: SETTINGS },
     { label: "oauth tokens", name: OAUTH },
   ];
-  const counts = await Promise.all(kinds.map((k) => db.kvCount(k.name)));
-  const byKind = kinds.map((k, i) => ({ label: k.label, count: counts[i]! }));
-  return { total: counts.reduce((s, n) => s + n, 0), byKind };
+  const [kvCounts, requestCount] = await Promise.all([
+    Promise.all(kinds.map((k) => db.kvCount(k.name))),
+    countRequests(),
+  ]);
+  const kvByLabel = new Map(kinds.map((k, i) => [k.label, kvCounts[i] ?? 0]));
+  const byKind = [
+    { label: "collections", count: kvByLabel.get("collections") ?? 0 },
+    { label: "requests", count: requestCount },
+    { label: "environments", count: kvByLabel.get("environments") ?? 0 },
+    { label: "history", count: kvByLabel.get("history") ?? 0 },
+    { label: "settings", count: kvByLabel.get("settings") ?? 0 },
+    { label: "oauth tokens", count: kvByLabel.get("oauth tokens") ?? 0 },
+  ];
+  return { total: requestCount + kvCounts.reduce((s, n) => s + n, 0), byKind };
 }
 
 export const loadOauthToken = (connId: string) =>
@@ -92,17 +112,237 @@ export function slugify(name: string): string {
 const reqKey = (colId: string, reqId: string) => `${colId}.${reqId}`;
 const ownedBy = (colId: string, key: string) => key.startsWith(`${colId}.`);
 
-/** The "document" collections whose edits we version + time-travel (native VCS).
+function colIdFromReqKey(key: string): string | null {
+  const sep = key.indexOf(".");
+  return sep > 0 ? key.slice(0, sep) : null;
+}
+
+function requestDocumentBody(
+  colId: string,
+  req: RequestDefinition
+): RequestDocumentBody {
+  const parsed = requestDefinitionSchema.parse(req);
+  return {
+    record_type: "request",
+    app_key: reqKey(colId, parsed.id),
+    collection_id: colId,
+    request_id: parsed.id,
+    request_name: parsed.name,
+    request_kind: parsed.kind,
+    request: parsed,
+  };
+}
+
+function parseRequestDocumentBody(value: unknown): RequestDocumentBody | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  const raw = value as Partial<RequestDocumentBody>;
+  if (
+    raw.record_type !== "request" ||
+    typeof raw.app_key !== "string" ||
+    typeof raw.collection_id !== "string" ||
+    typeof raw.request_id !== "string" ||
+    typeof raw.request !== "object" ||
+    raw.request === null
+  )
+    return null;
+  let request: RequestDefinition;
+  try {
+    request = requestDefinitionSchema.parse(raw.request);
+  } catch {
+    return null;
+  }
+  return {
+    record_type: "request",
+    app_key: raw.app_key,
+    collection_id: raw.collection_id,
+    request_id: raw.request_id,
+    request_name:
+      typeof raw.request_name === "string" ? raw.request_name : request.name,
+    request_kind:
+      raw.request_kind === request.kind ? raw.request_kind : request.kind,
+    request,
+  };
+}
+
+function requestFromDocument(
+  doc: db.DocumentRecord<RequestDocumentBody>
+): { key: string; value: RequestDefinition } | null {
+  const body = parseRequestDocumentBody(doc.body);
+  return body ? { key: body.app_key, value: body.request } : null;
+}
+
+async function listRequestDocuments(): Promise<
+  Array<{ key: string; value: RequestDefinition; rid: string }>
+> {
+  const docs = await db.documentList<RequestDocumentBody>(REQ);
+  const out: Array<{ key: string; value: RequestDefinition; rid: string }> = [];
+  for (const doc of docs) {
+    const parsed = requestFromDocument(doc);
+    if (parsed) out.push({ ...parsed, rid: doc.rid });
+  }
+  return out;
+}
+
+async function countRequests(): Promise<number> {
+  const keys = new Set<string>();
+  for (const doc of await listRequestDocuments().catch(() => []))
+    keys.add(doc.key);
+  return keys.size;
+}
+
+async function insertMissingRequestDocuments(
+  entries: Array<{ key: string; value: RequestDefinition }>
+): Promise<void> {
+  const docs = await listRequestDocuments().catch(() => []);
+  const have = new Set(docs.map((doc) => doc.key));
+  for (const { key, value } of entries) {
+    if (have.has(key)) continue;
+    const colId = colIdFromReqKey(key);
+    if (!colId) continue;
+    await db.documentInsert(REQ, requestDocumentBody(colId, value));
+    have.add(key);
+  }
+}
+
+async function ensureRequestCollection(): Promise<void> {
+  const model = await db.collectionModel(REQ);
+  if (model === "document") {
+    await db.ensureDocumentCollection(REQ);
+    return;
+  }
+
+  const legacy = model
+    ? await db.kvList<RequestDefinition>(REQ).catch(() => [])
+    : [];
+  if (model) await db.dropCollection(REQ);
+  await db.ensureDocumentCollection(REQ);
+  await insertMissingRequestDocuments(legacy);
+}
+
+export async function importLegacyRequestEntries(
+  entries: Array<{ key: string; value: RequestDefinition }>
+): Promise<void> {
+  const model = await db.collectionModel(REQ);
+  if (model && model !== "document") await db.dropCollection(REQ);
+  await db.ensureDocumentCollection(REQ);
+  await insertMissingRequestDocuments(entries);
+}
+
+export function legacyRequestEntry(
+  key: string,
+  value: unknown
+): { key: string; value: RequestDefinition } | null {
+  const colId = colIdFromReqKey(key);
+  if (!colId) return null;
+  try {
+    return { key, value: requestDefinitionSchema.parse(value) };
+  } catch {
+    return null;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function pointerSegment(segment: string): string {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function appendPatchOperations(
+  before: unknown,
+  after: unknown,
+  path: string,
+  out: db.DocumentPatchOperation[]
+): void {
+  if (sameJson(before, after)) return;
+  if (!isPlainRecord(before) || !isPlainRecord(after)) {
+    out.push({ op: "set", path, value: after });
+    return;
+  }
+
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const nextPath = `${path}/${pointerSegment(key)}`;
+    if (!(key in after)) {
+      out.push({ op: "unset", path: nextPath });
+      continue;
+    }
+    if (!(key in before)) {
+      out.push({ op: "set", path: nextPath, value: after[key] });
+      continue;
+    }
+    appendPatchOperations(before[key], after[key], nextPath, out);
+  }
+}
+
+function requestDocumentPatch(
+  before: RequestDocumentBody,
+  after: RequestDocumentBody
+): db.DocumentPatchOperation[] {
+  const out: db.DocumentPatchOperation[] = [];
+  appendPatchOperations(before, after, "/body", out);
+  return out;
+}
+
+async function saveRequestDocument(
+  colId: string,
+  req: RequestDefinition
+): Promise<void> {
+  const desired = requestDocumentBody(colId, req);
+  const existing = await db.documentFindByField<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    desired.app_key
+  );
+  if (!existing) {
+    await db.documentInsert(REQ, desired);
+    return;
+  }
+
+  const current = parseRequestDocumentBody(existing.body);
+  if (!current) {
+    await db.documentReplace(REQ, existing.rid, desired);
+    return;
+  }
+
+  await db.documentPatch(
+    REQ,
+    existing.rid,
+    requestDocumentPatch(current, desired)
+  );
+}
+
+async function requestDocumentAsOf(
+  colId: string,
+  reqId: string,
+  commitHash: string
+): Promise<RequestDefinition | null> {
+  const doc = await db.documentFindByFieldAsOf<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    reqKey(colId, reqId),
+    commitHash
+  );
+  return doc ? (parseRequestDocumentBody(doc.body)?.request ?? null) : null;
+}
+
+/** The data collections whose edits we version + time-travel (native VCS).
  *  HIST (response runs, pruned) and OAUTH (ephemeral tokens) stay last-writer-wins. */
 export const VERSIONED_COLLECTIONS = [COL, REQ, ENV, SETTINGS] as const;
 
 export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(COL);
-  await db.ensureKvCollection(REQ);
   await db.ensureKvCollection(ENV);
   await db.ensureKvCollection(HIST);
   await db.ensureKvCollection(SETTINGS);
   await db.ensureKvCollection(OAUTH);
+  await ensureRequestCollection();
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
@@ -144,19 +384,21 @@ export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
-  const [cols, reqs] = await Promise.all([
+  const [cols, docReqs] = await Promise.all([
     db.kvList<CollectionFile>(COL),
-    db.kvList<RequestDefinition>(REQ),
+    listRequestDocuments().catch(() => []),
   ]);
+  const reqs = new Map<string, RequestDefinition>();
+  for (const req of docReqs) reqs.set(req.key, req.value);
 
   const reqsByCollection = new Map<
     string,
     Array<{ key: string; value: RequestDefinition }>
   >();
-  for (const req of reqs) {
-    const sep = req.key.indexOf(".");
-    if (sep <= 0) continue;
-    const colId = req.key.slice(0, sep);
+  for (const [key, value] of reqs) {
+    const colId = colIdFromReqKey(key);
+    if (!colId) continue;
+    const req = { key, value };
     const bucket = reqsByCollection.get(colId);
     if (bucket) bucket.push(req);
     else reqsByCollection.set(colId, [req]);
@@ -229,12 +471,17 @@ export const saveCollectionMeta = async (colId: string, c: CollectionFile) => {
 };
 
 export const saveRequest = async (colId: string, req: RequestDefinition) => {
-  await db.kvPut(REQ, reqKey(colId, req.id), req);
+  await saveRequestDocument(colId, req);
   db.commitSoon(`save request ${req.name ?? req.id}`);
 };
 
 export const deleteRequest = async (colId: string, reqId: string) => {
-  await db.kvDelete(REQ, reqKey(colId, reqId));
+  const doc = await db.documentFindByField<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    reqKey(colId, reqId)
+  );
+  if (doc) await db.documentDelete(REQ, doc.rid);
   db.commitSoon("delete request");
 };
 
@@ -251,14 +498,14 @@ export const deleteEnvironment = async (name: string) => {
 /** Delete a whole collection: its meta + every owned request and history row.
  *  Environments are project-level now, so they are not touched. */
 export async function deleteCollection(colId: string): Promise<void> {
-  const [reqs, hist] = await Promise.all([
-    db.kvList<RequestDefinition>(REQ),
+  const [docReqs, hist] = await Promise.all([
+    listRequestDocuments().catch(() => []),
     db.kvList<HistoryEntry>(HIST),
   ]);
   await Promise.all([
-    ...reqs
+    ...docReqs
       .filter((r) => ownedBy(colId, r.key))
-      .map((r) => db.kvDelete(REQ, r.key)),
+      .map((r) => db.documentDelete(REQ, r.rid)),
     ...hist
       .filter((h) => h.value.collectionId === colId)
       .map((h) => db.kvDelete(HIST, h.key)),
@@ -335,8 +582,19 @@ export type { VcsCommit } from "./reddb";
 export const listCommits = (limit = 50) => db.listCommits(limit);
 
 /** A request's definition as it was at `commitHash`, or null if it didn't exist then. */
-export const requestAsOf = (colId: string, reqId: string, commitHash: string) =>
-  db.kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash);
+export async function requestAsOf(
+  colId: string,
+  reqId: string,
+  commitHash: string
+): Promise<RequestDefinition | null> {
+  const docValue = await requestDocumentAsOf(colId, reqId, commitHash).catch(
+    () => null
+  );
+  if (docValue) return docValue;
+  return db
+    .kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash)
+    .catch(() => null);
+}
 
 /** One node of a request's timeline: its value at a commit + whether it changed there. */
 export interface RequestHistoryNode {
@@ -356,11 +614,8 @@ export async function requestHistory(
   limit = 100
 ): Promise<RequestHistoryNode[]> {
   const commits = await db.listCommits(limit);
-  const key = reqKey(colId, reqId);
   const values = await Promise.all(
-    commits.map((c) =>
-      db.kvGetAsOf<RequestDefinition>(REQ, key, c.hash).catch(() => null)
-    )
+    commits.map((c) => requestAsOf(colId, reqId, c.hash).catch(() => null))
   );
   const json = values.map((v) => (v ? JSON.stringify(v) : null));
   return commits.map((commit, i) => ({
