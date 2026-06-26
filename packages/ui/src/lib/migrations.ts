@@ -3,10 +3,11 @@
 // `red_migrations` system collection, so each runs exactly once per store and the
 // boot call is a no-op once everything is applied.
 //
-// To add one: append a `{ name, sql }` entry (optionally `dependsOn`). `sql` is the
-// body after `AS`. RedDB auto-infers dependencies from the SQL when unambiguous;
-// declare `dependsOn` when it isn't. Names must be unique and stable — never rename
-// or reorder an already-shipped migration (its applied state is keyed by name).
+// To add one: append a `{ name, sql }` entry. `sql` is the body after `AS`.
+// Declare `dependsOn` explicitly whenever a migration must run after another one;
+// do not rely on RedDB's inference as an app-level contract. Names must be unique
+// and stable — never rename an already-shipped migration (its applied state is keyed
+// by name).
 //
 //   { name: "add_request_tags",
 //     sql: "ALTER TABLE rr_requests ADD COLUMN tags TEXT" }

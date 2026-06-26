@@ -38,7 +38,225 @@ function ipc(handlers: {
   });
 }
 
+type SimMigrationStatus = "pending" | "applied" | "failed";
+
+function migrationStore(
+  initial: Record<
+    string,
+    { status: SimMigrationStatus; dependsOn?: string[] }
+  > = {}
+) {
+  const migrations = new Map<
+    string,
+    { status: SimMigrationStatus; dependsOn: string[] }
+  >(
+    Object.entries(initial).map(([name, m]) => [
+      name,
+      { status: m.status, dependsOn: m.dependsOn ?? [] },
+    ])
+  );
+  const queries: string[] = [];
+
+  function applyPending() {
+    let applied = 0;
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (const [name, m] of migrations) {
+        if (m.status !== "pending") continue;
+        const ready = m.dependsOn.every(
+          (dep) => migrations.get(dep)?.status === "applied"
+        );
+        if (!ready) continue;
+        m.status = "applied";
+        applied++;
+        progressed = true;
+        migrations.set(name, m);
+      }
+    }
+    const blocked = [...migrations].find(
+      ([, m]) => m.status === "pending" && m.dependsOn.length > 0
+    );
+    if (blocked)
+      return reply(200, {
+        ok: false,
+        error: `dependency not applied for ${blocked[0]}`,
+      });
+    return rqlOk([{ message: `applied ${applied} migration(s)` }]);
+  }
+
+  return {
+    queries,
+    status(name: string) {
+      return migrations.get(name)?.status ?? null;
+    },
+    rql(query: string) {
+      queries.push(query);
+      if (query === "SELECT name, status FROM red_migrations")
+        return rqlOk(
+          [...migrations].map(([name, m]) => ({
+            name,
+            status: m.status,
+          }))
+        );
+
+      const create = query.match(
+        /^CREATE MIGRATION ([A-Za-z_][A-Za-z0-9_]*)(?: DEPENDS ON ([A-Za-z_][A-Za-z0-9_]*(?:, [A-Za-z_][A-Za-z0-9_]*)*))? AS /
+      );
+      if (create) {
+        const name = create[1]!;
+        if (migrations.has(name))
+          return reply(200, {
+            ok: false,
+            error: `migration '${name}' already exists`,
+          });
+        migrations.set(name, {
+          status: "pending",
+          dependsOn: create[2]?.split(", ") ?? [],
+        });
+        return rqlOk([{ message: `migration '${name}' registered` }]);
+      }
+
+      if (query === "APPLY MIGRATION *") return applyPending();
+
+      return rqlOk([{ message: "ok" }]);
+    },
+  };
+}
+
 describe("runMigrations", () => {
+  it("simulates first app boot on a brand-new store", async () => {
+    const store = migrationStore();
+    ipc({ rql: store.rql });
+
+    await db.runMigrations([
+      { name: "request_base", sql: "CREATE TABLE request_base (id BIGINT)" },
+      {
+        name: "request_tags",
+        dependsOn: ["request_base"],
+        sql: "ALTER TABLE request_base ADD COLUMN tags TEXT",
+      },
+    ]);
+
+    expect(store.queries).toEqual([
+      "SELECT name, status FROM red_migrations",
+      "CREATE MIGRATION request_base AS CREATE TABLE request_base (id BIGINT)",
+      "CREATE MIGRATION request_tags DEPENDS ON request_base AS ALTER TABLE request_base ADD COLUMN tags TEXT",
+      "APPLY MIGRATION *",
+    ]);
+    expect(store.status("request_base")).toBe("applied");
+    expect(store.status("request_tags")).toBe("applied");
+  });
+
+  it("simulates a second app boot on the same already-migrated store", async () => {
+    const store = migrationStore();
+    ipc({ rql: store.rql });
+    const defs = [
+      { name: "request_base", sql: "CREATE TABLE request_base (id BIGINT)" },
+      {
+        name: "request_tags",
+        dependsOn: ["request_base"],
+        sql: "ALTER TABLE request_base ADD COLUMN tags TEXT",
+      },
+    ];
+
+    await db.runMigrations(defs);
+    store.queries.length = 0;
+    await db.runMigrations(defs);
+
+    expect(store.queries).toEqual([
+      "SELECT name, status FROM red_migrations",
+      "APPLY MIGRATION *",
+    ]);
+    expect(store.status("request_base")).toBe("applied");
+    expect(store.status("request_tags")).toBe("applied");
+  });
+
+  it("simulates opening an existing store where shipped migrations are already applied", async () => {
+    const store = migrationStore({
+      request_document_search_indexes: { status: "applied" },
+    });
+    ipc({ rql: store.rql });
+
+    await db.runMigrations([
+      {
+        name: "request_document_search_indexes",
+        sql: "CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH",
+      },
+    ]);
+
+    expect(store.queries).toEqual([
+      "SELECT name, status FROM red_migrations",
+      "APPLY MIGRATION *",
+    ]);
+    expect(store.status("request_document_search_indexes")).toBe("applied");
+  });
+
+  it("simulates opening an existing store after registration succeeded but apply was interrupted", async () => {
+    const store = migrationStore({
+      request_document_search_indexes: { status: "pending" },
+    });
+    ipc({ rql: store.rql });
+
+    await db.runMigrations([
+      {
+        name: "request_document_search_indexes",
+        sql: "CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH",
+      },
+    ]);
+
+    expect(store.queries).toEqual([
+      "SELECT name, status FROM red_migrations",
+      "APPLY MIGRATION *",
+    ]);
+    expect(store.status("request_document_search_indexes")).toBe("applied");
+  });
+
+  it("simulates opening an existing store with a failed shipped migration", async () => {
+    const store = migrationStore({
+      request_document_search_indexes: { status: "failed" },
+    });
+    ipc({ rql: store.rql });
+
+    await expect(
+      db.runMigrations([
+        {
+          name: "request_document_search_indexes",
+          sql: "CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH",
+        },
+      ])
+    ).rejects.toThrow(
+      /RedDB migration request_document_search_indexes is failed/
+    );
+
+    expect(store.queries).toEqual(["SELECT name, status FROM red_migrations"]);
+    expect(store.status("request_document_search_indexes")).toBe("failed");
+  });
+
+  it("simulates an app upgrade on an existing store by registering only the newly shipped migration", async () => {
+    const store = migrationStore({
+      request_base: { status: "applied" },
+    });
+    ipc({ rql: store.rql });
+
+    await db.runMigrations([
+      { name: "request_base", sql: "CREATE TABLE request_base (id BIGINT)" },
+      {
+        name: "request_tags",
+        dependsOn: ["request_base"],
+        sql: "ALTER TABLE request_base ADD COLUMN tags TEXT",
+      },
+    ]);
+
+    expect(store.queries).toEqual([
+      "SELECT name, status FROM red_migrations",
+      "CREATE MIGRATION request_tags DEPENDS ON request_base AS ALTER TABLE request_base ADD COLUMN tags TEXT",
+      "APPLY MIGRATION *",
+    ]);
+    expect(store.status("request_base")).toBe("applied");
+    expect(store.status("request_tags")).toBe("applied");
+  });
+
   it("rejects migration names that RedDB cannot parse before issuing RQL", async () => {
     const queries: string[] = [];
     ipc({
@@ -77,6 +295,32 @@ describe("runMigrations", () => {
     expect(queries).toEqual([]);
   });
 
+  it("registers valid dependencies explicitly", async () => {
+    const queries: string[] = [];
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (query === "SELECT name, status FROM red_migrations")
+          return rqlOk([]);
+        return rqlOk([{ message: "ok" }]);
+      },
+    });
+
+    await db.runMigrations([
+      { name: "request_base", sql: "CREATE TABLE request_base (id BIGINT)" },
+      {
+        name: "request_tags",
+        dependsOn: ["request_base"],
+        sql: "ALTER TABLE request_base ADD COLUMN tags TEXT",
+      },
+    ]);
+
+    expect(queries).toContain(
+      "CREATE MIGRATION request_tags DEPENDS ON request_base AS ALTER TABLE request_base ADD COLUMN tags TEXT"
+    );
+    expect(queries).toContain("APPLY MIGRATION *");
+  });
+
   it.each([
     [
       "duplicate names",
@@ -100,6 +344,11 @@ describe("runMigrations", () => {
         },
       ],
       /sql must be the body after AS/,
+    ],
+    [
+      "BATCH clause",
+      [{ name: "batched_request_tags", sql: "BATCH 100 ROWS AS UPDATE users" }],
+      /BATCH is not supported by this app wrapper/,
     ],
     [
       "self dependency",
@@ -147,7 +396,7 @@ describe("runMigrations", () => {
   it("fails closed when the migration catalog cannot be inspected", async () => {
     ipc({
       rql: (query) => {
-        if (query === "SELECT name FROM red_migrations")
+        if (query === "SELECT name, status FROM red_migrations")
           return reply(200, { ok: false, error: "red_migrations unavailable" });
         return rqlOk([]);
       },
