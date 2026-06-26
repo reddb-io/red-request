@@ -8,6 +8,7 @@
   import ProtocolForm from "./ProtocolForm.svelte";
   import WebSocketPanel from "./WebSocketPanel.svelte";
   import GrpcPanel from "./GrpcPanel.svelte";
+  import HistoryTimeline from "./HistoryTimeline.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
@@ -18,11 +19,9 @@
   let showRunner = $state(false);
   let showCode = $state(false);
   let showSchema = $state(false);
-  let showHistory = $state(false);
   type ModalComponent = Component<{ onClose: () => void }>;
   let RunnerPanelComponent = $state<ModalComponent | null>(null);
   let CodeModalComponent = $state<ModalComponent | null>(null);
-  let HistoryModalComponent = $state<ModalComponent | null>(null);
   let GraphQlSchemaComponent = $state<ModalComponent | null>(null);
   let gqlTab = $state<"query" | "variables">("query");
   // Soft-wrap long lines in the body editor (drops the line-number gutter while on).
@@ -56,20 +55,6 @@
       }
     }
     showCode = true;
-  }
-
-  async function openHistory() {
-    if (!HistoryModalComponent) {
-      try {
-        HistoryModalComponent = (
-          await import("./HistoryTimeline.svelte")
-        ).default;
-      } catch (error) {
-        reportLazyLoadFailure("History", error);
-        return;
-      }
-    }
-    showHistory = true;
   }
 
   async function openSchema() {
@@ -123,11 +108,20 @@
     | "body"
     | "auth"
     | "scripts"
+    | "history"
     | "settings"
     | "config";
   let tab = $state<Tab>("params");
-  const httpTabs: Tab[] = ["params", "headers", "body", "auth", "scripts", "settings"];
-  const netTabs: Tab[] = ["config", "scripts"];
+  const httpTabs: Tab[] = [
+    "params",
+    "headers",
+    "body",
+    "auth",
+    "scripts",
+    "history",
+    "settings",
+  ];
+  const netTabs: Tab[] = ["config", "scripts", "history"];
   const tabs = $derived(ws.activeReq?.kind === "http" ? httpTabs : netTabs);
   $effect(() => {
     if (!tabs.includes(tab)) tab = tabs[0]!;
@@ -316,14 +310,6 @@
           title="Generate code (curl, fetch, python…)">Code</Button
         >
       {/if}
-      <Button
-        onclick={() => void openHistory()}
-        variant="outline"
-        size="xs"
-        class="shrink-0"
-        data-testid="request-history-btn"
-        title="View and restore past versions of this request">History</Button
-      >
     </div>
 
     {#if ws.activeReq.kind === "ws" || ws.activeReq.kind === "sse"}
@@ -347,7 +333,7 @@
       {/each}
     </div>
 
-    <div class="flex-1 overflow-auto p-3">
+    <div class={tab === "history" ? "flex-1 overflow-hidden" : "flex-1 overflow-auto p-3"}>
       {#if tab === "params"}
         <div class="flex flex-col gap-5">
           <section>
@@ -482,6 +468,8 @@
         </div>
       {:else if tab === "config"}
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
+      {:else if tab === "history"}
+        <HistoryTimeline embedded />
       {:else}
         <div class="flex flex-col gap-2">
           <div class="flex items-center gap-2">
@@ -573,9 +561,6 @@
 
   {#if showCode && CodeModalComponent}
     <CodeModalComponent onClose={() => (showCode = false)} />
-  {/if}
-  {#if showHistory && HistoryModalComponent}
-    <HistoryModalComponent onClose={() => (showHistory = false)} />
   {/if}
   {#if showSchema && GraphQlSchemaComponent}
     <GraphQlSchemaComponent onClose={() => (showSchema = false)} />

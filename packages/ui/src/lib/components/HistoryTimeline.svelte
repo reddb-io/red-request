@@ -13,15 +13,15 @@
   import type { RequestHistoryNode } from "../repo";
   import type { RequestDefinition } from "@red-request/core/request";
 
-  let { onClose }: { onClose: () => void } = $props();
+  let {
+    onClose,
+    embedded = false,
+  }: { onClose?: () => void; embedded?: boolean } = $props();
 
   let loading = $state(true);
   let nodes = $state<RequestHistoryNode[]>([]);
   let selected = $state<RequestHistoryNode | null>(null);
   let restoring = $state(false);
-
-  const colId = ws.activeColId;
-  const reqId = ws.activeReq?.id ?? null;
 
   // Version boundaries (commits where this request actually changed), newest first.
   const versions = $derived(nodes.filter((n) => n.changedHere && n.value));
@@ -39,15 +39,24 @@
   const shortHash = (h: string) => h.slice(0, 7);
 
   $effect(() => {
-    void load();
+    const colId = ws.activeColId;
+    const reqId = ws.activeReq?.id ?? null;
+    void load(colId, reqId);
   });
-  async function load() {
+  async function load(colId: string | null | undefined, reqId: string | null) {
+    loading = true;
+    nodes = [];
+    selected = null;
     if (!colId || !reqId) {
       loading = false;
       return;
     }
-    nodes = await repo.requestHistory(colId, reqId, 100);
-    selected = nodes.find((n) => n.changedHere && n.value) ?? null;
+    const nextNodes = await repo.requestHistory(colId, reqId, 100);
+    if (colId !== ws.activeColId || reqId !== (ws.activeReq?.id ?? null)) {
+      return;
+    }
+    nodes = nextNodes;
+    selected = nextNodes.find((n) => n.changedHere && n.value) ?? null;
     loading = false;
   }
 
@@ -114,14 +123,14 @@
       await ws.restoreRequestVersion(
         structuredClone($state.snapshot(selected.value)) as RequestDefinition
       );
-      onClose();
+      onClose?.();
     } finally {
       restoring = false;
     }
   }
 </script>
 
-<Modal {onClose} class="flex h-[640px] w-[920px] max-w-[95vw] flex-col rounded-xl">
+{#snippet timeline(showClose: boolean)}
   <div class="flex items-center gap-2 border-b border-border px-4 py-2">
     <h2 class="text-sm font-semibold text-fg">Version history</h2>
     <span class="text-xs text-muted-fg">{ws.activeReq?.name ?? ""}</span>
@@ -131,13 +140,15 @@
         commit{nodes.length === 1 ? "" : "s"}</span
       >
     {/if}
-    <Button
-      onclick={onClose}
-      variant="ghost"
-      size="icon-xs"
-      class="ml-auto"
-      aria-label="close">✕</Button
-    >
+    {#if showClose && onClose}
+      <Button
+        onclick={onClose}
+        variant="ghost"
+        size="icon-xs"
+        class="ml-auto"
+        aria-label="close">✕</Button
+      >
+    {/if}
   </div>
 
   {#if loading}
@@ -246,4 +257,14 @@
       </div>
     </div>
   {/if}
-</Modal>
+{/snippet}
+
+{#if embedded}
+  <div class="flex h-full min-h-[460px] flex-col">
+    {@render timeline(false)}
+  </div>
+{:else if onClose}
+  <Modal {onClose} class="flex h-[640px] w-[920px] max-w-[95vw] flex-col rounded-xl">
+    {@render timeline(true)}
+  </Modal>
+{/if}

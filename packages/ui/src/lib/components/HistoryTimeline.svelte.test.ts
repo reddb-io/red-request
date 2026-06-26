@@ -61,6 +61,7 @@ describe("HistoryTimeline", () => {
 
     render(HistoryTimeline, { onClose: () => {} });
 
+    expect(requestHistory).toHaveBeenCalledWith("col1", "r1", 100);
     expect(await screen.findByText("Current")).toBeTruthy();
     // the non-changing commit is shown as context (dim), not a version
     expect(await screen.findByText(/no change to this request/i)).toBeTruthy();
@@ -104,5 +105,20 @@ describe("HistoryTimeline", () => {
     requestHistory.mockResolvedValue([]);
     render(HistoryTimeline, { onClose: () => {} });
     expect(await screen.findByText(/No saved versions yet/i)).toBeTruthy();
+  });
+
+  it("renders inline for the request tab without modal close chrome", async () => {
+    requestHistory.mockResolvedValue([
+      {
+        commit: commit("h1", "create", 1),
+        value: req("v1 name"),
+        changedHere: true,
+      },
+    ]);
+
+    render(HistoryTimeline, { embedded: true });
+
+    expect(await screen.findByText("Version history")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /close/i })).toBeNull();
   });
 });
