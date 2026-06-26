@@ -9,7 +9,24 @@ export default defineConfig({
   plugins: [svelte()],
   resolve: {
     conditions: ["browser"],
-    alias: { $lib: fileURLToPath(new URL("./src/lib", import.meta.url)) },
+    alias: [
+      {
+        find: "$lib",
+        replacement: fileURLToPath(new URL("./src/lib", import.meta.url)),
+      },
+      {
+        find: /^@red-request\/core$/,
+        replacement: fileURLToPath(
+          new URL("../core/src/index.ts", import.meta.url)
+        ),
+      },
+      {
+        find: /^@red-request\/core\/(.+)$/,
+        replacement: fileURLToPath(
+          new URL("../core/src/$1.ts", import.meta.url)
+        ),
+      },
+    ],
   },
   test: {
     environment: "jsdom",

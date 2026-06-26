@@ -18,6 +18,7 @@
   let cmdOpen = $state(false);
   let lazyLoadError = $state("");
   let SettingsViewComponent = $state<Component | null>(null);
+  let RedUiDatabaseViewComponent = $state<Component | null>(null);
   let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
     null
   );
@@ -153,6 +154,18 @@
     }
   }
 
+  async function loadRedUiDatabaseView() {
+    if (RedUiDatabaseViewComponent) return;
+    try {
+      RedUiDatabaseViewComponent = (
+        await import("$lib/components/RedUiDatabaseView.svelte")
+      ).default;
+      lazyLoadError = "";
+    } catch (error) {
+      reportLazyLoadFailure("database", error);
+    }
+  }
+
   async function openCommandPalette() {
     if (!CommandPaletteComponent) {
       try {
@@ -169,6 +182,7 @@
 
   $effect(() => {
     if (ws.view === "settings") void loadSettingsView();
+    if (ws.view === "database") void loadRedUiDatabaseView();
   });
 
   function onKey(e: KeyboardEvent) {
@@ -224,6 +238,16 @@
           <IconBar />
           {#if ws.view === "home"}
             <div class="flex-1 overflow-hidden"><HomeView /></div>
+          {:else if ws.view === "database" && ws.redUiEnabled}
+            <div class="flex-1 overflow-hidden">
+              {#if RedUiDatabaseViewComponent}
+                <RedUiDatabaseViewComponent />
+              {:else if lazyLoadError}
+                <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
+              {:else}
+                <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+              {/if}
+            </div>
           {:else if ws.view === "settings"}
             <div class="flex-1 overflow-hidden">
               {#if SettingsViewComponent}

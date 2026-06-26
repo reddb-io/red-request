@@ -71,6 +71,7 @@ import {
 /** Reserved name for the always-on base environment (vars + secrets) that every
  *  named environment layers on top of. Stored alongside the others. */
 const GLOBALS_ENV = "Globals";
+export type AppView = "home" | "requests" | "settings" | "database";
 
 const emptyGlobals = (): StoredEnvironment =>
   storedEnvironmentSchema.parse({ name: GLOBALS_ENV, vars: {}, secrets: {} });
@@ -98,7 +99,9 @@ class Workspace {
   /** Top-level navigation: icon-bar selects one. Home bundles dashboard + proxy/profile
    *  management; Requests is the workspace (collections + active request); Settings holds
    *  project-level config. The Sidebar's old segmented [requests|dashboard] is gone. */
-  view = $state<"home" | "requests" | "settings">("requests");
+  view = $state<AppView>("requests");
+  /** Settings > Data opt-in for the embedded red-ui database inspector. */
+  redUiEnabled = $state(false);
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);
@@ -372,6 +375,10 @@ class Workspace {
       await repo.ensureSample();
       appLog("debug", "loadStore: loadNetwork…");
       this.network = await repo.loadNetwork();
+      appLog("debug", "loadStore: loadUiSettings…");
+      this.redUiEnabled = (await repo.loadUiSettings()).redUiEnabled;
+      if (!this.redUiEnabled && this.view === "database")
+        this.view = "requests";
       appLog("debug", "loadStore: reload…");
       await this.reload();
       appLog("debug", "loadStore: reloadEnvironments…");
@@ -938,6 +945,12 @@ class Workspace {
   /** Persist the project-level proxy/profile pool (called on blur from the manager UI). */
   async saveProxiesProfiles(): Promise<void> {
     await repo.saveNetwork($state.snapshot(this.network) as NetworkSettings);
+  }
+
+  async setRedUiEnabled(enabled: boolean): Promise<void> {
+    this.redUiEnabled = enabled;
+    if (!enabled && this.view === "database") this.view = "requests";
+    await repo.saveUiSettings({ redUiEnabled: enabled });
   }
 
   /**

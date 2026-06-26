@@ -116,10 +116,14 @@
   let menuItems = $state<MenuItem[]>([]);
   let menuIndex = $state(0);
   let tokenStart = $state(-1);
+  let menuStyle = $state("");
   // "var" inserts {{name}} for a {{ … }} token; "gql" replaces the partial identifier under the
   // cursor with a schema-sourced GraphQL field/argument name.
   let menuMode = $state<"var" | "gql">("var");
   let wordStart = $state(-1);
+  const MENU_MARGIN = 12;
+  const MENU_MIN_WIDTH = 576;
+  const MENU_MAX_HEIGHT = 288;
 
   const knownSet = $derived(new Set(known));
   const functionCatalog = TEMPLATE_FUNCTION_CATALOG;
@@ -208,6 +212,32 @@
     tip = null;
   }
 
+  function positionMenu() {
+    if (!el || typeof window === "undefined") return;
+    const r = el.getBoundingClientRect();
+    const width = Math.max(
+      280,
+      Math.min(Math.max(MENU_MIN_WIDTH, r.width), window.innerWidth - MENU_MARGIN * 2)
+    );
+    const left = Math.min(
+      Math.max(MENU_MARGIN, r.left),
+      Math.max(MENU_MARGIN, window.innerWidth - MENU_MARGIN - width)
+    );
+    const below = window.innerHeight - r.bottom - MENU_MARGIN;
+    const above = r.top - MENU_MARGIN;
+    const openAbove = below < 180 && above > below;
+    const maxHeight = Math.max(
+      160,
+      Math.min(MENU_MAX_HEIGHT, openAbove ? above : below)
+    );
+    const top = openAbove
+      ? Math.max(MENU_MARGIN, r.top - maxHeight - 4)
+      : Math.min(r.bottom + 4, window.innerHeight - MENU_MARGIN - maxHeight);
+    menuStyle = `left:${Math.round(left)}px;top:${Math.round(top)}px;width:${Math.round(
+      width
+    )}px;max-height:${Math.round(maxHeight)}px`;
+  }
+
   function refreshMenu() {
     if (!el) return;
     updateCaret();
@@ -245,6 +275,7 @@
       menuItems = [...functionItems, ...variableItems];
       menuIndex = 0;
       showMenu = menuItems.length > 0;
+      if (showMenu) void tick().then(positionMenu);
       return;
     }
     if (gqlSchema) {
@@ -261,6 +292,7 @@
       }));
       menuIndex = 0;
       showMenu = menuItems.length > 0;
+      if (showMenu) void tick().then(positionMenu);
       return;
     }
     showMenu = false;
@@ -320,7 +352,8 @@
   $effect(() => {
     if (!showMenu || !menuEl) return;
     const active = menuEl.children[menuIndex] as HTMLElement | undefined;
-    active?.scrollIntoView({ block: "nearest" });
+    if (typeof active?.scrollIntoView === "function")
+      active.scrollIntoView({ block: "nearest" });
   });
 
   const pad = $derived(dense ? "px-2" : "px-2.5");
@@ -341,6 +374,12 @@
       : "rounded-md border border-border bg-[var(--color-bg-2)] transition focus-within:border-[var(--color-brand)] focus-within:ring-1 focus-within:ring-[var(--color-brand)]"
   );
 </script>
+
+<svelte:window
+  onresize={() => {
+    if (showMenu) positionMenu();
+  }}
+/>
 
 {#snippet backdropLayer()}
   <div
@@ -413,7 +452,9 @@
   {#if showMenu}
     <ul
       bind:this={menuEl}
-      class="panel absolute top-full left-1 z-50 mt-1 max-h-72 w-72 overflow-y-auto py-1 shadow-xl"
+      data-slot="var-field-menu"
+      style={menuStyle}
+      class="panel fixed z-[80] overflow-y-auto py-1 shadow-xl"
     >
       {#each menuItems as item, i (item.label)}
         <li>
@@ -437,11 +478,11 @@
                 : item.kind === "fn"
                   ? "ƒ"
                   : "⬩"}</span>
-            <span class="min-w-0 flex-1 truncate">{item.label}</span>
+            <span class="min-w-[12rem] flex-1 truncate">{item.label}</span>
             {#if item.kind === "gql" && item.gql.type}
-              <span class="ml-auto truncate text-xs text-[var(--color-brand)]">{item.gql.type}</span>
+              <span class="ml-3 max-w-[50%] shrink truncate text-xs text-[var(--color-brand)]">{item.gql.type}</span>
             {:else if item.kind !== "gql" && item.desc}
-              <span class="ml-auto truncate text-xs text-fg-faint">{item.desc}</span>
+              <span class="ml-3 max-w-[50%] shrink truncate text-xs text-fg-faint">{item.desc}</span>
             {/if}
           </button>
         </li>

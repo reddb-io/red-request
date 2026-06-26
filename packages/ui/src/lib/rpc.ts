@@ -49,6 +49,25 @@ export function reddbVersion(): Promise<string> {
   return invoke<string>("reddb_version");
 }
 
+/** Current HTTP endpoint for the managed embedded RedDB sidecar. */
+export function reddbUrl(): Promise<string> {
+  return invoke<string>("reddb_url");
+}
+
+export interface ReddbHttpReply {
+  status: number;
+  body: string;
+}
+
+/** Raw RedDB HTTP request through Rust, sharing red-request's managed sidecar. */
+export function reddbRequest(
+  method: string,
+  path: string,
+  body: string | null = null
+): Promise<ReddbHttpReply> {
+  return invoke<ReddbHttpReply>("reddb_request", { method, path, body });
+}
+
 /** Size + last-modified for a file (e.g. the project's app.rdb). */
 export interface FileMeta {
   exists: boolean;
