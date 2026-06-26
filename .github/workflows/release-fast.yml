@@ -57,6 +57,12 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
+      - name: Set up protoc for RedDB source build
+        if: env.REDDB_SOURCE_REF != ''
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout RedDB source
         if: env.REDDB_SOURCE_REF != ''
         uses: actions/checkout@v7
