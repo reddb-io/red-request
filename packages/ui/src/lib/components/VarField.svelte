@@ -66,6 +66,7 @@
   let scrollTop = $state(0);
   let lineH = $state(17.5);
   let padTop = $state(6);
+  const editorHeight = $derived(Math.ceil(rows * lineH + padTop * 2));
   function countLines(text: string): number {
     let count = 1;
     for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1)) {
@@ -344,6 +345,7 @@
 {#snippet backdropLayer()}
   <div
     bind:this={backdrop}
+    data-slot="var-field-backdrop"
     aria-hidden="true"
     class="{shared} pointer-events-none absolute inset-0 overflow-hidden text-fg"
   >{#each segments as s, i (i)}{#if s.kind === "plain"}<span>{s.text}</span
@@ -362,12 +364,15 @@
   {#if multiline}
     <textarea
       bind:this={el}
+      data-slot="var-field-textarea"
       bind:value
       {placeholder}
       {rows}
       aria-label={ariaLabel}
       spellcheck="false"
-      class="{shared} relative w-full resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
+      class="{shared} relative w-full {gutterMode
+        ? 'h-full overflow-auto'
+        : ''} resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={onKeyup}
       onclick={refreshMenu}
@@ -383,6 +388,7 @@
   {:else}
     <input
       bind:this={el}
+      data-slot="var-field-input"
       bind:value
       {placeholder}
       aria-label={ariaLabel}
@@ -444,13 +450,18 @@
   {/if}
 {/snippet}
 
-<div class="relative {frame} {gutterMode ? 'flex' : ''}">
+<div
+  data-slot="var-field"
+  class="relative {frame} {gutterMode ? 'flex' : ''}"
+  style={gutterMode ? `height:${editorHeight}px` : ""}
+>
   {#if gutterMode}
     <div
       bind:this={gutter}
+      data-slot="var-field-gutter"
       aria-hidden="true"
       class="mono shrink-0 overflow-hidden border-r border-border px-2 text-right text-xs text-fg-faint select-none"
-      style="padding-top:{padTop}px; padding-bottom:{padTop}px"
+      style="height:{editorHeight}px; padding-top:{padTop}px; padding-bottom:{padTop}px"
     >
       {#each lines as i (i)}
         <div
@@ -461,7 +472,7 @@
         </div>
       {/each}
     </div>
-    <div class="relative min-w-0 flex-1 overflow-hidden">
+    <div data-slot="var-field-editor-pane" class="relative h-full min-w-0 flex-1 overflow-hidden">
       <div
         class="pointer-events-none absolute inset-x-0 bg-white/[0.04]"
         style="top:{padTop + caretLine * lineH - scrollTop}px; height:{lineH}px"
