@@ -1907,8 +1907,14 @@ class Workspace {
     )
       return;
     const oldName = env.name;
-    env.name = name;
-    await repo.renameEnvironment(oldName, env);
+    const renamed = storedEnvironmentSchema.parse({
+      ...(structuredClone($state.snapshot(env)) as StoredEnvironment),
+      name,
+    });
+    await repo.renameEnvironment(oldName, renamed);
+    env.name = renamed.name;
+    env.vars = renamed.vars;
+    env.secrets = renamed.secrets;
     await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     if (this.activeEnvName === oldName) this.activeEnvName = name;
   }

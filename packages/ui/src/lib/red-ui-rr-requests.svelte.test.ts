@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { QueryResult } from "../../node_modules/@reddb-io/ui/src/lib/reddb/client";
+import type { QueryResult } from "@reddb-io/ui";
 // Import the pure renderer helpers from the embedded package source. The public
 // renderer barrel mounts Svelte components that use red-ui's own `$lib` alias,
 // which collides with red-request's test alias.

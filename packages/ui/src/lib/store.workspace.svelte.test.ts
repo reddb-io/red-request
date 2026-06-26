@@ -202,4 +202,41 @@ describe("Workspace persistence coordination", () => {
     expect(ws.environments.map((env) => env.name)).toEqual(["dev", "prod"]);
     expect(repo.renameEnvironment).not.toHaveBeenCalled();
   });
+
+  it("keeps an environment rename out of live state until persistence succeeds", async () => {
+    let finishRename!: () => void;
+    vi.mocked(repo.renameEnvironment).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRename = resolve;
+        })
+    );
+    ws.environments = [
+      storedEnvironmentSchema.parse({
+        name: "dev",
+        vars: { API_URL: "https://api.test" },
+        secrets: {},
+      }),
+    ];
+    ws.activeEnvName = "dev";
+
+    const pendingRename = ws.renameEnv(ws.environments[0]!, "prod");
+
+    expect(ws.environments[0]!.name).toBe("dev");
+    expect(ws.activeEnvName).toBe("dev");
+
+    finishRename();
+    await pendingRename;
+
+    expect(repo.renameEnvironment).toHaveBeenCalledWith(
+      "dev",
+      expect.objectContaining({
+        name: "prod",
+        vars: { API_URL: "https://api.test" },
+      })
+    );
+    expect(ws.environments[0]!.name).toBe("prod");
+    expect(ws.activeEnvName).toBe("prod");
+    expect(repo.saveEnvironmentOrder).toHaveBeenCalledWith(["prod"]);
+  });
 });
