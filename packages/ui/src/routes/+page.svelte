@@ -4,6 +4,7 @@
   import { ws } from "$lib/store.svelte";
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
+  import ClosingOverlay from "$lib/components/ClosingOverlay.svelte";
   import ProjectTransition from "$lib/components/ProjectTransition.svelte";
   import IconBar from "$lib/components/IconBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -23,6 +24,19 @@
     null
   );
 
+  function waitForPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        resolve();
+      };
+      setTimeout(finish, 80);
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    });
+  }
+
   onMount(() => {
     void ws.init();
 
@@ -41,12 +55,17 @@
     // Rust also arms a native watchdog on CloseRequested, so a wedged webview cannot
     // trap the OS close button behind preventDefault().
     let unlistenClose: (() => void) | undefined;
+    let closeStarted = false;
     try {
       const win = getCurrentWindow();
       void win
         .onCloseRequested(async (event) => {
           event.preventDefault();
+          ws.beginClosing();
+          if (closeStarted) return;
+          closeStarted = true;
           try {
+            await waitForPaint();
             await Promise.race([
               ws.flushSave(),
               new Promise((r) => setTimeout(r, 2000)),
@@ -306,5 +325,8 @@
   </div>
   {#if ws.transitioning}
     <ProjectTransition />
+  {/if}
+  {#if ws.closing}
+    <ClosingOverlay />
   {/if}
 </Tooltip.Provider>
