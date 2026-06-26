@@ -36,8 +36,9 @@
     document.addEventListener("visibilitychange", onVisibility);
 
     // Intercept the window close so the flush lands while reddb is still alive (the Rust
-    // side now reaps the sidecar on Destroyed, not CloseRequested). Race a timeout so a
-    // hung save can never wedge the window shut.
+    // side reaps the sidecar on Destroyed, not CloseRequested). This is best-effort:
+    // Rust also arms a native watchdog on CloseRequested, so a wedged webview cannot
+    // trap the OS close button behind preventDefault().
     let unlistenClose: (() => void) | undefined;
     try {
       const win = getCurrentWindow();

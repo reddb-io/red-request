@@ -14,6 +14,7 @@ use tauri_plugin_shell::ShellExt;
 use tokio::sync::oneshot;
 
 const PERF_LOG_MIN_MS: u128 = 5;
+const CLOSE_WATCHDOG_MS: u64 = 2_500;
 
 fn perf_ms(start: Instant) -> u128 {
     start.elapsed().as_millis()
@@ -24,6 +25,23 @@ fn log_perf_slow(op: &str, detail: &str, start: Instant) {
     if ms >= PERF_LOG_MIN_MS {
         log::debug!(target: "perf", "{op} {detail} in {ms}ms");
     }
+}
+
+fn arm_close_watchdog(window: tauri::Window) {
+    let label = window.label().to_string();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(CLOSE_WATCHDOG_MS)).await;
+        match window.destroy() {
+            Ok(()) => log::warn!(
+                target: "app",
+                "window close watchdog forced destroy for {label}"
+            ),
+            Err(e) => log::debug!(
+                target: "app",
+                "window close watchdog found {label} already closed: {e}"
+            ),
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1885,13 +1903,20 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Reap on Destroyed (not CloseRequested) so the webview can flush a pending
             // autosave to reddb on close *before* the sidecar is torn down. The frontend
-            // intercepts CloseRequested, flushes the active request, then destroys the
-            // window — which lands here. Reaping on CloseRequested instead SIGTERM'd reddb
-            // mid-flush and dropped the last edit. RunEvent::Exit also reaps (idempotent),
-            // so a window closed without the frontend handler still cleans up — no orphaned
-            // `red server` is left behind on the .rdb lock.
-            if let tauri::WindowEvent::Destroyed = event {
-                reap_sidecars(window.app_handle());
+            // intercepts CloseRequested, flushes the active request, then destroys the window.
+            //
+            // Close must still be native-fail-safe: if the webview event loop is wedged after
+            // registering its close listener, the JS timeout cannot run and the OS close button
+            // would be trapped behind preventDefault(). Arm a Rust watchdog on every close
+            // request; normal closes destroy first, hung closes are force-destroyed here.
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    arm_close_watchdog(window.clone());
+                }
+                tauri::WindowEvent::Destroyed => {
+                    reap_sidecars(window.app_handle());
+                }
+                _ => {}
             }
         })
         .setup(|app| {
