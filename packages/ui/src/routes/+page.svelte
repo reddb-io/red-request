@@ -173,7 +173,7 @@
   function onKey(e: KeyboardEvent) {
     if (ws.screen !== "app") return;
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === "k") {
+    if (mod && ["k", "p"].includes(e.key.toLowerCase())) {
       e.preventDefault();
       if (cmdOpen) cmdOpen = false;
       else void openCommandPalette();

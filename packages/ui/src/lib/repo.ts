@@ -1,9 +1,9 @@
-// Collection repository — backed by the embedded RedDB store (KV collections).
+// Collection repository — backed by the embedded RedDB store.
 //
-//   rr_collections   key=<colId>            → CollectionFile
-//   rr_requests      key=<colId>.<reqId>    → RequestDefinition
-//   rr_environments  key=<envSlug>          → StoredEnvironment (project-level, sealed secrets)
-//   rr_settings      key="globals"          → Record<string,string> (project-level base vars)
+//   rr_collections    KV key=<colId>         → CollectionFile
+//   rr_requests       Document app_key=<colId>.<reqId> → RequestDefinition envelope
+//   rr_environments   KV key=<envSlug>       → StoredEnvironment (project-level, sealed secrets)
+//   rr_settings       KV key="globals"       → Record<string,string> (project-level base vars)
 //
 // Keys use `.` as separator; collection/request ids and env slugs are URL-safe slugs.
 // Environments and global vars are project-level (shared by every collection); a one-time
@@ -40,6 +40,22 @@ export const SETTINGS = "rr_settings";
 export const OAUTH = "rr_oauth_tokens";
 
 const MAX_HISTORY_PER_REQ = 50;
+const REQ_MIGRATION_STAGE = "rr_requests_migration_stage";
+
+type RequestDocumentBody = {
+  record_type: "request";
+  app_key: string;
+  collection_id: string;
+  request_id: string;
+  request_name: string;
+  request_kind: RequestDefinition["kind"];
+  request_method: string;
+  request_url: string;
+  request_folder: string;
+  request_target: string;
+  search_text: string;
+  request: RequestDefinition;
+};
 
 /** Cached OAuth2/OIDC token set, keyed by a connection id (hash of tokenUrl|clientId|
  *  scope|grantType). Token strings are sealed (AES-GCM) before they land here; the
@@ -61,15 +77,25 @@ export async function recordCounts(): Promise<{
 }> {
   const kinds: { label: string; name: string }[] = [
     { label: "collections", name: COL },
-    { label: "requests", name: REQ },
     { label: "environments", name: ENV },
     { label: "history", name: HIST },
     { label: "settings", name: SETTINGS },
     { label: "oauth tokens", name: OAUTH },
   ];
-  const counts = await Promise.all(kinds.map((k) => db.kvCount(k.name)));
-  const byKind = kinds.map((k, i) => ({ label: k.label, count: counts[i]! }));
-  return { total: counts.reduce((s, n) => s + n, 0), byKind };
+  const [kvCounts, requestCount] = await Promise.all([
+    Promise.all(kinds.map((k) => db.kvCount(k.name))),
+    countRequests(),
+  ]);
+  const kvByLabel = new Map(kinds.map((k, i) => [k.label, kvCounts[i] ?? 0]));
+  const byKind = [
+    { label: "collections", count: kvByLabel.get("collections") ?? 0 },
+    { label: "requests", count: requestCount },
+    { label: "environments", count: kvByLabel.get("environments") ?? 0 },
+    { label: "history", count: kvByLabel.get("history") ?? 0 },
+    { label: "settings", count: kvByLabel.get("settings") ?? 0 },
+    { label: "oauth tokens", count: kvByLabel.get("oauth tokens") ?? 0 },
+  ];
+  return { total: requestCount + kvCounts.reduce((s, n) => s + n, 0), byKind };
 }
 
 export const loadOauthToken = (connId: string) =>
@@ -92,17 +118,425 @@ export function slugify(name: string): string {
 const reqKey = (colId: string, reqId: string) => `${colId}.${reqId}`;
 const ownedBy = (colId: string, key: string) => key.startsWith(`${colId}.`);
 
-/** The "document" collections whose edits we version + time-travel (native VCS).
+function colIdFromReqKey(key: string): string | null {
+  const sep = key.indexOf(".");
+  return sep > 0 ? key.slice(0, sep) : null;
+}
+
+function requestTarget(req: RequestDefinition): string {
+  if (req.kind === "grpc") {
+    const method = [req.grpc.service, req.grpc.method]
+      .filter(Boolean)
+      .join("/");
+    return [req.url, method].filter(Boolean).join(" ");
+  }
+  if (req.url) return req.url;
+  if (!req.net.host) return "";
+  return req.net.port ? `${req.net.host}:${req.net.port}` : req.net.host;
+}
+
+function requestSearchText(
+  colId: string,
+  req: RequestDefinition,
+  target: string
+): string {
+  return [
+    colId,
+    req.id,
+    req.name,
+    req.folder,
+    req.kind,
+    req.method,
+    req.url,
+    target,
+    req.net.host,
+    req.net.port ? String(req.net.port) : "",
+    req.net.recordType,
+    req.grpc.service,
+    req.grpc.method,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function requestDocumentBody(
+  colId: string,
+  req: RequestDefinition
+): RequestDocumentBody {
+  const parsed = requestDefinitionSchema.parse(req);
+  const target = requestTarget(parsed);
+  return {
+    record_type: "request",
+    app_key: reqKey(colId, parsed.id),
+    collection_id: colId,
+    request_id: parsed.id,
+    request_name: parsed.name,
+    request_kind: parsed.kind,
+    request_method: parsed.kind === "http" ? parsed.method : "",
+    request_url: parsed.url,
+    request_folder: parsed.folder,
+    request_target: target,
+    search_text: requestSearchText(colId, parsed, target),
+    request: parsed,
+  };
+}
+
+function parseRequestDocumentBody(value: unknown): RequestDocumentBody | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return null;
+  const raw = value as Partial<RequestDocumentBody>;
+  if (
+    raw.record_type !== "request" ||
+    typeof raw.app_key !== "string" ||
+    typeof raw.collection_id !== "string" ||
+    typeof raw.request_id !== "string" ||
+    typeof raw.request !== "object" ||
+    raw.request === null
+  )
+    return null;
+  let request: RequestDefinition;
+  try {
+    request = requestDefinitionSchema.parse(raw.request);
+  } catch {
+    return null;
+  }
+  return {
+    record_type: "request",
+    app_key: raw.app_key,
+    collection_id: raw.collection_id,
+    request_id: raw.request_id,
+    request_name:
+      typeof raw.request_name === "string" ? raw.request_name : request.name,
+    request_kind:
+      raw.request_kind === request.kind ? raw.request_kind : request.kind,
+    request_method:
+      typeof raw.request_method === "string"
+        ? raw.request_method
+        : request.kind === "http"
+          ? request.method
+          : "",
+    request_url:
+      typeof raw.request_url === "string" ? raw.request_url : request.url,
+    request_folder:
+      typeof raw.request_folder === "string"
+        ? raw.request_folder
+        : request.folder,
+    request_target:
+      typeof raw.request_target === "string"
+        ? raw.request_target
+        : requestTarget(request),
+    search_text:
+      typeof raw.search_text === "string"
+        ? raw.search_text
+        : requestSearchText(raw.collection_id, request, requestTarget(request)),
+    request,
+  };
+}
+
+function requestFromDocument(
+  doc: db.DocumentRecord<RequestDocumentBody>
+): { key: string; value: RequestDefinition } | null {
+  const body = parseRequestDocumentBody(doc.body);
+  return body ? { key: body.app_key, value: body.request } : null;
+}
+
+async function listRequestDocumentsFrom(
+  collection: string
+): Promise<Array<{ key: string; value: RequestDefinition; rid: string }>> {
+  const docs = await db.documentList<RequestDocumentBody>(collection);
+  const out: Array<{ key: string; value: RequestDefinition; rid: string }> = [];
+  for (const doc of docs) {
+    const parsed = requestFromDocument(doc);
+    if (parsed) out.push({ ...parsed, rid: doc.rid });
+  }
+  return out;
+}
+
+async function listRequestDocuments(): Promise<
+  Array<{ key: string; value: RequestDefinition; rid: string }>
+> {
+  return listRequestDocumentsFrom(REQ);
+}
+
+async function countRequests(): Promise<number> {
+  const keys = new Set<string>();
+  for (const doc of await listRequestDocuments().catch(() => []))
+    keys.add(doc.key);
+  return keys.size;
+}
+
+async function insertMissingRequestDocuments(
+  collection: string,
+  entries: Array<{ key: string; value: RequestDefinition }>
+): Promise<void> {
+  const docs = await listRequestDocumentsFrom(collection).catch(() => []);
+  const have = new Set(docs.map((doc) => doc.key));
+  for (const { key, value } of entries) {
+    if (have.has(key)) continue;
+    const colId = colIdFromReqKey(key);
+    if (!colId) continue;
+    await db.documentInsert(collection, requestDocumentBody(colId, value));
+    have.add(key);
+  }
+}
+
+function assertRequestEntriesPresent(
+  collection: string,
+  expected: Array<{ key: string; value: RequestDefinition }>,
+  actual: Array<{ key: string; value: RequestDefinition }>
+): void {
+  const have = new Set(actual.map((doc) => doc.key));
+  const missing = expected
+    .map((entry) => entry.key)
+    .filter((key) => !have.has(key));
+  if (missing.length > 0)
+    throw new Error(
+      `request migration ${collection}: missing ${missing.length} staged request(s)`
+    );
+}
+
+async function stagedRequestMigrationEntries(): Promise<
+  Array<{ key: string; value: RequestDefinition; rid: string }>
+> {
+  const model = await db.collectionModel(REQ_MIGRATION_STAGE);
+  if (model !== "document") return [];
+  return listRequestDocumentsFrom(REQ_MIGRATION_STAGE).catch(() => []);
+}
+
+async function dropRequestMigrationStage(): Promise<void> {
+  await db.dropCollection(REQ_MIGRATION_STAGE).catch((error) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `request migration stage cleanup failed: ${detail}`);
+  });
+}
+
+async function stageLegacyRequestMigration(
+  legacy: Array<{ key: string; value: RequestDefinition }>
+): Promise<Array<{ key: string; value: RequestDefinition }>> {
+  const stageModel = await db.collectionModel(REQ_MIGRATION_STAGE);
+  if (stageModel) await db.dropCollection(REQ_MIGRATION_STAGE);
+  await db.ensureDocumentCollection(REQ_MIGRATION_STAGE);
+  await insertMissingRequestDocuments(REQ_MIGRATION_STAGE, legacy);
+  const staged = await listRequestDocumentsFrom(REQ_MIGRATION_STAGE);
+  assertRequestEntriesPresent(REQ_MIGRATION_STAGE, legacy, staged);
+  return staged.map(({ key, value }) => ({ key, value }));
+}
+
+async function recoverStagedRequestMigration(): Promise<void> {
+  const staged = await stagedRequestMigrationEntries();
+  if (staged.length === 0) return;
+  const entries = staged.map(({ key, value }) => ({ key, value }));
+  await insertMissingRequestDocuments(REQ, entries);
+  const canonical = await listRequestDocuments();
+  assertRequestEntriesPresent(REQ, entries, canonical);
+  await dropRequestMigrationStage();
+}
+
+async function ensureRequestCollection(): Promise<void> {
+  const model = await db.collectionModel(REQ);
+  if (model === "document") {
+    await db.ensureDocumentCollection(REQ);
+    await recoverStagedRequestMigration();
+    await backfillRequestDocumentPromotedFieldsBestEffort();
+    return;
+  }
+
+  if (!model) {
+    const staged = await stagedRequestMigrationEntries();
+    await db.ensureDocumentCollection(REQ);
+    if (staged.length > 0) await recoverStagedRequestMigration();
+    await backfillRequestDocumentPromotedFieldsBestEffort();
+    return;
+  }
+
+  const legacy = model
+    ? await db.kvList<RequestDefinition>(REQ).catch(() => [])
+    : [];
+  const staged = await stageLegacyRequestMigration(legacy);
+  await db.dropCollection(REQ);
+  await db.ensureDocumentCollection(REQ);
+  await insertMissingRequestDocuments(REQ, staged);
+  assertRequestEntriesPresent(REQ, staged, await listRequestDocuments());
+  await dropRequestMigrationStage();
+  await backfillRequestDocumentPromotedFieldsBestEffort();
+}
+
+export async function importLegacyRequestEntries(
+  entries: Array<{ key: string; value: RequestDefinition }>
+): Promise<void> {
+  const model = await db.collectionModel(REQ);
+  if (model && model !== "document") await db.dropCollection(REQ);
+  await db.ensureDocumentCollection(REQ);
+  await insertMissingRequestDocuments(REQ, entries);
+}
+
+export function legacyRequestEntry(
+  key: string,
+  value: unknown
+): { key: string; value: RequestDefinition } | null {
+  const colId = colIdFromReqKey(key);
+  if (!colId) return null;
+  try {
+    return { key, value: requestDefinitionSchema.parse(value) };
+  } catch {
+    return null;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function pointerSegment(segment: string): string {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+const REQUEST_DOCUMENT_PROMOTED_FIELDS: Array<keyof RequestDocumentBody> = [
+  "record_type",
+  "app_key",
+  "collection_id",
+  "request_id",
+  "request_name",
+  "request_kind",
+  "request_method",
+  "request_url",
+  "request_folder",
+  "request_target",
+  "search_text",
+];
+
+function appendPatchOperations(
+  before: unknown,
+  after: unknown,
+  path: string,
+  out: db.DocumentPatchOperation[]
+): void {
+  if (sameJson(before, after)) return;
+  if (!isPlainRecord(before) || !isPlainRecord(after)) {
+    out.push({ op: "set", path, value: after });
+    return;
+  }
+
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const nextPath = `${path}/${pointerSegment(key)}`;
+    if (!(key in after)) {
+      out.push({ op: "unset", path: nextPath });
+      continue;
+    }
+    if (!(key in before)) {
+      out.push({ op: "set", path: nextPath, value: after[key] });
+      continue;
+    }
+    appendPatchOperations(before[key], after[key], nextPath, out);
+  }
+}
+
+function requestDocumentPatch(
+  before: RequestDocumentBody,
+  after: RequestDocumentBody,
+  rawBefore?: unknown
+): db.DocumentPatchOperation[] {
+  const out: db.DocumentPatchOperation[] = [];
+  appendPatchOperations(before, after, "/body", out);
+  appendPromotedRequestDocumentPatch(rawBefore, after, out);
+  return out;
+}
+
+function appendPromotedRequestDocumentPatch(
+  rawBefore: unknown,
+  after: RequestDocumentBody,
+  out: db.DocumentPatchOperation[]
+): void {
+  if (!isPlainRecord(rawBefore)) return;
+  const seen = new Set(out.map((op) => op.path));
+  for (const field of REQUEST_DOCUMENT_PROMOTED_FIELDS) {
+    const path = `/body/${pointerSegment(field)}`;
+    if (seen.has(path) || sameJson(rawBefore[field], after[field])) continue;
+    out.push({ op: "set", path, value: after[field] });
+    seen.add(path);
+  }
+}
+
+async function backfillRequestDocumentPromotedFields(): Promise<void> {
+  const docs = await db.documentList<RequestDocumentBody>(REQ).catch(() => []);
+  for (const doc of docs) {
+    const current = parseRequestDocumentBody(doc.body);
+    if (!current) continue;
+    const desired = requestDocumentBody(current.collection_id, current.request);
+    const operations: db.DocumentPatchOperation[] = [];
+    appendPromotedRequestDocumentPatch(doc.body, desired, operations);
+    if (operations.length > 0) await db.documentPatch(REQ, doc.rid, operations);
+  }
+}
+
+async function backfillRequestDocumentPromotedFieldsBestEffort(): Promise<void> {
+  try {
+    await backfillRequestDocumentPromotedFields();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `request search metadata backfill failed: ${detail}`);
+  }
+}
+
+async function saveRequestDocument(
+  colId: string,
+  req: RequestDefinition
+): Promise<void> {
+  const desired = requestDocumentBody(colId, req);
+  const existing = await db.documentFindByField<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    desired.app_key
+  );
+  if (!existing) {
+    await db.documentInsert(REQ, desired);
+    return;
+  }
+
+  const current = parseRequestDocumentBody(existing.body);
+  if (!current) {
+    await db.documentReplace(REQ, existing.rid, desired);
+    return;
+  }
+
+  await db.documentPatch(
+    REQ,
+    existing.rid,
+    requestDocumentPatch(current, desired, existing.body)
+  );
+}
+
+async function requestDocumentAsOf(
+  colId: string,
+  reqId: string,
+  commitHash: string
+): Promise<RequestDefinition | null> {
+  const doc = await db.documentFindByFieldAsOf<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    reqKey(colId, reqId),
+    commitHash
+  );
+  return doc ? (parseRequestDocumentBody(doc.body)?.request ?? null) : null;
+}
+
+/** The data collections whose edits we version + time-travel (native VCS).
  *  HIST (response runs, pruned) and OAUTH (ephemeral tokens) stay last-writer-wins. */
 export const VERSIONED_COLLECTIONS = [COL, REQ, ENV, SETTINGS] as const;
 
 export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(COL);
-  await db.ensureKvCollection(REQ);
   await db.ensureKvCollection(ENV);
   await db.ensureKvCollection(HIST);
   await db.ensureKvCollection(SETTINGS);
   await db.ensureKvCollection(OAUTH);
+  await ensureRequestCollection();
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
@@ -144,19 +578,21 @@ export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
-  const [cols, reqs] = await Promise.all([
+  const [cols, docReqs] = await Promise.all([
     db.kvList<CollectionFile>(COL),
-    db.kvList<RequestDefinition>(REQ),
+    listRequestDocuments().catch(() => []),
   ]);
+  const reqs = new Map<string, RequestDefinition>();
+  for (const req of docReqs) reqs.set(req.key, req.value);
 
   const reqsByCollection = new Map<
     string,
     Array<{ key: string; value: RequestDefinition }>
   >();
-  for (const req of reqs) {
-    const sep = req.key.indexOf(".");
-    if (sep <= 0) continue;
-    const colId = req.key.slice(0, sep);
+  for (const [key, value] of reqs) {
+    const colId = colIdFromReqKey(key);
+    if (!colId) continue;
+    const req = { key, value };
     const bucket = reqsByCollection.get(colId);
     if (bucket) bucket.push(req);
     else reqsByCollection.set(colId, [req]);
@@ -189,6 +625,49 @@ export async function loadAll(): Promise<LoadedCollection[]> {
     }
     return migrated.value;
   });
+}
+
+export interface RequestSearchResult {
+  rid: string;
+  collectionId: string;
+  requestId: string;
+  name: string;
+  kind: RequestDefinition["kind"];
+  method: string;
+  url: string;
+  folder: string;
+  target: string;
+  request: RequestDefinition;
+}
+
+export async function searchRequests(
+  query: string,
+  limit = 25
+): Promise<RequestSearchResult[]> {
+  const docs = await db.documentSearchByTextField<RequestDocumentBody>(
+    REQ,
+    "search_text",
+    query,
+    limit
+  );
+  const out: RequestSearchResult[] = [];
+  for (const doc of docs) {
+    const body = parseRequestDocumentBody(doc.body);
+    if (!body) continue;
+    out.push({
+      rid: doc.rid,
+      collectionId: body.collection_id,
+      requestId: body.request_id,
+      name: body.request_name,
+      kind: body.request_kind,
+      method: body.request_method,
+      url: body.request_url,
+      folder: body.request_folder,
+      target: body.request_target,
+      request: body.request,
+    });
+  }
+  return out;
 }
 
 /** Load the project-level environments. Self-migrates any legacy per-collection
@@ -229,12 +708,17 @@ export const saveCollectionMeta = async (colId: string, c: CollectionFile) => {
 };
 
 export const saveRequest = async (colId: string, req: RequestDefinition) => {
-  await db.kvPut(REQ, reqKey(colId, req.id), req);
+  await saveRequestDocument(colId, req);
   db.commitSoon(`save request ${req.name ?? req.id}`);
 };
 
 export const deleteRequest = async (colId: string, reqId: string) => {
-  await db.kvDelete(REQ, reqKey(colId, reqId));
+  const doc = await db.documentFindByField<RequestDocumentBody>(
+    REQ,
+    "app_key",
+    reqKey(colId, reqId)
+  );
+  if (doc) await db.documentDelete(REQ, doc.rid);
   db.commitSoon("delete request");
 };
 
@@ -251,14 +735,14 @@ export const deleteEnvironment = async (name: string) => {
 /** Delete a whole collection: its meta + every owned request and history row.
  *  Environments are project-level now, so they are not touched. */
 export async function deleteCollection(colId: string): Promise<void> {
-  const [reqs, hist] = await Promise.all([
-    db.kvList<RequestDefinition>(REQ),
+  const [docReqs, hist] = await Promise.all([
+    listRequestDocuments().catch(() => []),
     db.kvList<HistoryEntry>(HIST),
   ]);
   await Promise.all([
-    ...reqs
+    ...docReqs
       .filter((r) => ownedBy(colId, r.key))
-      .map((r) => db.kvDelete(REQ, r.key)),
+      .map((r) => db.documentDelete(REQ, r.rid)),
     ...hist
       .filter((h) => h.value.collectionId === colId)
       .map((h) => db.kvDelete(HIST, h.key)),
@@ -335,8 +819,19 @@ export type { VcsCommit } from "./reddb";
 export const listCommits = (limit = 50) => db.listCommits(limit);
 
 /** A request's definition as it was at `commitHash`, or null if it didn't exist then. */
-export const requestAsOf = (colId: string, reqId: string, commitHash: string) =>
-  db.kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash);
+export async function requestAsOf(
+  colId: string,
+  reqId: string,
+  commitHash: string
+): Promise<RequestDefinition | null> {
+  const docValue = await requestDocumentAsOf(colId, reqId, commitHash).catch(
+    () => null
+  );
+  if (docValue) return docValue;
+  return db
+    .kvGetAsOf<RequestDefinition>(REQ, reqKey(colId, reqId), commitHash)
+    .catch(() => null);
+}
 
 /** One node of a request's timeline: its value at a commit + whether it changed there. */
 export interface RequestHistoryNode {
@@ -356,11 +851,8 @@ export async function requestHistory(
   limit = 100
 ): Promise<RequestHistoryNode[]> {
   const commits = await db.listCommits(limit);
-  const key = reqKey(colId, reqId);
   const values = await Promise.all(
-    commits.map((c) =>
-      db.kvGetAsOf<RequestDefinition>(REQ, key, c.hash).catch(() => null)
-    )
+    commits.map((c) => requestAsOf(colId, reqId, c.hash).catch(() => null))
   );
   const json = values.map((v) => (v ? JSON.stringify(v) : null));
   return commits.map((commit, i) => ({

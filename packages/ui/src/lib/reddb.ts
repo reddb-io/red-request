@@ -1,8 +1,9 @@
-// RedDB client. Every operation is RQL (RedDB's SQL) sent through the Rust `reddb_rql`
-// command, which runs `red connect` — the native conduit shared by the local embedded
-// server and remote `reds://` connections. KV ops use the native `KV PUT/GET/DELETE` /
-// `LIST KV` verbs (model stays `kv`); values are JSON strings. Keys are single-quoted
-// (so dots/colons are literal) and `'` is escaped as `''`.
+// RedDB client. Most operations are RQL (RedDB's SQL) sent through the Rust
+// `reddb_rql` command, which runs `red connect` — the native conduit shared by
+// the local embedded server and remote `reds://` connections. KV ops use the
+// native `KV PUT/GET/DELETE` / `LIST KV` verbs (model stays `kv`); values are
+// JSON strings. Document mutations use the embedded HTTP API so nested edits can
+// be persisted as JSON-pointer patches instead of whole-value string rewrites.
 import { invoke } from "@tauri-apps/api/core";
 
 interface HttpReply {
@@ -12,9 +13,15 @@ interface HttpReply {
 
 /** Escape a single-quoted RQL string literal. */
 const esc = (s: string) => s.replace(/'/g, "''");
+/** A conservative bare identifier for app-owned collection/field names. */
+const ident = (s: string) => {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(s))
+    throw new Error(`invalid RedDB identifier: ${s}`);
+  return s;
+};
 /** A `collection.'key'` reference — the key quoted so dots/colons stay literal. */
 const kvRef = (collection: string, key: string) =>
-  `${collection}.'${esc(key)}'`;
+  `${ident(collection)}.'${esc(key)}'`;
 
 /** Result of an RQL statement run via the `red connect` conduit. */
 export interface RqlResult {
@@ -77,9 +84,25 @@ export async function ensureKvCollection(name: string): Promise<void> {
     `SELECT name FROM red.collections WHERE name = '${esc(name)}'`
   );
   if (found.ok && found.records.length > 0) return;
-  const c = await rql(`CREATE KV ${name}`);
+  const c = await rql(`CREATE KV ${ident(name)}`);
   if (!c.ok && !/already exists/i.test(c.error ?? ""))
     throw new Error(`CREATE KV ${name}: ${c.error}`);
+}
+
+/** Logical model recorded in `red.collections`, or null when absent. */
+export async function collectionModel(name: string): Promise<string | null> {
+  const found = await rql(
+    `SELECT model FROM red.collections WHERE name = '${esc(name)}' LIMIT 1`
+  );
+  if (!found.ok || found.records.length === 0) return null;
+  const model = found.records[0]?.model;
+  return typeof model === "string" ? model : null;
+}
+
+/** Drop an app-owned collection, regardless of its current model. */
+export async function dropCollection(name: string): Promise<void> {
+  const r = await rql(`DROP COLLECTION IF EXISTS ${ident(name)}`);
+  if (!r.ok) throw new Error(`DROP COLLECTION ${name}: ${r.error}`);
 }
 
 export async function kvPut(
@@ -113,7 +136,7 @@ export async function kvDelete(collection: string, key: string): Promise<void> {
 }
 
 export async function kvCount(collection: string): Promise<number> {
-  const r = await rql(`LIST KV ${collection}`);
+  const r = await rql(`LIST KV ${ident(collection)}`);
   return r.ok ? r.records.length : 0;
 }
 
@@ -121,7 +144,7 @@ export async function kvCount(collection: string): Promise<number> {
 export async function kvList<T>(
   collection: string
 ): Promise<Array<{ key: string; value: T }>> {
-  const r = await rql(`LIST KV ${collection}`);
+  const r = await rql(`LIST KV ${ident(collection)}`);
   if (!r.ok) return [];
   const out: Array<{ key: string; value: T }> = [];
   for (const rec of r.records) {
@@ -135,6 +158,261 @@ export async function kvList<T>(
     }
   }
   return out;
+}
+
+// --- RedDB documents --------------------------------------------------------
+
+export interface DocumentRecord<T = unknown> {
+  rid: string;
+  body: T;
+  raw: Record<string, unknown>;
+}
+
+export type DocumentPatchOperation =
+  | { op: "set"; path: string; value: unknown }
+  | { op: "unset"; path: string };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseMaybeJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function ridFrom(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+}
+
+const PROMOTED_DOCUMENT_SKIP = new Set([
+  "rid",
+  "id",
+  "collection",
+  "kind",
+  "tenant",
+  "created_at",
+  "updated_at",
+  "identity",
+  "data",
+  "cross_refs",
+  "metadata",
+]);
+
+function promotedBody(row: Record<string, unknown>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (!PROMOTED_DOCUMENT_SKIP.has(key)) body[key] = value;
+  }
+  return body;
+}
+
+function bodyFromEntityJson(value: unknown): unknown {
+  if (!isRecord(value)) return null;
+  const data = value.data;
+  if (isRecord(data)) {
+    const named = data.named;
+    if (isRecord(named) && "body" in named) return parseMaybeJson(named.body);
+  }
+  if ("body" in value) return parseMaybeJson(value.body);
+  return null;
+}
+
+function parseDocumentRecord<T>(
+  row: Record<string, unknown>
+): DocumentRecord<T> | null {
+  const rid = ridFrom(row.rid) ?? ridFrom(row.id);
+  if (!rid) return null;
+
+  let body: unknown = null;
+  if ("body" in row) body = parseMaybeJson(row.body);
+  else if ("entity" in row) body = bodyFromEntityJson(row.entity);
+  else body = promotedBody(row);
+
+  if (body === null || body === undefined) return null;
+  return { rid, body: body as T, raw: row };
+}
+
+function documentRecordFromHttp<T>(
+  json: unknown,
+  fallbackBody?: T
+): DocumentRecord<T> | null {
+  if (!isRecord(json)) return null;
+  const entity = json.entity;
+  const row = isRecord(entity)
+    ? { ...entity, rid: json.rid ?? json.id ?? entity.rid ?? entity.id }
+    : json;
+  const parsed = parseDocumentRecord<T>(row);
+  if (parsed) return parsed;
+  const rid = ridFrom(json.rid) ?? ridFrom(json.id);
+  return rid && fallbackBody !== undefined
+    ? { rid, body: fallbackBody, raw: json }
+    : null;
+}
+
+function httpError(
+  action: string,
+  collection: string,
+  status: number,
+  json: unknown
+): Error {
+  const message =
+    isRecord(json) && typeof (json.message ?? json.error) === "string"
+      ? ((json.message ?? json.error) as string)
+      : `HTTP ${status}`;
+  return new Error(`${action} ${collection}: ${message}`);
+}
+
+/** Ensure `name` exists as a Document collection. */
+export async function ensureDocumentCollection(name: string): Promise<void> {
+  const model = await collectionModel(name);
+  if (model === "document") return;
+  if (model)
+    throw new Error(`collection ${name} exists as ${model}, expected document`);
+  const c = await rql(`CREATE DOCUMENT ${ident(name)}`);
+  if (!c.ok && !/already exists/i.test(c.error ?? ""))
+    throw new Error(`CREATE DOCUMENT ${name}: ${c.error}`);
+}
+
+/** Count document entities in a collection. */
+export async function documentCount(collection: string): Promise<number> {
+  const r = await rql(`SELECT rid FROM ${ident(collection)}`);
+  return r.ok ? r.records.length : 0;
+}
+
+function queryLimit(limit: number): number {
+  return Math.max(1, Math.min(100, Math.floor(limit) || 25));
+}
+
+/** List document entities and decode their canonical `body` JSON. */
+export async function documentList<T>(
+  collection: string
+): Promise<DocumentRecord<T>[]> {
+  const r = await rql(`SELECT rid, body FROM ${ident(collection)}`);
+  if (!r.ok) return [];
+  return r.records
+    .map((row) => parseDocumentRecord<T>(row))
+    .filter((row): row is DocumentRecord<T> => row !== null);
+}
+
+/** Search documents by a lower-cased promoted text field. Multiple terms are ANDed
+ *  so command-palette queries like "post users" stay precise without a full parser. */
+export async function documentSearchByTextField<T>(
+  collection: string,
+  field: string,
+  query: string,
+  limit = 25
+): Promise<DocumentRecord<T>[]> {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8);
+  const where = terms.length
+    ? ` WHERE ${terms
+        .map((term) => `${ident(field)} LIKE '%${esc(term)}%'`)
+        .join(" AND ")}`
+    : "";
+  const r = await rql(
+    `SELECT rid, body FROM ${ident(collection)}${where} LIMIT ${queryLimit(
+      limit
+    )}`
+  );
+  if (!r.ok) return [];
+  return r.records
+    .map((row) => parseDocumentRecord<T>(row))
+    .filter((row): row is DocumentRecord<T> => row !== null);
+}
+
+/** Read one document by a promoted top-level body field. */
+export async function documentFindByField<T>(
+  collection: string,
+  field: string,
+  value: string
+): Promise<DocumentRecord<T> | null> {
+  const r = await rql(
+    `SELECT rid, body FROM ${ident(collection)} WHERE ${ident(field)} = '${esc(value)}' LIMIT 1`
+  );
+  if (!r.ok || r.records.length === 0) return null;
+  return parseDocumentRecord<T>(r.records[0]!);
+}
+
+/** Time-travel read of one document by a promoted top-level body field. */
+export async function documentFindByFieldAsOf<T>(
+  collection: string,
+  field: string,
+  value: string,
+  commitHash: string
+): Promise<DocumentRecord<T> | null> {
+  const r = await rql(
+    `SELECT rid, body FROM ${ident(collection)} AS OF COMMIT '${esc(commitHash)}' WHERE ${ident(field)} = '${esc(value)}' LIMIT 1`
+  );
+  if (!r.ok || r.records.length === 0) return null;
+  return parseDocumentRecord<T>(r.records[0]!);
+}
+
+/** Insert one document through HTTP so RedDB stores canonical JSON in `body`. */
+export async function documentInsert<T>(
+  collection: string,
+  body: T
+): Promise<DocumentRecord<T>> {
+  const r = await reddbHttp(
+    "POST",
+    `/collections/${encodeURIComponent(collection)}/documents`,
+    { body }
+  );
+  if (!r.ok) throw httpError("documentInsert", collection, r.status, r.json);
+  const rec = documentRecordFromHttp<T>(r.json, body);
+  if (!rec) throw new Error(`documentInsert ${collection}: missing rid`);
+  return rec;
+}
+
+/** Patch nested document fields with RedDB JSON-pointer operations. */
+export async function documentPatch(
+  collection: string,
+  rid: string,
+  operations: DocumentPatchOperation[]
+): Promise<void> {
+  if (operations.length === 0) return;
+  const r = await reddbHttp(
+    "PATCH",
+    `/collections/${encodeURIComponent(collection)}/entities/${encodeURIComponent(rid)}`,
+    { operations }
+  );
+  if (!r.ok) throw httpError("documentPatch", collection, r.status, r.json);
+}
+
+/** Replace a document's canonical body. Used only when the stored envelope is malformed. */
+export async function documentReplace<T>(
+  collection: string,
+  rid: string,
+  body: T
+): Promise<void> {
+  const r = await reddbHttp(
+    "PATCH",
+    `/collections/${encodeURIComponent(collection)}/entities/${encodeURIComponent(rid)}`,
+    { body }
+  );
+  if (!r.ok) throw httpError("documentReplace", collection, r.status, r.json);
+}
+
+export async function documentDelete(
+  collection: string,
+  rid: string
+): Promise<void> {
+  const r = await reddbHttp(
+    "DELETE",
+    `/collections/${encodeURIComponent(collection)}/entities/${encodeURIComponent(rid)}`
+  );
+  if (!r.ok && r.status !== 404)
+    throw httpError("documentDelete", collection, r.status, r.json);
 }
 
 // --- RedDB-native SQL migrations -------------------------------------------
@@ -233,7 +511,9 @@ async function reddbHttp(
  *  can time-travel its keys. Safe on populated collections — flips a catalog flag;
  *  history starts from this point forward. Tolerant of "already versioned". */
 export async function setVersioned(collection: string): Promise<void> {
-  await rql(`ALTER TABLE ${collection} SET VERSIONED = true`).catch(() => {});
+  await rql(`ALTER TABLE ${ident(collection)} SET VERSIONED = true`).catch(
+    () => {}
+  );
 }
 
 /** A commit in the store's history — one restore point across every versioned
@@ -331,7 +611,7 @@ export async function kvGetAsOf<T>(
   commitHash: string
 ): Promise<T | null> {
   const r = await rql(
-    `SELECT value FROM ${collection} AS OF COMMIT '${esc(commitHash)}' WHERE key = '${esc(key)}'`
+    `SELECT value FROM ${ident(collection)} AS OF COMMIT '${esc(commitHash)}' WHERE key = '${esc(key)}'`
   );
   if (!r.ok || r.records.length === 0) return null;
   const v = r.records[0]!.value;

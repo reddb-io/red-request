@@ -6,7 +6,24 @@ import { fileURLToPath } from "node:url";
 // separate config (vitest.components.config.ts) that adds the svelte plugin.
 export default defineConfig({
   resolve: {
-    alias: { $lib: fileURLToPath(new URL("./src/lib", import.meta.url)) },
+    alias: [
+      {
+        find: "$lib",
+        replacement: fileURLToPath(new URL("./src/lib", import.meta.url)),
+      },
+      {
+        find: /^@red-request\/core$/,
+        replacement: fileURLToPath(
+          new URL("../core/src/index.ts", import.meta.url)
+        ),
+      },
+      {
+        find: /^@red-request\/core\/(.+)$/,
+        replacement: fileURLToPath(
+          new URL("../core/src/$1.ts", import.meta.url)
+        ),
+      },
+    ],
   },
   test: {
     environment: "jsdom",
