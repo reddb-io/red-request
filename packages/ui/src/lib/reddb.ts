@@ -416,11 +416,13 @@ export async function documentDelete(
 }
 
 // --- RedDB-native SQL migrations -------------------------------------------
-// RedDB ships a first-class migration system in the query engine: `CREATE MIGRATION`
+// RedDB ships a migration system in the query engine: `CREATE MIGRATION`
 // registers SQL (status pending, stored in the `red_migrations` system collection),
-// and `APPLY MIGRATION *` runs every pending one in dependency order (Kahn topo-sort),
-// resumable for BATCH data migrations. We register the app's shipped migrations
-// (idempotently) and apply all pending on every project boot.
+// and `APPLY MIGRATION *` runs pending migrations. The app intentionally uses a
+// conservative subset here: simple schema/index migrations, explicit dependencies
+// between app-shipped migrations, and no BATCH / rollback / tenant fanout contract.
+// We register the app's shipped migrations idempotently and apply pending ones on
+// every project boot.
 
 /** A migration the app ships and guarantees is applied. `sql` is the body after `AS`. */
 export interface MigrationDef {
@@ -468,6 +470,10 @@ function prepareMigrationDefinitions(
       throw new Error(
         `invalid RedDB migration "${name}": sql must be the body after AS`
       );
+    if (/^BATCH\s+\d+\s+ROWS\b/i.test(sql))
+      throw new Error(
+        `invalid RedDB migration "${name}": BATCH is not supported by this app wrapper`
+      );
 
     const dependsOn = (d.dependsOn ?? []).map((dep) =>
       assertRedDbIdentifier(dep, "migration dependency")
@@ -495,12 +501,19 @@ function prepareMigrationDefinitions(
 export async function runMigrations(defs: MigrationDef[]): Promise<void> {
   const migrations = prepareMigrationDefinitions(defs);
   if (migrations.length) {
-    const existing = await rql("SELECT name FROM red_migrations");
+    const existing = await rql("SELECT name, status FROM red_migrations");
     if (!existing.ok)
       throw new Error(`failed to inspect RedDB migrations: ${existing.error}`);
-    const have = new Set(existing.records.map((r) => r.name as string));
+    const have = new Map(
+      existing.records
+        .filter((r) => typeof r.name === "string")
+        .map((r) => [r.name as string, r.status])
+    );
     for (const d of migrations) {
-      if (have.has(d.name)) continue;
+      const status = have.get(d.name);
+      if (status === "failed")
+        throw new Error(`RedDB migration ${d.name} is failed`);
+      if (status !== undefined) continue;
       const dep = d.dependsOn.length
         ? ` DEPENDS ON ${d.dependsOn.join(", ")}`
         : "";

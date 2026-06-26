@@ -111,7 +111,8 @@ describe("Document-backed request storage", () => {
     ipc({
       rql: (query) => {
         queries.push(query);
-        if (query === "SELECT name FROM red_migrations") return rqlOk([]);
+        if (query === "SELECT name, status FROM red_migrations")
+          return rqlOk([]);
         return rqlOk([{ message: "ok" }]);
       },
     });
