@@ -7,6 +7,10 @@ on:
         description: "Pinned RedDB release tag to smoke-package with"
         required: true
         default: "v1.13.1"
+      reddb_source_ref:
+        description: "Optional RedDB source commit/ref to build instead of downloading release assets"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -17,6 +21,7 @@ concurrency:
 
 env:
   REDDB_VERSION: ${{ github.event.inputs.reddb_version }}
+  REDDB_SOURCE_REF: ${{ github.event.inputs.reddb_source_ref }}
 
 jobs:
   linux-deb:
@@ -52,9 +57,26 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
+      - name: Set up protoc for RedDB source build
+        if: env.REDDB_SOURCE_REF != ''
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout RedDB source
+        if: env.REDDB_SOURCE_REF != ''
+        uses: actions/checkout@v7
+        with:
+          repository: reddb-io/reddb
+          ref: ${{ env.REDDB_SOURCE_REF }}
+          path: .red/tmp/reddb-source
+          persist-credentials: false
+
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: "apps/desktop/src-tauri -> target"
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            .red/tmp/reddb-source -> target
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -76,7 +98,15 @@ jobs:
       - name: Build engine sidecar
         run: pnpm engine:build
 
-      - name: Provision RedDB sidecar
+      - name: Provision RedDB sidecar (source)
+        if: env.REDDB_SOURCE_REF != ''
+        run: pnpm reddb:sync
+        env:
+          REDDB_SRC: ${{ github.workspace }}/.red/tmp/reddb-source
+          REDDB_TARGET: x86_64-unknown-linux-gnu
+
+      - name: Provision RedDB sidecar (download)
+        if: env.REDDB_SOURCE_REF == ''
         run: pnpm reddb:fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

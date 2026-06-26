@@ -60,6 +60,23 @@ if (targets.length === 0) {
   exit(2);
 }
 
+const sourceRef = env.REDDB_SOURCE_REF?.trim();
+if (sourceRef) {
+  try {
+    const commit = await ghJson(
+      `repos/${REPO}/commits/${encodeURIComponent(sourceRef)}`
+    );
+    console.log(
+      `RedDB source ref ${sourceRef} resolves to ${commit.sha}; release asset preflight skipped because CI will build red from source.`
+    );
+    exit(0);
+  } catch (err) {
+    console.error(`RedDB source preflight failed: ${err.message}`);
+    console.error("Fix REDDB_SOURCE_REF or publish full RedDB release assets.");
+    exit(1);
+  }
+}
+
 const tag = env.REDDB_VERSION;
 
 let release;

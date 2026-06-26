@@ -28,6 +28,12 @@ env:
   # → black/loading screen). Also persists collection contracts so KV collections survive a
   # server restart (reddb fix a8139467).
   REDDB_VERSION: v1.15.0
+  # Build the sidecar from source while the RedDB release carrying PR #1473
+  # (native migration contract fixes: BATCH 0 rejection, EXPLAIN MIGRATION *,
+  # rollback dependency guard, VCS error propagation) is not yet available as a
+  # full multi-platform stable asset set. Once a stable RedDB release publishes
+  # all red-* assets for our matrix, clear this and bump REDDB_VERSION instead.
+  REDDB_SOURCE_REF: fb6dd5b00737ac5c093d838875c8ddb7eed4f874
   # Run AppImage tooling (linuxdeploy) without FUSE, which CI runners lack.
   APPIMAGE_EXTRACT_AND_RUN: "1"
   # linuxdeploy's strip pass chokes on some shared objects under the no-FUSE extract path
@@ -48,10 +54,11 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Check RedDB sidecar release assets
-        # Verify the reddb sidecar exists for every platform we build (below) at
-        # REDDB_VERSION before spending matrix time. macOS is Apple Silicon only for now
-        # (GitHub's Intel macos-13 runners are scarce and leave the run queued forever).
+      - name: Check RedDB sidecar source/release availability
+        # With REDDB_SOURCE_REF set, verify the pinned RedDB commit exists; otherwise
+        # verify the pinned release exposes the prebuilt sidecar assets for every
+        # platform we build below. macOS is Apple Silicon only for now (GitHub's
+        # Intel macos-13 runners are scarce and leave the run queued forever).
         run: >-
           node scripts/check-reddb-release-assets.mjs
           x86_64-unknown-linux-gnu
@@ -145,9 +152,26 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Set up protoc for RedDB source build
+        if: env.REDDB_SOURCE_REF != ''
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout RedDB source
+        if: env.REDDB_SOURCE_REF != ''
+        uses: actions/checkout@v7
+        with:
+          repository: reddb-io/reddb
+          ref: ${{ env.REDDB_SOURCE_REF }}
+          path: .red/tmp/reddb-source
+          persist-credentials: false
+
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: "apps/desktop/src-tauri -> target"
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            .red/tmp/reddb-source -> target
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -164,9 +188,20 @@ jobs:
       - name: Build engine sidecar (Bun → externalBin)
         run: pnpm engine:build
 
-      # Download the prebuilt `red` sidecar for this runner's host triple from reddb's
-      # releases (reddb v1.15+ publishes linux/macOS/windows × x86_64/aarch64).
+      # Build `red` from a pinned RedDB source commit when REDDB_SOURCE_REF is set.
+      # This is how red-request can adopt urgent RedDB runtime fixes before the
+      # upstream project has published full multi-platform sidecar assets.
+      - name: Provision RedDB sidecar (source)
+        if: env.REDDB_SOURCE_REF != ''
+        run: pnpm reddb:sync
+        env:
+          REDDB_SRC: ${{ github.workspace }}/.red/tmp/reddb-source
+          REDDB_TARGET: ${{ matrix.target }}
+
+      # Otherwise download the prebuilt `red` sidecar for this runner's host
+      # triple from RedDB's releases.
       - name: Provision RedDB sidecar (download)
+        if: env.REDDB_SOURCE_REF == ''
         run: pnpm reddb:fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
