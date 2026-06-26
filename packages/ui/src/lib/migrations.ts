@@ -13,5 +13,13 @@
 import type { MigrationDef } from "./reddb";
 
 export const MIGRATIONS: MigrationDef[] = [
-  // No migrations yet — the runner is wired and will apply any added here on boot.
+  {
+    name: "0001_request_document_search_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS rr_requests_app_key ON rr_requests (app_key) USING HASH;
+      CREATE INDEX IF NOT EXISTS rr_requests_collection_id ON rr_requests (collection_id) USING HASH;
+      CREATE INDEX IF NOT EXISTS rr_requests_kind ON rr_requests (request_kind) USING BITMAP;
+      CREATE INDEX IF NOT EXISTS rr_requests_name ON rr_requests (request_name)
+    `,
+  },
 ];

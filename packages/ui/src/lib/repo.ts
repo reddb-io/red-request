@@ -40,6 +40,7 @@ export const SETTINGS = "rr_settings";
 export const OAUTH = "rr_oauth_tokens";
 
 const MAX_HISTORY_PER_REQ = 50;
+const REQ_MIGRATION_STAGE = "rr_requests_migration_stage";
 
 type RequestDocumentBody = {
   record_type: "request";
@@ -240,16 +241,22 @@ function requestFromDocument(
   return body ? { key: body.app_key, value: body.request } : null;
 }
 
-async function listRequestDocuments(): Promise<
-  Array<{ key: string; value: RequestDefinition; rid: string }>
-> {
-  const docs = await db.documentList<RequestDocumentBody>(REQ);
+async function listRequestDocumentsFrom(
+  collection: string
+): Promise<Array<{ key: string; value: RequestDefinition; rid: string }>> {
+  const docs = await db.documentList<RequestDocumentBody>(collection);
   const out: Array<{ key: string; value: RequestDefinition; rid: string }> = [];
   for (const doc of docs) {
     const parsed = requestFromDocument(doc);
     if (parsed) out.push({ ...parsed, rid: doc.rid });
   }
   return out;
+}
+
+async function listRequestDocuments(): Promise<
+  Array<{ key: string; value: RequestDefinition; rid: string }>
+> {
+  return listRequestDocumentsFrom(REQ);
 }
 
 async function countRequests(): Promise<number> {
@@ -260,23 +267,85 @@ async function countRequests(): Promise<number> {
 }
 
 async function insertMissingRequestDocuments(
+  collection: string,
   entries: Array<{ key: string; value: RequestDefinition }>
 ): Promise<void> {
-  const docs = await listRequestDocuments().catch(() => []);
+  const docs = await listRequestDocumentsFrom(collection).catch(() => []);
   const have = new Set(docs.map((doc) => doc.key));
   for (const { key, value } of entries) {
     if (have.has(key)) continue;
     const colId = colIdFromReqKey(key);
     if (!colId) continue;
-    await db.documentInsert(REQ, requestDocumentBody(colId, value));
+    await db.documentInsert(collection, requestDocumentBody(colId, value));
     have.add(key);
   }
+}
+
+function assertRequestEntriesPresent(
+  collection: string,
+  expected: Array<{ key: string; value: RequestDefinition }>,
+  actual: Array<{ key: string; value: RequestDefinition }>
+): void {
+  const have = new Set(actual.map((doc) => doc.key));
+  const missing = expected
+    .map((entry) => entry.key)
+    .filter((key) => !have.has(key));
+  if (missing.length > 0)
+    throw new Error(
+      `request migration ${collection}: missing ${missing.length} staged request(s)`
+    );
+}
+
+async function stagedRequestMigrationEntries(): Promise<
+  Array<{ key: string; value: RequestDefinition; rid: string }>
+> {
+  const model = await db.collectionModel(REQ_MIGRATION_STAGE);
+  if (model !== "document") return [];
+  return listRequestDocumentsFrom(REQ_MIGRATION_STAGE).catch(() => []);
+}
+
+async function dropRequestMigrationStage(): Promise<void> {
+  await db.dropCollection(REQ_MIGRATION_STAGE).catch((error) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `request migration stage cleanup failed: ${detail}`);
+  });
+}
+
+async function stageLegacyRequestMigration(
+  legacy: Array<{ key: string; value: RequestDefinition }>
+): Promise<Array<{ key: string; value: RequestDefinition }>> {
+  const stageModel = await db.collectionModel(REQ_MIGRATION_STAGE);
+  if (stageModel) await db.dropCollection(REQ_MIGRATION_STAGE);
+  await db.ensureDocumentCollection(REQ_MIGRATION_STAGE);
+  await insertMissingRequestDocuments(REQ_MIGRATION_STAGE, legacy);
+  const staged = await listRequestDocumentsFrom(REQ_MIGRATION_STAGE);
+  assertRequestEntriesPresent(REQ_MIGRATION_STAGE, legacy, staged);
+  return staged.map(({ key, value }) => ({ key, value }));
+}
+
+async function recoverStagedRequestMigration(): Promise<void> {
+  const staged = await stagedRequestMigrationEntries();
+  if (staged.length === 0) return;
+  const entries = staged.map(({ key, value }) => ({ key, value }));
+  await insertMissingRequestDocuments(REQ, entries);
+  const canonical = await listRequestDocuments();
+  assertRequestEntriesPresent(REQ, entries, canonical);
+  await dropRequestMigrationStage();
 }
 
 async function ensureRequestCollection(): Promise<void> {
   const model = await db.collectionModel(REQ);
   if (model === "document") {
     await db.ensureDocumentCollection(REQ);
+    await recoverStagedRequestMigration();
+    await backfillRequestDocumentPromotedFieldsBestEffort();
+    return;
+  }
+
+  if (!model) {
+    const staged = await stagedRequestMigrationEntries();
+    await db.ensureDocumentCollection(REQ);
+    if (staged.length > 0) await recoverStagedRequestMigration();
     await backfillRequestDocumentPromotedFieldsBestEffort();
     return;
   }
@@ -284,9 +353,12 @@ async function ensureRequestCollection(): Promise<void> {
   const legacy = model
     ? await db.kvList<RequestDefinition>(REQ).catch(() => [])
     : [];
-  if (model) await db.dropCollection(REQ);
+  const staged = await stageLegacyRequestMigration(legacy);
+  await db.dropCollection(REQ);
   await db.ensureDocumentCollection(REQ);
-  await insertMissingRequestDocuments(legacy);
+  await insertMissingRequestDocuments(REQ, staged);
+  assertRequestEntriesPresent(REQ, staged, await listRequestDocuments());
+  await dropRequestMigrationStage();
   await backfillRequestDocumentPromotedFieldsBestEffort();
 }
 
@@ -296,7 +368,7 @@ export async function importLegacyRequestEntries(
   const model = await db.collectionModel(REQ);
   if (model && model !== "document") await db.dropCollection(REQ);
   await db.ensureDocumentCollection(REQ);
-  await insertMissingRequestDocuments(entries);
+  await insertMissingRequestDocuments(REQ, entries);
 }
 
 export function legacyRequestEntry(
@@ -412,36 +484,6 @@ async function backfillRequestDocumentPromotedFieldsBestEffort(): Promise<void> 
   }
 }
 
-async function ensureRequestIndexes(): Promise<void> {
-  const indexes: Array<{
-    name: string;
-    columns: string[];
-    method?: db.IndexMethod;
-  }> = [
-    { name: "rr_requests_app_key", columns: ["app_key"], method: "HASH" },
-    {
-      name: "rr_requests_collection_id",
-      columns: ["collection_id"],
-      method: "HASH",
-    },
-    { name: "rr_requests_kind", columns: ["request_kind"], method: "BITMAP" },
-    { name: "rr_requests_name", columns: ["request_name"] },
-  ];
-  for (const index of indexes) {
-    try {
-      await db.ensureIndex(REQ, index.name, index.columns, {
-        method: index.method,
-      });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      appLog(
-        "warn",
-        `request search index ${index.name} unavailable: ${detail}`
-      );
-    }
-  }
-}
-
 async function saveRequestDocument(
   colId: string,
   req: RequestDefinition
@@ -495,7 +537,6 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(SETTINGS);
   await db.ensureKvCollection(OAUTH);
   await ensureRequestCollection();
-  await ensureRequestIndexes();
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
