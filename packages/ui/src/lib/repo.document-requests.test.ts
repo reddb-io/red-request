@@ -26,6 +26,40 @@ function request(id: string, patch: Partial<RequestDefinition> = {}) {
   return { ...newRequest(id), ...patch };
 }
 
+function requestTarget(req: RequestDefinition): string {
+  if (req.kind === "grpc") {
+    const method = [req.grpc.service, req.grpc.method]
+      .filter(Boolean)
+      .join("/");
+    return [req.url, method].filter(Boolean).join(" ");
+  }
+  if (req.url) return req.url;
+  if (!req.net.host) return "";
+  return req.net.port ? `${req.net.host}:${req.net.port}` : req.net.host;
+}
+
+function requestSearchText(colId: string, req: RequestDefinition): string {
+  const target = requestTarget(req);
+  return [
+    colId,
+    req.id,
+    req.name,
+    req.folder,
+    req.kind,
+    req.method,
+    req.url,
+    target,
+    req.net.host,
+    req.net.port ? String(req.net.port) : "",
+    req.net.recordType,
+    req.grpc.service,
+    req.grpc.method,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function requestDoc(colId: string, req: RequestDefinition) {
   return {
     record_type: "request",
@@ -34,6 +68,11 @@ function requestDoc(colId: string, req: RequestDefinition) {
     request_id: req.id,
     request_name: req.name,
     request_kind: req.kind,
+    request_method: req.kind === "http" ? req.method : "",
+    request_url: req.url,
+    request_folder: req.folder,
+    request_target: requestTarget(req),
+    search_text: requestSearchText(colId, req),
     request: req,
   };
 }
@@ -81,6 +120,7 @@ describe("Document-backed request storage", () => {
         if (
           query.startsWith("CREATE KV ") ||
           query.startsWith("CREATE DOCUMENT ") ||
+          query.startsWith("CREATE INDEX ") ||
           query.startsWith("ALTER TABLE ") ||
           query.startsWith("DROP COLLECTION ")
         ) {
@@ -180,6 +220,11 @@ describe("Document-backed request storage", () => {
     expect(operations).toEqual(
       expect.arrayContaining([
         { op: "set", path: "/body/request_name", value: "New" },
+        expect.objectContaining({
+          op: "set",
+          path: "/body/search_text",
+          value: expect.stringContaining("new"),
+        }),
         { op: "set", path: "/body/request/name", value: "New" },
         {
           op: "set",
@@ -220,6 +265,40 @@ describe("Document-backed request storage", () => {
     await repo.saveRequest("c1", req);
 
     expect(postedBodies).toEqual([requestDoc("c1", req)]);
+  });
+
+  it("searches request documents through promoted search text", async () => {
+    const req = request("r1", {
+      name: "List users",
+      method: "GET",
+      url: "https://api.test/users",
+    });
+
+    ipc({
+      rql: (query) => {
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE search_text LIKE '%users%' LIMIT 10"
+        )
+          return rqlOk([{ rid: 7, body: requestDoc("c1", req) }]);
+        return rqlOk([]);
+      },
+    });
+
+    await expect(repo.searchRequests("users", 10)).resolves.toEqual([
+      {
+        rid: "7",
+        collectionId: "c1",
+        requestId: "r1",
+        name: "List users",
+        kind: "http",
+        method: "GET",
+        url: "https://api.test/users",
+        folder: "",
+        target: "https://api.test/users",
+        request: req,
+      },
+    ]);
   });
 
   it("reads request history from document commits and falls back to legacy KV commits", async () => {

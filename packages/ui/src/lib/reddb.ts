@@ -286,11 +286,67 @@ export async function documentCount(collection: string): Promise<number> {
   return r.ok ? r.records.length : 0;
 }
 
+export type IndexMethod = "BTREE" | "HASH" | "BITMAP" | "RTREE";
+
+/** Ensure a secondary index exists. Search still works without these, so callers may
+ *  decide whether an index failure is fatal for their boot path. */
+export async function ensureIndex(
+  collection: string,
+  name: string,
+  columns: string[],
+  opts: { method?: IndexMethod; unique?: boolean } = {}
+): Promise<void> {
+  if (columns.length === 0)
+    throw new Error("index requires at least one column");
+  const unique = opts.unique ? "UNIQUE " : "";
+  const method = opts.method ? ` USING ${opts.method}` : "";
+  const r = await rql(
+    `CREATE ${unique}INDEX IF NOT EXISTS ${ident(name)} ON ${ident(
+      collection
+    )} (${columns.map(ident).join(", ")})${method}`
+  );
+  if (!r.ok) throw new Error(`CREATE INDEX ${name}: ${r.error}`);
+}
+
+function queryLimit(limit: number): number {
+  return Math.max(1, Math.min(100, Math.floor(limit) || 25));
+}
+
 /** List document entities and decode their canonical `body` JSON. */
 export async function documentList<T>(
   collection: string
 ): Promise<DocumentRecord<T>[]> {
   const r = await rql(`SELECT rid, body FROM ${ident(collection)}`);
+  if (!r.ok) return [];
+  return r.records
+    .map((row) => parseDocumentRecord<T>(row))
+    .filter((row): row is DocumentRecord<T> => row !== null);
+}
+
+/** Search documents by a lower-cased promoted text field. Multiple terms are ANDed
+ *  so command-palette queries like "post users" stay precise without a full parser. */
+export async function documentSearchByTextField<T>(
+  collection: string,
+  field: string,
+  query: string,
+  limit = 25
+): Promise<DocumentRecord<T>[]> {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8);
+  const where = terms.length
+    ? ` WHERE ${terms
+        .map((term) => `${ident(field)} LIKE '%${esc(term)}%'`)
+        .join(" AND ")}`
+    : "";
+  const r = await rql(
+    `SELECT rid, body FROM ${ident(collection)}${where} LIMIT ${queryLimit(
+      limit
+    )}`
+  );
   if (!r.ok) return [];
   return r.records
     .map((row) => parseDocumentRecord<T>(row))

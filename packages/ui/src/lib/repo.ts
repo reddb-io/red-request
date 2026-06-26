@@ -48,6 +48,11 @@ type RequestDocumentBody = {
   request_id: string;
   request_name: string;
   request_kind: RequestDefinition["kind"];
+  request_method: string;
+  request_url: string;
+  request_folder: string;
+  request_target: string;
+  search_text: string;
   request: RequestDefinition;
 };
 
@@ -117,11 +122,49 @@ function colIdFromReqKey(key: string): string | null {
   return sep > 0 ? key.slice(0, sep) : null;
 }
 
+function requestTarget(req: RequestDefinition): string {
+  if (req.kind === "grpc") {
+    const method = [req.grpc.service, req.grpc.method]
+      .filter(Boolean)
+      .join("/");
+    return [req.url, method].filter(Boolean).join(" ");
+  }
+  if (req.url) return req.url;
+  if (!req.net.host) return "";
+  return req.net.port ? `${req.net.host}:${req.net.port}` : req.net.host;
+}
+
+function requestSearchText(
+  colId: string,
+  req: RequestDefinition,
+  target: string
+): string {
+  return [
+    colId,
+    req.id,
+    req.name,
+    req.folder,
+    req.kind,
+    req.method,
+    req.url,
+    target,
+    req.net.host,
+    req.net.port ? String(req.net.port) : "",
+    req.net.recordType,
+    req.grpc.service,
+    req.grpc.method,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 function requestDocumentBody(
   colId: string,
   req: RequestDefinition
 ): RequestDocumentBody {
   const parsed = requestDefinitionSchema.parse(req);
+  const target = requestTarget(parsed);
   return {
     record_type: "request",
     app_key: reqKey(colId, parsed.id),
@@ -129,6 +172,11 @@ function requestDocumentBody(
     request_id: parsed.id,
     request_name: parsed.name,
     request_kind: parsed.kind,
+    request_method: parsed.kind === "http" ? parsed.method : "",
+    request_url: parsed.url,
+    request_folder: parsed.folder,
+    request_target: target,
+    search_text: requestSearchText(colId, parsed, target),
     request: parsed,
   };
 }
@@ -161,6 +209,26 @@ function parseRequestDocumentBody(value: unknown): RequestDocumentBody | null {
       typeof raw.request_name === "string" ? raw.request_name : request.name,
     request_kind:
       raw.request_kind === request.kind ? raw.request_kind : request.kind,
+    request_method:
+      typeof raw.request_method === "string"
+        ? raw.request_method
+        : request.kind === "http"
+          ? request.method
+          : "",
+    request_url:
+      typeof raw.request_url === "string" ? raw.request_url : request.url,
+    request_folder:
+      typeof raw.request_folder === "string"
+        ? raw.request_folder
+        : request.folder,
+    request_target:
+      typeof raw.request_target === "string"
+        ? raw.request_target
+        : requestTarget(request),
+    search_text:
+      typeof raw.search_text === "string"
+        ? raw.search_text
+        : requestSearchText(raw.collection_id, request, requestTarget(request)),
     request,
   };
 }
@@ -209,6 +277,7 @@ async function ensureRequestCollection(): Promise<void> {
   const model = await db.collectionModel(REQ);
   if (model === "document") {
     await db.ensureDocumentCollection(REQ);
+    await backfillRequestDocumentPromotedFieldsBestEffort();
     return;
   }
 
@@ -218,6 +287,7 @@ async function ensureRequestCollection(): Promise<void> {
   if (model) await db.dropCollection(REQ);
   await db.ensureDocumentCollection(REQ);
   await insertMissingRequestDocuments(legacy);
+  await backfillRequestDocumentPromotedFieldsBestEffort();
 }
 
 export async function importLegacyRequestEntries(
@@ -254,6 +324,20 @@ function pointerSegment(segment: string): string {
   return segment.replace(/~/g, "~0").replace(/\//g, "~1");
 }
 
+const REQUEST_DOCUMENT_PROMOTED_FIELDS: Array<keyof RequestDocumentBody> = [
+  "record_type",
+  "app_key",
+  "collection_id",
+  "request_id",
+  "request_name",
+  "request_kind",
+  "request_method",
+  "request_url",
+  "request_folder",
+  "request_target",
+  "search_text",
+];
+
 function appendPatchOperations(
   before: unknown,
   after: unknown,
@@ -283,11 +367,79 @@ function appendPatchOperations(
 
 function requestDocumentPatch(
   before: RequestDocumentBody,
-  after: RequestDocumentBody
+  after: RequestDocumentBody,
+  rawBefore?: unknown
 ): db.DocumentPatchOperation[] {
   const out: db.DocumentPatchOperation[] = [];
   appendPatchOperations(before, after, "/body", out);
+  appendPromotedRequestDocumentPatch(rawBefore, after, out);
   return out;
+}
+
+function appendPromotedRequestDocumentPatch(
+  rawBefore: unknown,
+  after: RequestDocumentBody,
+  out: db.DocumentPatchOperation[]
+): void {
+  if (!isPlainRecord(rawBefore)) return;
+  const seen = new Set(out.map((op) => op.path));
+  for (const field of REQUEST_DOCUMENT_PROMOTED_FIELDS) {
+    const path = `/body/${pointerSegment(field)}`;
+    if (seen.has(path) || sameJson(rawBefore[field], after[field])) continue;
+    out.push({ op: "set", path, value: after[field] });
+    seen.add(path);
+  }
+}
+
+async function backfillRequestDocumentPromotedFields(): Promise<void> {
+  const docs = await db.documentList<RequestDocumentBody>(REQ).catch(() => []);
+  for (const doc of docs) {
+    const current = parseRequestDocumentBody(doc.body);
+    if (!current) continue;
+    const desired = requestDocumentBody(current.collection_id, current.request);
+    const operations: db.DocumentPatchOperation[] = [];
+    appendPromotedRequestDocumentPatch(doc.body, desired, operations);
+    if (operations.length > 0) await db.documentPatch(REQ, doc.rid, operations);
+  }
+}
+
+async function backfillRequestDocumentPromotedFieldsBestEffort(): Promise<void> {
+  try {
+    await backfillRequestDocumentPromotedFields();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `request search metadata backfill failed: ${detail}`);
+  }
+}
+
+async function ensureRequestIndexes(): Promise<void> {
+  const indexes: Array<{
+    name: string;
+    columns: string[];
+    method?: db.IndexMethod;
+  }> = [
+    { name: "rr_requests_app_key", columns: ["app_key"], method: "HASH" },
+    {
+      name: "rr_requests_collection_id",
+      columns: ["collection_id"],
+      method: "HASH",
+    },
+    { name: "rr_requests_kind", columns: ["request_kind"], method: "BITMAP" },
+    { name: "rr_requests_name", columns: ["request_name"] },
+  ];
+  for (const index of indexes) {
+    try {
+      await db.ensureIndex(REQ, index.name, index.columns, {
+        method: index.method,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      appLog(
+        "warn",
+        `request search index ${index.name} unavailable: ${detail}`
+      );
+    }
+  }
 }
 
 async function saveRequestDocument(
@@ -314,7 +466,7 @@ async function saveRequestDocument(
   await db.documentPatch(
     REQ,
     existing.rid,
-    requestDocumentPatch(current, desired)
+    requestDocumentPatch(current, desired, existing.body)
   );
 }
 
@@ -343,6 +495,7 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(SETTINGS);
   await db.ensureKvCollection(OAUTH);
   await ensureRequestCollection();
+  await ensureRequestIndexes();
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
@@ -431,6 +584,49 @@ export async function loadAll(): Promise<LoadedCollection[]> {
     }
     return migrated.value;
   });
+}
+
+export interface RequestSearchResult {
+  rid: string;
+  collectionId: string;
+  requestId: string;
+  name: string;
+  kind: RequestDefinition["kind"];
+  method: string;
+  url: string;
+  folder: string;
+  target: string;
+  request: RequestDefinition;
+}
+
+export async function searchRequests(
+  query: string,
+  limit = 25
+): Promise<RequestSearchResult[]> {
+  const docs = await db.documentSearchByTextField<RequestDocumentBody>(
+    REQ,
+    "search_text",
+    query,
+    limit
+  );
+  const out: RequestSearchResult[] = [];
+  for (const doc of docs) {
+    const body = parseRequestDocumentBody(doc.body);
+    if (!body) continue;
+    out.push({
+      rid: doc.rid,
+      collectionId: body.collection_id,
+      requestId: body.request_id,
+      name: body.request_name,
+      kind: body.request_kind,
+      method: body.request_method,
+      url: body.request_url,
+      folder: body.request_folder,
+      target: body.request_target,
+      request: body.request,
+    });
+  }
+  return out;
 }
 
 /** Load the project-level environments. Self-migrates any legacy per-collection
