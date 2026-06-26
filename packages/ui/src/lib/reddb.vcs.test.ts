@@ -8,6 +8,16 @@ const reply = (status: number, body: unknown) => ({
   body: typeof body === "string" ? body : JSON.stringify(body),
 });
 
+function rqlOk(records: Array<Record<string, unknown>> = []) {
+  return reply(200, {
+    ok: true,
+    data: {
+      columns: Object.keys(records[0] ?? {}),
+      records,
+    },
+  });
+}
+
 /** Route reddb_rql + reddb_request to a handler; unhandled commands return null. */
 function ipc(handlers: {
   rql?: (query: string) => unknown;
@@ -27,6 +37,127 @@ function ipc(handlers: {
     return null;
   });
 }
+
+describe("runMigrations", () => {
+  it("rejects migration names that RedDB cannot parse before issuing RQL", async () => {
+    const queries: string[] = [];
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        return rqlOk([]);
+      },
+    });
+
+    await expect(
+      db.runMigrations([{ name: "0001_bad", sql: "SELECT 1" }])
+    ).rejects.toThrow(/invalid RedDB migration name "0001_bad"/);
+    expect(queries).toEqual([]);
+  });
+
+  it("rejects invalid migration dependencies before issuing RQL", async () => {
+    const queries: string[] = [];
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        return rqlOk([]);
+      },
+    });
+
+    await expect(
+      db.runMigrations([
+        {
+          name: "request_tags",
+          dependsOn: ["0001_request_document_search_indexes"],
+          sql: "SELECT 1",
+        },
+      ])
+    ).rejects.toThrow(
+      /invalid RedDB migration dependency "0001_request_document_search_indexes"/
+    );
+    expect(queries).toEqual([]);
+  });
+
+  it.each([
+    [
+      "duplicate names",
+      [
+        { name: "duplicate_request_tags", sql: "SELECT 1" },
+        { name: "duplicate_request_tags", sql: "SELECT 2" },
+      ],
+      /duplicate RedDB migration name "duplicate_request_tags"/,
+    ],
+    [
+      "empty SQL",
+      [{ name: "empty_request_tags", sql: "   " }],
+      /invalid RedDB migration "empty_request_tags": SQL is empty/,
+    ],
+    [
+      "full CREATE MIGRATION statement",
+      [
+        {
+          name: "wrapped_request_tags",
+          sql: "CREATE MIGRATION nested AS SELECT 1",
+        },
+      ],
+      /sql must be the body after AS/,
+    ],
+    [
+      "self dependency",
+      [
+        {
+          name: "self_dependent_request_tags",
+          dependsOn: ["self_dependent_request_tags"],
+          sql: "SELECT 1",
+        },
+      ],
+      /depends on itself/,
+    ],
+    [
+      "unknown dependency",
+      [
+        {
+          name: "orphan_request_tags",
+          dependsOn: ["missing_request_base"],
+          sql: "SELECT 1",
+        },
+      ],
+      /unknown dependency "missing_request_base"/,
+    ],
+    [
+      "NUL byte",
+      [{ name: "nul_request_tags", sql: "SELECT '\0'" }],
+      /SQL contains NUL/,
+    ],
+  ] satisfies Array<[string, Parameters<typeof db.runMigrations>[0], RegExp]>)(
+    "rejects %s before issuing RQL",
+    async (_name, defs, expected) => {
+      const queries: string[] = [];
+      ipc({
+        rql: (query) => {
+          queries.push(query);
+          return rqlOk([]);
+        },
+      });
+
+      await expect(db.runMigrations(defs)).rejects.toThrow(expected);
+      expect(queries).toEqual([]);
+    }
+  );
+
+  it("fails closed when the migration catalog cannot be inspected", async () => {
+    ipc({
+      rql: (query) => {
+        if (query === "SELECT name FROM red_migrations")
+          return reply(200, { ok: false, error: "red_migrations unavailable" });
+        return rqlOk([]);
+      },
+    });
+
+    await expect(
+      db.runMigrations([{ name: "request_tags", sql: "SELECT 1" }])
+    ).rejects.toThrow(/failed to inspect RedDB migrations/);
+  });
+});
 
 describe("commit", () => {
   it("posts to /repo/commits with a nested author object and returns the hash", async () => {
