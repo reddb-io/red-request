@@ -4,6 +4,7 @@
 //   rr_requests       Document app_key=<colId>.<reqId> → RequestDefinition envelope
 //   rr_environments   KV key=<envSlug>       → StoredEnvironment (project-level, sealed secrets)
 //   rr_settings       KV key="globals"       → Record<string,string> (project-level base vars)
+//   rr_settings       KV key="ui"            → project-local UI feature flags
 //
 // Keys use `.` as separator; collection/request ids and env slugs are URL-safe slugs.
 // Environments and global vars are project-level (shared by every collection); a one-time
@@ -551,6 +552,37 @@ export async function loadNetwork(): Promise<NetworkSettings> {
 export const saveNetwork = async (settings: NetworkSettings) => {
   await db.kvPut(SETTINGS, NETWORK_KEY, settings);
   db.commitSoon("update network settings");
+};
+
+export interface UiSettings {
+  redUiEnabled: boolean;
+}
+
+const UI_SETTINGS_KEY = "ui";
+const DEFAULT_UI_SETTINGS: UiSettings = { redUiEnabled: false };
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Project-local UI flags. Stored in the .rdb so Settings > Data follows the project. */
+export async function loadUiSettings(): Promise<UiSettings> {
+  const raw = record(
+    await db.kvGet<unknown>(SETTINGS, UI_SETTINGS_KEY).catch(() => null)
+  );
+  return {
+    redUiEnabled: raw.redUiEnabled === true,
+  };
+}
+
+export const saveUiSettings = async (settings: UiSettings) => {
+  await db.kvPut(SETTINGS, UI_SETTINGS_KEY, {
+    ...DEFAULT_UI_SETTINGS,
+    ...settings,
+  });
+  db.commitSoon("update ui settings");
 };
 
 /** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */

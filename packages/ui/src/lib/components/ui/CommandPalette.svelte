@@ -268,6 +268,9 @@
       {/if}
       {@render action("Home", "view", () => (ws.view = "home"))}
       {@render action("Requests", "view", () => (ws.view = "requests"))}
+      {#if ws.redUiEnabled}
+        {@render action("Database", "view", () => (ws.view = "database"))}
+      {/if}
       {@render action("Settings", "view", () => (ws.view = "settings"))}
       {@render action("Switch project…", "selector", () => ws.backToSelector())}
     </Command.Group>

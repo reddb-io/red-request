@@ -81,6 +81,8 @@
   let renameValue = $state("");
   let dataStatus = $state("");
   let dataBusy = $state(false);
+  let redUiSaving = $state(false);
+  let redUiError = $state("");
 
   // --- database file info (size / last update / record counts) -------------
   let dbMeta = $state<FileMeta | null>(null);
@@ -226,6 +228,20 @@
       { title: "Delete project data", kind: "warning" }
     );
     if (ok) await ws.deleteProjectData();
+  }
+
+  async function toggleRedUi(enabled: boolean) {
+    if (redUiSaving) return;
+    redUiSaving = true;
+    redUiError = "";
+    try {
+      await ws.setRedUiEnabled(enabled);
+    } catch (e) {
+      redUiError = e instanceof Error ? e.message : String(e);
+      ws.redUiEnabled = !enabled;
+    } finally {
+      redUiSaving = false;
+    }
   }
 
   const totals = $derived({
@@ -382,6 +398,31 @@
         {:else}…{/if}
       </span>
     </div>
+  </div>
+
+  <!-- Embedded red-ui -------------------------------------------------------->
+  <div class="panel mb-4 p-4">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <h2 class="label mb-1">Database browser</h2>
+        <p class="hint max-w-2xl text-fg-subtle">
+          Show a DB icon in the left rail for inspecting this request store with red-ui.
+        </p>
+      </div>
+      <label class="inline-flex cursor-pointer items-center gap-2 text-xs text-fg">
+        <input
+          type="checkbox"
+          class="accent-accent"
+          checked={ws.redUiEnabled}
+          disabled={redUiSaving}
+          onchange={(e) => toggleRedUi((e.currentTarget as HTMLInputElement).checked)}
+        />
+        Enabled
+      </label>
+    </div>
+    {#if redUiError}
+      <p class="mono mt-2 text-xs text-red-300">{redUiError}</p>
+    {/if}
   </div>
 
   <!-- Data: import / export ------------------------------------------------->

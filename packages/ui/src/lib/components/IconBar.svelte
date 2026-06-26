@@ -1,6 +1,6 @@
 <script lang="ts">
   // Vertical icon rail (VSCode-style) — the app's top-level navigation. Selects
-  // ws.view: Home (dashboard + network pool), Requests (the workspace), Settings.
+  // ws.view: Home (dashboard + network pool), Requests, optional Database, Settings.
   // Icons go vivid brand-red when their view is active, dark red when idle and
   // brighten toward brand on hover. The brand monogram sits at the top; the
   // project switcher anchors the bottom.
@@ -9,16 +9,28 @@
   import { projectLabel } from "../project";
   import House from "@lucide/svelte/icons/house";
   import Send from "@lucide/svelte/icons/send";
+  import Database from "@lucide/svelte/icons/database";
   import Settings from "@lucide/svelte/icons/settings";
   import ArrowLeftRight from "@lucide/svelte/icons/arrow-left-right";
   import type { Component } from "svelte";
+  import type { AppView } from "../store.svelte";
 
-  type View = "home" | "requests" | "settings";
-  const items: { view: View; icon: Component; label: string }[] = [
-    { view: "home", icon: House, label: "Home — dashboard & network pool" },
-    { view: "requests", icon: Send, label: "Requests — collections & workspace" },
-    { view: "settings", icon: Settings, label: "Settings — project configuration" },
-  ];
+  type NavItem = { view: AppView; icon: Component<any>; label: string };
+  const items = $derived.by<NavItem[]>(() => {
+    const out: NavItem[] = [
+      { view: "home", icon: House, label: "Home: dashboard and network pool" },
+      { view: "requests", icon: Send, label: "Requests: collections and workspace" },
+    ];
+    if (ws.redUiEnabled) {
+      out.push({
+        view: "database",
+        icon: Database,
+        label: "Database: inspect request store",
+      });
+    }
+    out.push({ view: "settings", icon: Settings, label: "Settings: project configuration" });
+    return out;
+  });
 </script>
 
 <nav

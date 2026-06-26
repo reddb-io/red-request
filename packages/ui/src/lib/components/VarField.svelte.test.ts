@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
 import VarField from "./VarField.svelte";
 
 describe("VarField", () => {
@@ -26,5 +26,58 @@ describe("VarField", () => {
     expect(pane?.className).toContain("h-full");
     expect(textarea.className).toContain("h-full");
     expect(textarea.className).toContain("overflow-auto");
+  });
+
+  it("opens a wide suggestions menu without overflowing the viewport", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 600,
+      configurable: true,
+    });
+
+    const { container } = render(VarField, {
+      value: "{{",
+      known: ["api_host"],
+      values: {
+        api_host:
+          "A very long value description that should not hide the variable name column",
+      },
+      ariaLabel: "URL",
+    });
+    const input = screen.getByLabelText("URL");
+    input.getBoundingClientRect = () =>
+      ({
+        left: 720,
+        right: 780,
+        top: 100,
+        bottom: 128,
+        width: 60,
+        height: 28,
+        x: 720,
+        y: 100,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    (input as HTMLInputElement).setSelectionRange(2, 2);
+    await fireEvent.click(input);
+
+    const menu = await waitFor(() => {
+      const el = container.querySelector<HTMLElement>(
+        '[data-slot="var-field-menu"]'
+      );
+      expect(el).toBeTruthy();
+      return el!;
+    });
+
+    await waitFor(() => expect(menu.style.width).toBe("576px"));
+    expect(menu.className).toContain("fixed");
+    expect(parseInt(menu.style.width, 10)).toBe(576);
+    expect(
+      parseInt(menu.style.left, 10) + parseInt(menu.style.width, 10)
+    ).toBeLessThanOrEqual(788);
+    expect(await screen.findByText("api_host")).toBeTruthy();
   });
 });
