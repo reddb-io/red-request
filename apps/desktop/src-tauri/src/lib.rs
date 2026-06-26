@@ -989,62 +989,116 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
     }
 }
 
-/// Enforce single-writer on a `.rdb`: kill any `red server` already bound to this
-/// exact db file before we spawn ours. Such a process is either a crash orphan (we
-/// can't reap on SIGKILL) or a second app instance on the same store — two writers
-/// on one .rdb corrupt the B-tree, so the newest launch wins. Linux-only (scans
-/// /proc); a no-op elsewhere.
-#[cfg(target_os = "linux")]
-fn stale_reddb_pids(db_path: &std::path::Path) -> Vec<u32> {
-    let me = std::process::id();
-    let want = db_path.to_string_lossy();
-    let mut pids = Vec::new();
-    let Ok(entries) = std::fs::read_dir("/proc") else {
-        return pids;
+fn comparable_db_path(path: &std::path::Path) -> String {
+    let normalized = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let value = normalized.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        value.to_ascii_lowercase()
+    } else {
+        value
+    }
+}
+
+fn red_server_db_path_arg(args: &[String]) -> Option<&str> {
+    for (idx, arg) in args.iter().enumerate() {
+        if arg == "--path" {
+            return args.get(idx + 1).map(String::as_str);
+        }
+        if let Some(path) = arg.strip_prefix("--path=") {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn is_red_executable(arg: &str) -> bool {
+    let name = std::path::Path::new(arg)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(arg);
+    name == "red" || name.eq_ignore_ascii_case("red.exe")
+}
+
+fn reddb_server_argv_matches_db(args: &[String], db_path: &std::path::Path) -> bool {
+    if !args.first().is_some_and(|arg| is_red_executable(arg)) {
+        return false;
+    }
+    if !args.iter().skip(1).any(|arg| arg == "server") {
+        return false;
+    }
+    let Some(path) = red_server_db_path_arg(args) else {
+        return false;
     };
-    for entry in entries.flatten() {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse::<u32>().ok())
-        else {
-            continue;
-        };
+    comparable_db_path(std::path::Path::new(path)) == comparable_db_path(db_path)
+}
+
+fn process_args(process: &sysinfo::Process) -> Vec<String> {
+    process
+        .cmd()
+        .iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn process_snapshot() -> sysinfo::System {
+    let mut system = sysinfo::System::new();
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        sysinfo::ProcessRefreshKind::new()
+            .with_cmd(sysinfo::UpdateKind::Always)
+            .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
+    );
+    system
+}
+
+/// Enforce single-writer on a `.rdb`: find any `red server` already bound to
+/// this exact db file before we spawn ours. Such a process is either a crash
+/// orphan (we can't reap on SIGKILL) or a second app instance on the same store.
+/// Two writers on one .rdb corrupt the B-tree, so the newest launch wins.
+fn stale_reddb_pids(db_path: &std::path::Path) -> Vec<u32> {
+    let me = sysinfo::get_current_pid()
+        .map(|pid| pid.as_u32())
+        .unwrap_or_else(|_| std::process::id());
+    process_snapshot()
+        .processes()
+        .values()
+        .filter_map(|process| {
+            let pid = process.pid().as_u32();
+            if pid == me {
+                return None;
+            }
+            if reddb_server_argv_matches_db(&process_args(process), db_path) {
+                Some(pid)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn kill_stale_reddb(db_path: &std::path::Path) {
+    let me = sysinfo::get_current_pid()
+        .map(|pid| pid.as_u32())
+        .unwrap_or_else(|_| std::process::id());
+    for process in process_snapshot().processes().values() {
+        let pid = process.pid().as_u32();
         if pid == me {
             continue;
         }
-        // /proc/<pid>/cmdline is NUL-separated argv.
-        let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+        if !reddb_server_argv_matches_db(&process_args(process), db_path) {
             continue;
-        };
-        let args: Vec<String> = raw
-            .split(|&b| b == 0)
-            .filter(|s| !s.is_empty())
-            .map(|s| String::from_utf8_lossy(s).into_owned())
-            .collect();
-        let is_red_server = args
-            .first()
-            .is_some_and(|a| a.rsplit('/').next().unwrap_or(a) == "red")
-            && args.iter().any(|a| a == "server");
-        let on_this_db = args.windows(2).any(|w| w[0] == "--path" && w[1] == *want);
-        if is_red_server && on_this_db {
-            pids.push(pid);
         }
-    }
-    pids
-}
-
-#[cfg(target_os = "linux")]
-fn kill_stale_reddb(db_path: &std::path::Path) {
-    for pid in stale_reddb_pids(db_path) {
         log::warn!(
             target: "reddb",
-            "single-writer guard: killing stale red server pid {pid} on {}",
+            "single-writer guard: terminating stale red server pid {pid} on {}",
             db_path.to_string_lossy()
         );
-        let _ = std::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status();
+        let terminated = process
+            .kill_with(sysinfo::Signal::Term)
+            .unwrap_or_else(|| process.kill());
+        if !terminated {
+            log::warn!(target: "reddb", "single-writer guard: failed to signal pid {pid}");
+        }
     }
 }
 
@@ -1052,10 +1106,16 @@ fn kill_stale_reddb(db_path: &std::path::Path) {
 /// dying process keeps the file lock until it's fully reaped. Spawning before then makes reddb
 /// report the db as unopenable, which used to trigger a DESTRUCTIVE "incompatible" backup of a
 /// perfectly good store (the data-loss-on-upgrade bug). Bounded so a wedged process can't hang
-/// startup. No-op off Linux (we can't enumerate processes there).
-#[cfg(target_os = "linux")]
+/// startup.
 async fn wait_for_no_stale(db_path: &std::path::Path) {
     for _ in 0..40 {
+        if stale_reddb_pids(db_path).is_empty() {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+    }
+    kill_stale_reddb_force(db_path);
+    for _ in 0..20 {
         if stale_reddb_pids(db_path).is_empty() {
             return;
         }
@@ -1068,11 +1128,28 @@ async fn wait_for_no_stale(db_path: &std::path::Path) {
     );
 }
 
-#[cfg(not(target_os = "linux"))]
-fn kill_stale_reddb(_db_path: &std::path::Path) {}
-
-#[cfg(not(target_os = "linux"))]
-async fn wait_for_no_stale(_db_path: &std::path::Path) {}
+fn kill_stale_reddb_force(db_path: &std::path::Path) {
+    let me = sysinfo::get_current_pid()
+        .map(|pid| pid.as_u32())
+        .unwrap_or_else(|_| std::process::id());
+    for process in process_snapshot().processes().values() {
+        let pid = process.pid().as_u32();
+        if pid == me {
+            continue;
+        }
+        if !reddb_server_argv_matches_db(&process_args(process), db_path) {
+            continue;
+        }
+        log::warn!(
+            target: "reddb",
+            "single-writer guard: force-killing stale red server pid {pid} on {}",
+            db_path.to_string_lossy()
+        );
+        if !process.kill() {
+            log::warn!(target: "reddb", "single-writer guard: failed to force-kill pid {pid}");
+        }
+    }
+}
 
 /// Spawn one reddb sidecar for `db_path` and wait until it answers /stats.
 /// On readiness failure the child is killed (so a failed start can't orphan a process).
@@ -1573,7 +1650,7 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
 
 #[cfg(test)]
 mod tests {
-    use super::{open_with_key, seal_with_key};
+    use super::{open_with_key, reddb_server_argv_matches_db, seal_with_key};
 
     #[test]
     fn seal_open_roundtrip() {
@@ -1588,6 +1665,63 @@ mod tests {
     fn wrong_key_fails() {
         let sealed = seal_with_key(&[1u8; 32], "x").unwrap();
         assert!(open_with_key(&[2u8; 32], &sealed.iv, &sealed.ct).is_err());
+    }
+
+    #[test]
+    fn matches_reddb_server_for_exact_db_path() {
+        let db = std::path::Path::new("/tmp/red request/app.rdb");
+        let args = vec![
+            "/opt/red-request/red".to_string(),
+            "server".to_string(),
+            "--path".to_string(),
+            "/tmp/red request/app.rdb".to_string(),
+            "--http-bind".to_string(),
+            "127.0.0.1:1234".to_string(),
+        ];
+        assert!(reddb_server_argv_matches_db(&args, db));
+    }
+
+    #[test]
+    fn matches_reddb_server_path_equals_form() {
+        let db = std::path::Path::new("/tmp/red-request/app.rdb");
+        let args = vec![
+            "red.exe".to_string(),
+            "server".to_string(),
+            "--path=/tmp/red-request/app.rdb".to_string(),
+        ];
+        assert!(reddb_server_argv_matches_db(&args, db));
+    }
+
+    #[test]
+    fn rejects_non_server_red_processes() {
+        let db = std::path::Path::new("/tmp/red-request/app.rdb");
+        let args = vec![
+            "red".to_string(),
+            "connect".to_string(),
+            "127.0.0.1:1234".to_string(),
+            "--path".to_string(),
+            "/tmp/red-request/app.rdb".to_string(),
+        ];
+        assert!(!reddb_server_argv_matches_db(&args, db));
+    }
+
+    #[test]
+    fn rejects_engine_sidecar_and_different_db_paths() {
+        let db = std::path::Path::new("/tmp/red-request/app.rdb");
+        let engine = vec![
+            "red-request-engine".to_string(),
+            "server".to_string(),
+            "--path".to_string(),
+            "/tmp/red-request/app.rdb".to_string(),
+        ];
+        let other_db = vec![
+            "red".to_string(),
+            "server".to_string(),
+            "--path".to_string(),
+            "/tmp/red-request-other/app.rdb".to_string(),
+        ];
+        assert!(!reddb_server_argv_matches_db(&engine, db));
+        assert!(!reddb_server_argv_matches_db(&other_db, db));
     }
 }
 
