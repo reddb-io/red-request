@@ -65,6 +65,7 @@ type RequestDocumentBody = {
   app_key: string;
   collection_id: string;
   request_id: string;
+  title: string;
   request_name: string;
   request_kind: RequestDefinition["kind"];
   request_method: string;
@@ -247,6 +248,7 @@ function requestDocumentBody(
     app_key: reqKey(colId, parsed.id),
     collection_id: colId,
     request_id: parsed.id,
+    title: parsed.name,
     request_name: parsed.name,
     request_kind: parsed.kind,
     request_method: parsed.kind === "http" ? parsed.method : "",
@@ -282,6 +284,12 @@ function parseRequestDocumentBody(value: unknown): RequestDocumentBody | null {
     app_key: raw.app_key,
     collection_id: raw.collection_id,
     request_id: raw.request_id,
+    title:
+      typeof raw.title === "string"
+        ? raw.title
+        : typeof raw.request_name === "string"
+          ? raw.request_name
+          : request.name,
     request_name:
       typeof raw.request_name === "string" ? raw.request_name : request.name,
     request_kind:
@@ -477,6 +485,7 @@ const REQUEST_DOCUMENT_PROMOTED_FIELDS: Array<keyof RequestDocumentBody> = [
   "app_key",
   "collection_id",
   "request_id",
+  "title",
   "request_name",
   "request_kind",
   "request_method",

@@ -69,6 +69,7 @@ function requestDoc(colId: string, req: RequestDefinition) {
     app_key: `${colId}.${req.id}`,
     collection_id: colId,
     request_id: req.id,
+    title: req.name,
     request_name: req.name,
     request_kind: req.kind,
     request_method: req.kind === "http" ? req.method : "",
@@ -395,6 +396,7 @@ describe("Document-backed request storage", () => {
 
     expect(operations).toEqual(
       expect.arrayContaining([
+        { op: "set", path: "/body/title", value: "New" },
         { op: "set", path: "/body/request_name", value: "New" },
         expect.objectContaining({
           op: "set",

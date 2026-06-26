@@ -1898,13 +1898,25 @@ class Workspace {
   }
 
   async renameEnv(env: StoredEnvironment, newName: string): Promise<void> {
-    if (!newName.trim() || newName === env.name || newName === GLOBALS_ENV)
+    const name = newName.trim();
+    if (!name || name === env.name || name === GLOBALS_ENV) return;
+    if (
+      this.environments.some(
+        (candidate) => candidate !== env && candidate.name === name
+      )
+    )
       return;
     const oldName = env.name;
-    env.name = newName;
-    await repo.renameEnvironment(oldName, env);
+    const renamed = storedEnvironmentSchema.parse({
+      ...(structuredClone($state.snapshot(env)) as StoredEnvironment),
+      name,
+    });
+    await repo.renameEnvironment(oldName, renamed);
+    env.name = renamed.name;
+    env.vars = renamed.vars;
+    env.secrets = renamed.secrets;
     await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
-    if (this.activeEnvName === oldName) this.activeEnvName = newName;
+    if (this.activeEnvName === oldName) this.activeEnvName = name;
   }
 
   async deleteEnv(env: StoredEnvironment): Promise<void> {
