@@ -292,10 +292,95 @@ fn sidecar_env() -> std::collections::HashMap<String, String> {
         "GDK_PIXBUF_MODULEDIR",
         "GST_PLUGIN_PATH",
         "GST_PLUGIN_SYSTEM_PATH",
+        // The embedded RedDB is app-managed. Host RedDB auth/vault env vars
+        // must not silently change red-request behavior on a user's machine.
+        "REDDB_AUTH",
+        "REDDB_REQUIRE_AUTH",
+        "REDDB_NO_AUTH",
+        "REDDB_VAULT",
+        "REDDB_CERTIFICATE",
+        "REDDB_CERTIFICATE_FILE",
+        "REDDB_USERNAME",
+        "REDDB_USERNAME_FILE",
+        "REDDB_PASSWORD",
+        "REDDB_PASSWORD_FILE",
+        "RED_ADMIN_TOKEN",
+        "RED_ADMIN_TOKEN_FILE",
+        "REDDB_STORAGE_PRESET",
+        "REDDB_STORAGE_PROFILE",
+        "REDDB_DEPLOY_PROFILE",
+        "REDDB_STORAGE_PACKAGING",
+        "REDDB_TOPOLOGY",
+        "REDDB_NODE_ROLE",
     ];
     std::env::vars()
         .filter(|(k, _)| !STRIP.contains(&k.as_str()))
         .collect()
+}
+
+const EMBEDDED_REDDB_STORAGE_PRESET: &str = "serverless";
+
+fn is_vault_certificate(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn reddb_vault_cert_path(db_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let parent = db_path
+        .parent()
+        .ok_or_else(|| "db path has no parent".to_string())?;
+    let file_name = db_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "app.rdb".to_string());
+    Ok(parent.join(format!("{file_name}.vault-cert")))
+}
+
+fn ensure_reddb_vault_certificate(db_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    use rand::TryRngCore;
+
+    let cert_path = reddb_vault_cert_path(db_path)?;
+    if cert_path.exists() {
+        let cert = std::fs::read_to_string(&cert_path)
+            .map_err(|e| format!("read RedDB vault certificate: {e}"))?;
+        let cert = cert.trim();
+        if is_vault_certificate(cert) {
+            return Ok(cert_path);
+        }
+        return Err(format!(
+            "invalid RedDB vault certificate at {}",
+            cert_path.display()
+        ));
+    }
+
+    if let Some(parent) = cert_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create RedDB vault certificate dir: {e}"))?;
+    }
+    let mut cert = [0u8; 32];
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut cert)
+        .map_err(|e| format!("generate RedDB vault certificate: {e}"))?;
+    std::fs::write(&cert_path, hex_lower(&cert))
+        .map_err(|e| format!("write RedDB vault certificate: {e}"))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        let _ = std::fs::set_permissions(&cert_path, perms);
+    }
+
+    Ok(cert_path)
 }
 
 fn spawn_engine(
@@ -1172,6 +1257,8 @@ async fn spawn_reddb_once(
     let bind = format!("127.0.0.1:{}", free_port()?);
     // gRPC front-door for `red connect` (RQL conduit), alongside the HTTP API.
     let grpc = format!("127.0.0.1:{}", free_port()?);
+    let vault_cert = ensure_reddb_vault_certificate(db_path)?;
+    let vault_cert_env = vault_cert.to_string_lossy().to_string();
     let args = [
         "server".to_string(),
         "--http".to_string(),
@@ -1182,12 +1269,15 @@ async fn spawn_reddb_once(
         "--grpc".to_string(),
         "--grpc-bind".to_string(),
         grpc.clone(),
+        "--vault".to_string(),
     ];
     let shell = app.shell();
     let sidecar = shell.sidecar("red").ok().map(|c| {
         c.env_clear()
             .envs(sidecar_env())
             .args(args.clone())
+            .env("REDDB_CERTIFICATE_FILE", vault_cert_env.clone())
+            .env("REDDB_STORAGE_PRESET", EMBEDDED_REDDB_STORAGE_PRESET)
             .env("RED_HTTP_TLS_DEV", "1")
             .spawn()
     });
@@ -1198,6 +1288,10 @@ async fn spawn_reddb_once(
             shell
                 .command(bin)
                 .args(args)
+                .env_clear()
+                .envs(sidecar_env())
+                .env("REDDB_CERTIFICATE_FILE", vault_cert_env)
+                .env("REDDB_STORAGE_PRESET", EMBEDDED_REDDB_STORAGE_PRESET)
                 .env("RED_HTTP_TLS_DEV", "1")
                 .spawn()
                 .map_err(|e| format!("failed to start reddb: {e}"))?
@@ -1650,7 +1744,25 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
 
 #[cfg(test)]
 mod tests {
-    use super::{open_with_key, reddb_server_argv_matches_db, seal_with_key};
+    use super::{
+        ensure_reddb_vault_certificate, is_vault_certificate, open_with_key,
+        reddb_server_argv_matches_db, reddb_vault_cert_path, seal_with_key, sidecar_env,
+        EMBEDDED_REDDB_STORAGE_PRESET,
+    };
+
+    fn temp_test_dir(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "red-request-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn seal_open_roundtrip() {
@@ -1665,6 +1777,54 @@ mod tests {
     fn wrong_key_fails() {
         let sealed = seal_with_key(&[1u8; 32], "x").unwrap();
         assert!(open_with_key(&[2u8; 32], &sealed.iv, &sealed.ct).is_err());
+    }
+
+    #[test]
+    fn creates_stable_reddb_vault_certificate_next_to_db() {
+        let dir = temp_test_dir("vault-cert");
+        let db = dir.join("app.rdb");
+
+        let cert_path = ensure_reddb_vault_certificate(&db).unwrap();
+        assert_eq!(cert_path, reddb_vault_cert_path(&db).unwrap());
+        let cert = std::fs::read_to_string(&cert_path).unwrap();
+        assert!(is_vault_certificate(cert.trim()));
+
+        let cert_path_again = ensure_reddb_vault_certificate(&db).unwrap();
+        let cert_again = std::fs::read_to_string(&cert_path_again).unwrap();
+        assert_eq!(cert, cert_again);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rejects_invalid_reddb_vault_certificate_file() {
+        let dir = temp_test_dir("vault-cert-invalid");
+        let db = dir.join("app.rdb");
+        let cert_path = reddb_vault_cert_path(&db).unwrap();
+        std::fs::write(&cert_path, "not-a-cert").unwrap();
+
+        let err = ensure_reddb_vault_certificate(&db).unwrap_err();
+        assert!(err.contains("invalid RedDB vault certificate"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn strips_host_reddb_storage_env_for_embedded_sidecar() {
+        std::env::set_var("REDDB_STORAGE_PRESET", "embedded");
+        std::env::set_var("REDDB_STORAGE_PROFILE", "cluster");
+        std::env::set_var("REDDB_STORAGE_PACKAGING", "single-file");
+
+        let env = sidecar_env();
+
+        assert!(!env.contains_key("REDDB_STORAGE_PRESET"));
+        assert!(!env.contains_key("REDDB_STORAGE_PROFILE"));
+        assert!(!env.contains_key("REDDB_STORAGE_PACKAGING"));
+        assert_eq!(EMBEDDED_REDDB_STORAGE_PRESET, "serverless");
+
+        std::env::remove_var("REDDB_STORAGE_PRESET");
+        std::env::remove_var("REDDB_STORAGE_PROFILE");
+        std::env::remove_var("REDDB_STORAGE_PACKAGING");
     }
 
     #[test]

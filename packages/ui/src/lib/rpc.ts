@@ -1,6 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
+  developerConsole,
+  developerConsoleDuration,
+  markDeveloperConsoleStart,
+} from "./developer-console.svelte";
+import {
   ENGINE_METHODS,
   type HttpSendParams,
   type HttpSendResult,
@@ -65,7 +70,31 @@ export function reddbRequest(
   path: string,
   body: string | null = null
 ): Promise<ReddbHttpReply> {
-  return invoke<ReddbHttpReply>("reddb_request", { method, path, body });
+  const started = markDeveloperConsoleStart();
+  return invoke<ReddbHttpReply>("reddb_request", { method, path, body })
+    .then((reply) => {
+      developerConsole.logReddbHttp({
+        method,
+        path,
+        ok: reply.status >= 200 && reply.status < 300,
+        status: reply.status,
+        durationMs: developerConsoleDuration(started),
+        bodyBytes: body?.length,
+      });
+      return reply;
+    })
+    .catch((error) => {
+      developerConsole.logReddbHttp({
+        method,
+        path,
+        ok: false,
+        status: 0,
+        durationMs: developerConsoleDuration(started),
+        bodyBytes: body?.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    });
 }
 
 /** Size + last-modified for a file (e.g. the project's app.rdb). */

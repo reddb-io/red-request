@@ -325,7 +325,7 @@
         <span
           class="text-amber-400"
           title={failed.length
-            ? `couldn't decrypt secret(s): ${failed.join(", ")} — re-enter them in this environment (secrets are encrypted per-machine, so a sealed value from another machine or a missing/locked OS keychain can't be opened)`
+            ? `couldn't open RedDB secret(s): ${failed.join(", ")} — re-enter them in this environment or check the embedded vault/config state`
             : "unresolved variables"}
         >
           ⚠ {ws.unresolved.join(", ")}{failed.length ? " 🔒" : ""}
