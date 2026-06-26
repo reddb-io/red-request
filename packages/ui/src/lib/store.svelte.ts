@@ -80,6 +80,7 @@ class Workspace {
   ready = $state(false);
   bridgeMissing = $state(false);
   loadError = $state<string | null>(null);
+  closing = $state(false);
   screen = $state<"selector" | "app">("selector");
   /** Cartoon "iris wipe" while a project opens: a black circle closes on the
    *  selector, the screen swaps to the app while fully black, then the iris opens
@@ -311,6 +312,10 @@ class Workspace {
   /** Return to the project selector. */
   backToSelector(): void {
     this.screen = "selector";
+  }
+
+  beginClosing(): void {
+    this.closing = true;
   }
 
   /** Rename the current project (display alias in recents — does not touch the folder). */

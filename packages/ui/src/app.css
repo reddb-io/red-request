@@ -307,9 +307,60 @@ body {
     width 420ms cubic-bezier(0.16, 0.84, 0.44, 1),
     height 420ms cubic-bezier(0.16, 0.84, 0.44, 1);
 }
+
+/* ClosingOverlay - shown as soon as the native window close request reaches JS. */
+.closing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  pointer-events: all;
+  background: color-mix(in oklch, var(--color-bg-0) 82%, transparent);
+  backdrop-filter: blur(8px);
+  animation: closing-overlay-in 150ms cubic-bezier(0.16, 0.84, 0.44, 1) both;
+}
+.closing-panel {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  width: min(22rem, 100%);
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-bg-1) 88%, var(--color-bg-0));
+  box-shadow: 0 18px 55px rgb(0 0 0 / 0.38);
+}
+.closing-spinner {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in oklch, var(--color-fg-muted) 30%, transparent);
+  border-top-color: var(--color-brand);
+  border-radius: 9999px;
+  animation: closing-spinner 760ms linear infinite;
+}
+@keyframes closing-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes closing-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .iris .hole {
     transition: none;
+  }
+  .closing-overlay,
+  .closing-spinner {
+    animation: none;
   }
 }
 
