@@ -20,6 +20,7 @@ import {
   networkSettingsSchema,
   newRequest,
   nativeSecretRefSchema,
+  projectSyncEventSchema,
   sealedSecretSchema,
   type CollectionFile,
   type RequestDefinition,
@@ -29,6 +30,9 @@ import {
   type LoadedCollection,
   type HistoryEntry,
   type NetworkSettings,
+  type ProjectSyncEntity,
+  type ProjectSyncEvent,
+  type ProjectSyncEventKind,
 } from "@red-request/core";
 import * as db from "./reddb";
 import * as secrets from "./secrets";
@@ -46,6 +50,7 @@ export const ENV = "rr_environments";
 export const HIST = "rr_history";
 export const SETTINGS = "rr_settings";
 export const OAUTH = "rr_oauth_tokens";
+export const SYNC_EVENTS = "rr_sync_events";
 
 const MAX_HISTORY_PER_REQ = 50;
 const REQ_MIGRATION_STAGE = "rr_requests_migration_stage";
@@ -59,6 +64,7 @@ const SETTINGS_NETWORK_KEY = "settings_network";
 const SETTINGS_UI_KEY = "settings_ui";
 const SETTINGS_GLOBALS_KEY = "settings_globals";
 const SETTINGS_ENV_ORDER_KEY = "settings_env_order";
+const SETTINGS_SYNC_CLIENT_ID_KEY = "settings_sync_client_id";
 
 type RequestDocumentBody = {
   record_type: "request";
@@ -194,6 +200,42 @@ function isSealedSecret(secret: StoredSecret): boolean {
 
 const reqKey = (colId: string, reqId: string) => `${colId}.${reqId}`;
 const ownedBy = (colId: string, key: string) => key.startsWith(`${colId}.`);
+
+function newSyncId(): string {
+  const cryptoObj = globalThis.crypto;
+  if (typeof cryptoObj?.randomUUID === "function")
+    return cryptoObj.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function syncClientId(): Promise<string> {
+  const existing = await db
+    .configGet<string>(APP_CONFIG, SETTINGS_SYNC_CLIENT_ID_KEY)
+    .catch(() => null);
+  if (typeof existing === "string" && existing.length > 0) return existing;
+  const id = newSyncId();
+  await db.configPut(APP_CONFIG, SETTINGS_SYNC_CLIENT_ID_KEY, id);
+  return id;
+}
+
+async function emitSyncEvent(
+  kind: ProjectSyncEventKind,
+  entity: ProjectSyncEntity,
+  payload: Record<string, unknown> = {}
+): Promise<ProjectSyncEvent> {
+  const event = projectSyncEventSchema.parse({
+    v: 1,
+    id: newSyncId(),
+    ts: Date.now(),
+    source: "red-request",
+    clientId: await syncClientId(),
+    kind,
+    entity,
+    payload,
+  });
+  await db.queuePush(SYNC_EVENTS, event);
+  return event;
+}
 
 function colIdFromReqKey(key: string): string | null {
   const sep = key.indexOf(".");
@@ -621,6 +663,7 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(OAUTH);
   await ensureRequestCollection();
   await db.ensureVaultCollection(APP_VAULT);
+  await db.ensureQueue(SYNC_EVENTS);
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);
@@ -638,6 +681,14 @@ export async function loadNetwork(): Promise<NetworkSettings> {
 }
 export const saveNetwork = async (settings: NetworkSettings) => {
   await db.configPut(APP_CONFIG, SETTINGS_NETWORK_KEY, settings);
+  await emitSyncEvent(
+    "network.saved",
+    { type: "network", id: "network", name: "network" },
+    {
+      proxyCount: settings.proxies.length,
+      profileCount: settings.profiles.length,
+    }
+  );
   db.commitSoon("update network settings");
 };
 
@@ -672,6 +723,11 @@ export const saveUiSettings = async (settings: UiSettings) => {
     ...DEFAULT_UI_SETTINGS,
     ...settings,
   });
+  await emitSyncEvent(
+    "settings.saved",
+    { type: "settings", id: "ui", name: "ui" },
+    { key: "ui" }
+  );
   db.commitSoon("update ui settings");
 };
 
@@ -806,6 +862,11 @@ export async function loadGlobals(): Promise<Record<string, string> | null> {
 }
 export const saveGlobals = async (vars: Record<string, string>) => {
   await db.configPut(APP_CONFIG, SETTINGS_GLOBALS_KEY, vars);
+  await emitSyncEvent(
+    "globals.saved",
+    { type: "globals", id: "globals", name: "globals" },
+    { keys: Object.keys(vars).sort() }
+  );
   db.commitSoon("update globals");
 };
 
@@ -959,7 +1020,13 @@ export async function loadEnvironmentOrder(): Promise<string[]> {
 }
 
 export async function saveEnvironmentOrder(names: string[]): Promise<void> {
-  await db.configPut(APP_CONFIG, SETTINGS_ENV_ORDER_KEY, [...new Set(names)]);
+  const order = [...new Set(names)];
+  await db.configPut(APP_CONFIG, SETTINGS_ENV_ORDER_KEY, order);
+  await emitSyncEvent(
+    "environment.reordered",
+    { type: "environment", id: "order", name: "order" },
+    { names: order }
+  );
   db.commitSoon("reorder environments");
 }
 
@@ -985,7 +1052,13 @@ export async function saveEnvironmentSecret(
   value: string
 ): Promise<void> {
   env.secrets[name] = await writeNativeSecret(env.name, name, value);
-  await saveEnvironment(env);
+  await saveEnvironmentRecord(env);
+  await emitSyncEvent(
+    "secret.saved",
+    { type: "secret", id: `${env.name}:${name}`, parentId: env.name, name },
+    { environment: env.name, secretName: name }
+  );
+  db.commitSoon(`save secret ${env.name}/${name}`);
 }
 
 export async function saveEnvironmentMissingSecret(
@@ -993,7 +1066,13 @@ export async function saveEnvironmentMissingSecret(
   name: string
 ): Promise<void> {
   env.secrets[name] = await writeNativeSecretReference(env.name, name, true);
-  await saveEnvironment(env);
+  await saveEnvironmentRecord(env);
+  await emitSyncEvent(
+    "secret.saved",
+    { type: "secret", id: `${env.name}:${name}`, parentId: env.name, name },
+    { environment: env.name, secretName: name, missing: true }
+  );
+  db.commitSoon(`save missing secret ${env.name}/${name}`);
 }
 
 export async function removeEnvironmentSecret(
@@ -1002,18 +1081,46 @@ export async function removeEnvironmentSecret(
 ): Promise<void> {
   const secret = env.secrets[name];
   delete env.secrets[name];
-  await saveEnvironment(env);
-  if (!secret || !isNativeSecret(secret)) return;
-  await deleteNativeSecretReference(secret);
+  await saveEnvironmentRecord(env);
+  if (secret && isNativeSecret(secret))
+    await deleteNativeSecretReference(secret);
+  await emitSyncEvent(
+    "secret.deleted",
+    { type: "secret", id: `${env.name}:${name}`, parentId: env.name, name },
+    { environment: env.name, secretName: name }
+  );
+  db.commitSoon(`delete secret ${env.name}/${name}`);
 }
 
 export const saveCollectionMeta = async (colId: string, c: CollectionFile) => {
   await db.kvPut(COL, colId, c);
+  await emitSyncEvent(
+    "collection.saved",
+    { type: "collection", id: colId, name: c.name },
+    {
+      collectionId: colId,
+      name: c.name,
+      order: c.order,
+      folders: c.folders,
+    }
+  );
   db.commitSoon(`save collection ${c.name ?? colId}`);
 };
 
 export const saveRequest = async (colId: string, req: RequestDefinition) => {
   await saveRequestDocument(colId, req);
+  await emitSyncEvent(
+    "request.saved",
+    { type: "request", id: req.id, parentId: colId, name: req.name },
+    {
+      collectionId: colId,
+      requestId: req.id,
+      requestName: req.name,
+      requestKind: req.kind,
+      method: req.kind === "http" ? req.method : "",
+      folder: req.folder,
+    }
+  );
   db.commitSoon(`save request ${req.name ?? req.id}`);
 };
 
@@ -1024,14 +1131,32 @@ export const deleteRequest = async (colId: string, reqId: string) => {
     reqKey(colId, reqId)
   );
   if (doc) await db.documentDelete(REQ, doc.rid);
+  await emitSyncEvent(
+    "request.deleted",
+    { type: "request", id: reqId, parentId: colId },
+    { collectionId: colId, requestId: reqId }
+  );
   db.commitSoon("delete request");
 };
 
-export const saveEnvironment = async (env: StoredEnvironment) => {
+async function saveEnvironmentRecord(env: StoredEnvironment): Promise<void> {
   await db.configPut(
     APP_CONFIG,
     nativeEnvKey(env.name),
     storedEnvironmentSchema.parse(env)
+  );
+}
+
+export const saveEnvironment = async (env: StoredEnvironment) => {
+  await saveEnvironmentRecord(env);
+  await emitSyncEvent(
+    "environment.saved",
+    { type: "environment", id: env.name, name: env.name },
+    {
+      name: env.name,
+      vars: Object.keys(env.vars).sort(),
+      secrets: Object.keys(env.secrets).sort(),
+    }
   );
   db.commitSoon(`save environment ${env.name}`);
 };
@@ -1086,9 +1211,14 @@ export const renameEnvironment = async (
   }
 
   env.secrets = renamed.secrets;
-  await saveEnvironment(renamed);
+  await saveEnvironmentRecord(renamed);
   await deleteEnvironmentRecord(oldName);
   await Promise.all(oldNativeSecrets.map(deleteNativeSecretReference));
+  await emitSyncEvent(
+    "environment.renamed",
+    { type: "environment", id: env.name, name: env.name },
+    { oldName, name: env.name }
+  );
   db.commitSoon(`rename environment ${oldName} to ${env.name}`);
 };
 
@@ -1106,6 +1236,11 @@ export const deleteEnvironment = async (name: string) => {
     );
   }
   await deleteEnvironmentRecord(name);
+  await emitSyncEvent(
+    "environment.deleted",
+    { type: "environment", id: name, name },
+    { name }
+  );
   db.commitSoon(`delete environment ${name}`);
 };
 
@@ -1125,6 +1260,11 @@ export async function deleteCollection(colId: string): Promise<void> {
       .map((h) => db.kvDelete(HIST, h.key)),
   ]);
   await db.kvDelete(COL, colId);
+  await emitSyncEvent(
+    "collection.deleted",
+    { type: "collection", id: colId },
+    { collectionId: colId }
+  );
   db.commitSoon("delete collection");
 }
 

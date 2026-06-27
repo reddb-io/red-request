@@ -352,6 +352,23 @@ export async function vaultUnseal(path: string): Promise<string | null> {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+// --- RedDB queues -----------------------------------------------------------
+
+type QueueMode = "FANOUT";
+
+export async function ensureQueue(
+  name: string,
+  mode: QueueMode = "FANOUT"
+): Promise<void> {
+  const r = await rql(`CREATE QUEUE IF NOT EXISTS ${ident(name)} ${mode}`);
+  if (!r.ok) throw new Error(`CREATE QUEUE ${name}: ${r.error}`);
+}
+
+export async function queuePush(name: string, payload: unknown): Promise<void> {
+  const r = await rql(`QUEUE PUSH ${ident(name)} ${JSON.stringify(payload)}`);
+  if (!r.ok) throw new Error(`QUEUE PUSH ${name}: ${r.error}`);
+}
+
 // --- RedDB documents --------------------------------------------------------
 
 export interface DocumentRecord<T = unknown> {
