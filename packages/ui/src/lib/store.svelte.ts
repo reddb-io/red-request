@@ -75,6 +75,8 @@ import {
 const GLOBALS_ENV = "Globals";
 const PROJECT_OPEN_TIMEOUT_MS = 15_000;
 const LOAD_STEP_TIMEOUT_MS = 15_000;
+const SYNC_QUEUE_WAIT_MS = 15_000;
+const SYNC_RELOAD_DELAY_MS = 250;
 export type AppView = "home" | "requests" | "settings" | "database";
 
 const emptyGlobals = (): StoredEnvironment =>
@@ -155,6 +157,9 @@ class Workspace {
   runError = $state<string | null>(null);
   private projectOpenGeneration = 0;
   private loadStoreGeneration = 0;
+  private syncLoopGeneration = 0;
+  private syncLoopRunning = false;
+  private syncReloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** History for the active request (newest first) — powers the Timings panel. */
   reqHistory = $state<HistoryEntry[]>([]);
@@ -271,6 +276,7 @@ class Workspace {
       appLog("info", "init: arg_launched → entering app directly");
       await this.loadStore();
       this.screen = "app";
+      this.startSyncLoop();
     } else {
       appLog("info", "init: not arg-launched → showing project selector");
       this.screen = "selector";
@@ -284,6 +290,7 @@ class Workspace {
    *  sync with ProjectTransition.svelte's CSS transitions. */
   async chooseProject(dir: string | null): Promise<void> {
     const generation = ++this.projectOpenGeneration;
+    this.stopSyncLoop();
     // Persist any pending edit on the CURRENT project before we swap reddb.
     await this.flushSave();
     // A hair longer than the matching CSS transitions so each extreme is reached.
@@ -383,6 +390,7 @@ class Workspace {
     const value = raw.trim();
     if (!value) return;
     const generation = ++this.projectOpenGeneration;
+    this.stopSyncLoop();
     await this.flushSave();
     this.transitioning = false;
     this.transitionPhase = "idle";
@@ -449,6 +457,7 @@ class Workspace {
   backToSelector(): void {
     this.projectOpenGeneration++;
     this.loadStoreGeneration++;
+    this.stopSyncLoop();
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.loading = null;
@@ -536,25 +545,31 @@ class Workspace {
   /** (Re)load the store; sets loadError on failure. Used by init and Retry.
    *  `canHeal` allows one automatic recovery from incompatible on-disk data
    *  (a collection in the wrong model) — back it up + recreate, then retry once. */
-  async loadStore(canHeal = true): Promise<void> {
+  async loadStore(
+    canHeal = true,
+    options: { showLoading?: boolean } = {}
+  ): Promise<void> {
+    const showLoading = options.showLoading !== false;
     const generation = ++this.loadStoreGeneration;
     const isCurrent = () => generation === this.loadStoreGeneration;
     this.loadError = null;
-    this.loading = {
-      startedAt: Date.now(),
-      step: "starting…",
-      log: [],
-    };
+    if (showLoading)
+      this.loading = {
+        startedAt: Date.now(),
+        step: "starting…",
+        log: [],
+      };
     const step = (s: string, detail?: string) => {
       if (!isCurrent()) return;
-      this.loading = this.loading
-        ? {
-            ...this.loading,
-            step: s,
-            detail,
-            log: [...this.loading.log, { ts: Date.now(), step: s, detail }],
-          }
-        : null;
+      this.loading =
+        showLoading && this.loading
+          ? {
+              ...this.loading,
+              step: s,
+              detail,
+              log: [...this.loading.log, { ts: Date.now(), step: s, detail }],
+            }
+          : null;
       appLog("info", `loadStore: ${s}${detail ? ` (${detail})` : ""}`);
     };
     try {
@@ -625,7 +640,8 @@ class Workspace {
         );
         void recentSetCount(this.project.project_dir, total);
       }
-      this.loading = null;
+      if (showLoading) this.loading = null;
+      if (this.screen === "app") this.startSyncLoop();
     } catch (e) {
       if (!isCurrent()) return;
       const msg = e instanceof Error ? e.message : String(e);
@@ -642,21 +658,115 @@ class Workspace {
         try {
           await resetIncompatibleDb();
           step("retrying load after recreate");
-          await this.loadStore(false); // retry once on the fresh store
+          await this.loadStore(false, options); // retry once on the fresh store
           return;
         } catch (healErr) {
           this.loadError =
             healErr instanceof Error ? healErr.message : String(healErr);
           appLog("error", `loadStore: heal failed: ${this.loadError}`);
-          this.loading = null;
+          if (showLoading) this.loading = null;
           return;
         }
       }
       this.loadError = msg;
       appLog("error", `loadStore failed: ${msg}`);
       step("failed", msg);
-      this.loading = null;
+      if (showLoading) this.loading = null;
     }
+  }
+
+  private startSyncLoop(): void {
+    if (!isTauri || this.syncLoopRunning || this.screen !== "app") return;
+    const generation = ++this.syncLoopGeneration;
+    this.syncLoopRunning = true;
+    void this.syncLoop(generation);
+  }
+
+  private stopSyncLoop(): void {
+    this.syncLoopGeneration++;
+    this.syncLoopRunning = false;
+    if (this.syncReloadTimer) clearTimeout(this.syncReloadTimer);
+    this.syncReloadTimer = null;
+  }
+
+  private async syncLoop(generation: number): Promise<void> {
+    let consumer = "";
+    let clientId = "";
+    try {
+      [consumer, clientId] = await Promise.all([
+        repo.syncConsumerName(),
+        repo.currentSyncClientId(),
+      ]);
+    } catch (error) {
+      if (generation === this.syncLoopGeneration) {
+        const detail = error instanceof Error ? error.message : String(error);
+        appLog("warn", `sync loop disabled: ${detail}`);
+        this.syncLoopRunning = false;
+      }
+      return;
+    }
+
+    while (
+      generation === this.syncLoopGeneration &&
+      this.syncLoopRunning &&
+      this.screen === "app"
+    ) {
+      try {
+        const messages = await repo.readSyncEvents(
+          consumer,
+          SYNC_QUEUE_WAIT_MS
+        );
+        if (generation !== this.syncLoopGeneration) break;
+        let sawRemote = false;
+        for (const message of messages) {
+          if (!message.event) {
+            appLog(
+              "warn",
+              `sync event ${message.messageId} ignored: invalid payload`
+            );
+            await repo
+              .ackSyncEvent(message.messageId, message.deliveryId)
+              .catch((error) => {
+                const detail =
+                  error instanceof Error ? error.message : String(error);
+                appLog("warn", `sync event ack failed: ${detail}`);
+              });
+            continue;
+          }
+          if (message.event.clientId !== clientId) {
+            sawRemote = true;
+            appLog(
+              "info",
+              `sync event received: ${message.event.kind} ${message.event.entity.type}/${message.event.entity.id}`
+            );
+          }
+          await repo
+            .ackSyncEvent(message.messageId, message.deliveryId)
+            .catch((error) => {
+              const detail =
+                error instanceof Error ? error.message : String(error);
+              appLog("warn", `sync event ack failed: ${detail}`);
+            });
+        }
+        if (sawRemote) this.scheduleSyncReload();
+      } catch (error) {
+        if (generation !== this.syncLoopGeneration) break;
+        const detail = error instanceof Error ? error.message : String(error);
+        appLog("warn", `sync event read failed: ${detail}`);
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      }
+    }
+
+    if (generation === this.syncLoopGeneration) this.syncLoopRunning = false;
+  }
+
+  private scheduleSyncReload(): void {
+    if (this.syncReloadTimer) return;
+    this.syncReloadTimer = setTimeout(() => {
+      this.syncReloadTimer = null;
+      if (this.screen !== "app") return;
+      void this.loadStore(true, { showLoading: false });
+    }, SYNC_RELOAD_DELAY_MS);
   }
 
   async retry(): Promise<void> {

@@ -369,6 +369,64 @@ export async function queuePush(name: string, payload: unknown): Promise<void> {
   if (!r.ok) throw new Error(`QUEUE PUSH ${name}: ${r.error}`);
 }
 
+export interface QueueMessage<T = unknown> {
+  messageId: string;
+  deliveryId?: string;
+  payload: T;
+  consumer?: string;
+  deliveryCount?: number;
+}
+
+function queueMessageFrom<T>(
+  row: Record<string, unknown>
+): QueueMessage<T> | null {
+  const messageId = row.message_id;
+  if (typeof messageId !== "string" || messageId.length === 0) return null;
+  const deliveryId = row.delivery_id;
+  const deliveryCount = row.delivery_count;
+  const consumer = row.consumer;
+  return {
+    messageId,
+    deliveryId: typeof deliveryId === "string" ? deliveryId : undefined,
+    payload: parseMaybeJson(row.payload) as T,
+    consumer: typeof consumer === "string" ? consumer : undefined,
+    deliveryCount:
+      typeof deliveryCount === "number" ? deliveryCount : undefined,
+  };
+}
+
+export async function queueReadWait<T>(
+  name: string,
+  consumer: string,
+  count = 10,
+  waitMs = 15_000
+): Promise<QueueMessage<T>[]> {
+  const safeCount = Math.max(1, Math.min(100, Math.floor(count) || 10));
+  const safeWaitMs = Math.max(0, Math.min(30_000, Math.floor(waitMs) || 0));
+  const r = await rql(
+    `QUEUE READ ${ident(name)} CONSUMER ${ident(
+      consumer
+    )} COUNT ${safeCount} WAIT ${safeWaitMs}ms`
+  );
+  if (!r.ok) throw new Error(`QUEUE READ ${name}: ${r.error}`);
+  return r.records
+    .map((row) => queueMessageFrom<T>(row))
+    .filter((row): row is QueueMessage<T> => row !== null);
+}
+
+export async function queueAck(
+  name: string,
+  messageId: string,
+  deliveryId?: string
+): Promise<void> {
+  const r = await rql(
+    deliveryId
+      ? `QUEUE ACK ${ident(name)} WITH delivery_id = '${esc(deliveryId)}'`
+      : `QUEUE ACK ${ident(name)} '${esc(messageId)}'`
+  );
+  if (!r.ok) throw new Error(`QUEUE ACK ${name}/${messageId}: ${r.error}`);
+}
+
 // --- RedDB documents --------------------------------------------------------
 
 export interface DocumentRecord<T = unknown> {

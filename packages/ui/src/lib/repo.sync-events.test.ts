@@ -80,6 +80,59 @@ describe("project sync events", () => {
     );
   });
 
+  it("reads and acknowledges project sync events through RedDB fanout queue delivery", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "QUEUE READ rr_sync_events CONSUMER rr_client COUNT 20 WAIT 15000ms"
+        )
+          return rqlOk([
+            {
+              message_id: "123",
+              delivery_id: "did-123",
+              payload: {
+                v: 1,
+                id: "evt-1",
+                ts: 1,
+                source: "red-request",
+                clientId: "client-2",
+                kind: "request.saved",
+                entity: { type: "request", id: "r1", parentId: "c1" },
+                payload: {},
+              },
+              consumer: "rr_client",
+              delivery_count: 1,
+            },
+          ]);
+        return rqlOk([{ message: "ok" }]);
+      },
+    });
+
+    const messages = await repo.readSyncEvents("rr_client", 15_000, 20);
+    await repo.ackSyncEvent(messages[0]!.messageId, messages[0]!.deliveryId);
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        messageId: "123",
+        deliveryId: "did-123",
+        event: expect.objectContaining({
+          kind: "request.saved",
+          clientId: "client-2",
+        }),
+      }),
+    ]);
+    expect(queries).toContain(
+      "QUEUE READ rr_sync_events CONSUMER rr_client COUNT 20 WAIT 15000ms"
+    );
+    expect(queries).toContain(
+      "QUEUE ACK rr_sync_events WITH delivery_id = 'did-123'"
+    );
+  });
+
   it("emits metadata-only request save events", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-27T12:00:00Z"));
