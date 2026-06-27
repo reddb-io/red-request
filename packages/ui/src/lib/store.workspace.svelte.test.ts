@@ -119,8 +119,10 @@ function resetWorkspace() {
   ws.transitioning = false;
   ws.transitionPhase = "idle";
   ws.loading = null;
+  ws.openingTarget = null;
   ws.project = null;
   ws.collections = [];
+  ws.network = { proxies: [], profiles: [] };
   ws.activeColId = null;
   ws.activeReq = null;
   ws.environments = [];
@@ -181,6 +183,47 @@ describe("Workspace persistence coordination", () => {
 
     await vi.advanceTimersByTimeAsync(15_000);
     await pending;
+  });
+
+  it("forceOpenRecovery aborts a stuck project open and preserves the target for retry", async () => {
+    vi.useFakeTimers();
+    const { openProject } = await import("./project");
+    vi.mocked(openProject)
+      .mockImplementationOnce(() => new Promise<never>(() => {}))
+      .mockResolvedValueOnce({
+        db_path: "/tmp/stuck-project/.red/request/app.rdb",
+        project_dir: "/tmp/stuck-project",
+        is_project: true,
+        arg_launched: false,
+        name: "stuck-project",
+      });
+
+    const stuckOpen = ws.chooseProject("/tmp/stuck-project");
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    ws.forceOpenRecovery("Project opening was stopped after 11s.");
+
+    expect(ws.transitioning).toBe(false);
+    expect(ws.transitionPhase).toBe("idle");
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toContain("stopped");
+    expect(ws.project?.project_dir).toBe("/tmp/stuck-project");
+    expect(ws.openingTarget).toEqual({
+      kind: "local",
+      dir: "/tmp/stuck-project",
+    });
+
+    const retry = ws.retry();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await retry;
+
+    expect(openProject).toHaveBeenLastCalledWith("/tmp/stuck-project");
+    expect(ws.loadError).toBeNull();
+    expect(ws.openingTarget).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(16_000);
+    await stuckOpen;
+    expect(ws.project?.project_dir).toBe("/tmp/stuck-project");
   });
 
   it("backToSelector invalidates a stuck load so stale results cannot repopulate the app", async () => {
@@ -312,6 +355,11 @@ describe("Workspace persistence coordination", () => {
     );
 
     const pending = ws.init().then(() => "resolved");
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.ready).toBe(true);
+    expect(ws.screen).toBe("app");
+    expect(ws.loading?.step).toBe("running migrations");
 
     await vi.advanceTimersByTimeAsync(16_000);
 

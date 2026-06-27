@@ -24,6 +24,7 @@
   let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
     null
   );
+  let now = $state(Date.now());
 
   function waitForPaint(): Promise<void> {
     return new Promise((resolve) => {
@@ -40,6 +41,9 @@
 
   onMount(() => {
     void ws.init();
+    const tick = setInterval(() => {
+      now = Date.now();
+    }, 1000);
 
     // Durability net for the debounced autosave: a pending edit must reach reddb before
     // the app loses focus, hides, or closes — otherwise closing within the debounce
@@ -84,9 +88,16 @@
     return () => {
       window.removeEventListener("blur", flush);
       document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(tick);
       unlistenClose?.();
     };
   });
+
+  const loadElapsedMs = $derived(
+    ws.loading ? Math.max(0, now - ws.loading.startedAt) : 0
+  );
+  const loadElapsedSeconds = $derived(Math.floor(loadElapsedMs / 1000));
+  const loadIsSlow = $derived(loadElapsedMs >= 10_000);
 
   // Autosave: persist the active request a short beat after the user stops
   // editing (URL, params, headers, body, auth…), so edits survive a reload or
@@ -377,7 +388,7 @@
           <div class="w-full max-w-md">
             <div class="mx-auto mb-4 grid h-10 w-10 place-items-center rounded-full bg-[var(--color-brand)]/15 text-[var(--color-brand)]">
               <span class="mono text-xs font-bold">
-                {Math.floor((Date.now() - ws.loading.startedAt) / 1000)}s
+                {loadElapsedSeconds}s
               </span>
             </div>
             <h1 class="mb-1 text-base font-semibold text-fg-strong">
@@ -401,13 +412,39 @@
                 </li>
               {/each}
             </ol>
+            {#if loadIsSlow}
+              <div class="mx-auto mt-4 max-w-sm rounded border border-red-500/30 bg-red-500/10 p-3 text-left">
+                <p class="mb-1 text-xs font-semibold text-red-300">
+                  This is taking longer than expected.
+                </p>
+                <p class="text-[11px] leading-5 text-fg-muted">
+                  You can stop the stuck open, export a crash report, retry the same target,
+                  or return to the project picker without waiting for the old operation.
+                </p>
+              </div>
+            {/if}
             <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
               <Button onclick={() => ws.backToSelector()} size="xs" variant="outline">
-                Cancel
+                Choose another project
+              </Button>
+              <Button onclick={() => ws.retry()} size="xs" variant="outline">
+                Retry opening
               </Button>
               <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
                 Export crash report
               </Button>
+              {#if loadIsSlow}
+                <Button
+                  onclick={() =>
+                    ws.forceOpenRecovery(
+                      `Project opening was stopped after ${loadElapsedSeconds}s at step: ${ws.loading?.step ?? "unknown"}.`
+                    )}
+                  size="xs"
+                  variant="ghost"
+                >
+                  Stop waiting
+                </Button>
+              {/if}
               {#if ws.project?.project_dir}
                 <Button
                   onclick={() => ws.rebuildStore()}
@@ -416,6 +453,23 @@
                   title="Back up app.rdb and recreate from scratch"
                 >
                   Rebuild database
+                </Button>
+              {/if}
+              {#if ws.recoveryProjectDir}
+                <Button
+                  onclick={() => {
+                    if (
+                      confirm(
+                        "Delete this project's .red/request data and return to the project picker? This cannot be undone."
+                      )
+                    )
+                      void ws.deleteProjectData();
+                  }}
+                  size="xs"
+                  variant="ghost"
+                  title="Deletes only this project's .red/request data, not the source folder"
+                >
+                  Delete local data
                 </Button>
               {/if}
             </div>

@@ -4,7 +4,13 @@
 // and surface the error with a Retry / Reload button.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { collectionFileSchema, newRequest } from "@red-request/core";
-import { render, screen, waitFor } from "@testing-library/svelte";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/svelte";
 
 vi.mock("./tauri", () => ({ isTauri: true }));
 vi.mock("./project", () => ({
@@ -73,10 +79,23 @@ vi.mock("$lib/components/HomeView.svelte", () => ({
 }));
 
 import Page from "../routes/+page.svelte";
+import { ws } from "./store.svelte";
 
 describe("+page error boundary", () => {
   beforeEach(() => {
+    cleanup();
     document.body.innerHTML = "";
+    ws.ready = false;
+    ws.bridgeMissing = false;
+    ws.loadError = null;
+    ws.closing = false;
+    ws.screen = "selector";
+    ws.transitioning = false;
+    ws.transitionPhase = "idle";
+    ws.loading = null;
+    ws.openingTarget = null;
+    ws.project = null;
+    ws.view = "requests";
   });
 
   it("surfaces a synthetic HomeView crash instead of going blank", async () => {
@@ -114,10 +133,75 @@ describe("+page error boundary", () => {
       expect(document.body.textContent).toContain("running migrations");
     });
     expect(screen.getByLabelText("Close window")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Choose another project" })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry opening" })).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Export crash report" })
     ).toBeTruthy();
+  });
+
+  it("offers strong recovery actions when project opening stays stuck behind the transition", async () => {
+    const project = await import("./project");
+    const storeMod = await import("./store.svelte");
+    vi.mocked(project.projectInfo).mockResolvedValueOnce({
+      db_path: "/tmp/fake/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: null,
+    });
+    render(Page);
+
+    await waitFor(() => {
+      expect(storeMod.ws.ready).toBe(true);
+      expect(storeMod.ws.loading).toBeNull();
+    });
+
+    storeMod.ws.ready = true;
+    storeMod.ws.screen = "app";
+    storeMod.ws.project = {
+      db_path: "/tmp/fake/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: "fake",
+    };
+    storeMod.ws.transitioning = true;
+    storeMod.ws.transitionPhase = "hold";
+    storeMod.ws.loading = {
+      startedAt: Date.now() - 12_000,
+      step: "opening database file",
+      log: [{ ts: Date.now() - 12_000, step: "opening database file" }],
+    };
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain(
+        "This is taking longer than expected"
+      );
+    });
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Choose another project" })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry opening" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop waiting" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Delete local data" })
+    ).toBeTruthy();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
+
+    await waitFor(() => {
+      expect(storeMod.ws.transitioning).toBe(false);
+      expect(storeMod.ws.loading).toBeNull();
+      expect(document.body.textContent).toContain(
+        "Project opening was stopped"
+      );
+    });
+    expect(document.querySelector(".iris")).toBeNull();
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
   });
 
   it("prioritizes project recovery over a stale loading overlay", async () => {
