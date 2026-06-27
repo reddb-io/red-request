@@ -1,0 +1,223 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mockIPC } from "@tauri-apps/api/mocks";
+import {
+  newRequest,
+  storedEnvironmentSchema,
+  type RequestDefinition,
+} from "@red-request/core";
+import * as repo from "./repo";
+
+const reply = (status: number, body: unknown) => ({
+  status,
+  body: typeof body === "string" ? body : JSON.stringify(body),
+});
+
+function rqlOk(records: Array<Record<string, unknown>> = []) {
+  return reply(200, {
+    ok: true,
+    data: {
+      columns: Object.keys(records[0] ?? {}),
+      records,
+    },
+  });
+}
+
+function request(id: string, patch: Partial<RequestDefinition> = {}) {
+  return { ...newRequest(id), ...patch };
+}
+
+function ipc(handlers: {
+  rql?: (query: string) => unknown;
+  request?: (method: string, path: string, body: string | null) => unknown;
+}) {
+  mockIPC((cmd, args) => {
+    const a = args as Record<string, unknown>;
+    if (cmd === "reddb_rql")
+      return handlers.rql?.(a.query as string) ?? rqlOk([]);
+    if (cmd === "reddb_request")
+      return (
+        handlers.request?.(
+          a.method as string,
+          a.path as string,
+          (a.body as string | null) ?? null
+        ) ?? null
+      );
+    return null;
+  });
+}
+
+function syncPayload(query: string): Record<string, unknown> {
+  const prefix = "QUEUE PUSH rr_sync_events ";
+  expect(query.startsWith(prefix)).toBe(true);
+  return JSON.parse(query.slice(prefix.length)) as Record<string, unknown>;
+}
+
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
+
+describe("project sync events", () => {
+  it("creates the durable fanout queue during store boot", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT model FROM red.collections WHERE name = 'rr_requests' LIMIT 1"
+        )
+          return rqlOk([{ model: "document" }]);
+        return rqlOk([]);
+      },
+    });
+
+    await repo.ensureStore();
+
+    expect(queries).toContain(
+      "CREATE QUEUE IF NOT EXISTS rr_sync_events FANOUT"
+    );
+  });
+
+  it("emits metadata-only request save events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-27T12:00:00Z"));
+    const queries: string[] = [];
+    const req = request("r1", {
+      name: "Create user",
+      method: "POST",
+      url: "https://api.local/users?token=secret",
+      body: { type: "json", content: '{"password":"secret"}', fields: [] },
+    });
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r1' LIMIT 1"
+        )
+          return rqlOk([]);
+        if (query === "GET CONFIG red_request settings_sync_client_id")
+          return rqlOk([{ value: "client-1" }]);
+        return rqlOk([]);
+      },
+      request: () => reply(200, { ok: true, rid: 7 }),
+    });
+
+    await repo.saveRequest("c1", req);
+
+    const pushed = queries.filter((query) =>
+      query.startsWith("QUEUE PUSH rr_sync_events ")
+    );
+    expect(pushed).toHaveLength(1);
+    expect(syncPayload(pushed[0]!)).toMatchObject({
+      v: 1,
+      source: "red-request",
+      clientId: "client-1",
+      kind: "request.saved",
+      entity: {
+        type: "request",
+        id: "r1",
+        parentId: "c1",
+        name: "Create user",
+      },
+      payload: {
+        collectionId: "c1",
+        requestId: "r1",
+        requestName: "Create user",
+        requestKind: "http",
+        method: "POST",
+        folder: "",
+      },
+    });
+    expect(pushed[0]).not.toContain("password");
+    expect(pushed[0]).not.toContain("token=secret");
+  });
+
+  it("does not leak secret values into queue events", async () => {
+    const queries: string[] = [];
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {},
+    });
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (query === "GET CONFIG red_request settings_sync_client_id")
+          return rqlOk([{ value: "client-1" }]);
+        return rqlOk([{ message: "ok" }]);
+      },
+    });
+
+    await repo.saveEnvironmentSecret(env, "API_KEY", "sk_live");
+
+    const pushed = queries.filter((query) =>
+      query.startsWith("QUEUE PUSH rr_sync_events ")
+    );
+    expect(pushed).toHaveLength(1);
+    expect(syncPayload(pushed[0]!)).toMatchObject({
+      kind: "secret.saved",
+      entity: {
+        type: "secret",
+        id: "dev:API_KEY",
+        parentId: "dev",
+        name: "API_KEY",
+      },
+      payload: {
+        environment: "dev",
+        secretName: "API_KEY",
+      },
+    });
+    expect(pushed[0]).not.toContain("sk_live");
+  });
+
+  it("emits collection delete events after deleting owned rows", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (query === "SELECT rid, body FROM rr_requests")
+          return rqlOk([
+            {
+              rid: 3,
+              body: {
+                record_type: "request",
+                app_key: "c1.r1",
+                collection_id: "c1",
+                request_id: "r1",
+                request: request("r1"),
+              },
+            },
+          ]);
+        if (query === "LIST KV rr_history")
+          return rqlOk([
+            {
+              key: "h1",
+              value: JSON.stringify({ collectionId: "c1" }),
+            },
+          ]);
+        if (query === "GET CONFIG red_request settings_sync_client_id")
+          return rqlOk([{ value: "client-1" }]);
+        return rqlOk([]);
+      },
+      request: () => reply(200, { ok: true }),
+    });
+
+    await repo.deleteCollection("c1");
+
+    expect(queries).toContain("KV DELETE rr_collections.'c1'");
+    const pushed = queries.filter((query) =>
+      query.startsWith("QUEUE PUSH rr_sync_events ")
+    );
+    expect(syncPayload(pushed[0]!)).toMatchObject({
+      kind: "collection.deleted",
+      entity: { type: "collection", id: "c1" },
+      payload: { collectionId: "c1" },
+    });
+  });
+});

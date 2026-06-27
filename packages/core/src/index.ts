@@ -18,3 +18,4 @@ export * from "./export-postman.js";
 export * from "./export-insomnia.js";
 export * from "./proxy.js";
 export * from "./graphql.js";
+export * from "./sync.js";
