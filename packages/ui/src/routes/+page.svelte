@@ -401,6 +401,24 @@
                 </li>
               {/each}
             </ol>
+            <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <Button onclick={() => ws.backToSelector()} size="xs" variant="outline">
+                Cancel
+              </Button>
+              <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
+                Export crash report
+              </Button>
+              {#if ws.project?.project_dir}
+                <Button
+                  onclick={() => ws.rebuildStore()}
+                  size="xs"
+                  variant="ghost"
+                  title="Back up app.rdb and recreate from scratch"
+                >
+                  Rebuild database
+                </Button>
+              {/if}
+            </div>
           </div>
         </div>
       {:else if ws.bridgeMissing}

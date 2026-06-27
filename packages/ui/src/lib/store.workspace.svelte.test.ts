@@ -154,6 +154,58 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toContain("/tmp/stuck-project");
   });
 
+  it("reveals the loading recovery screen while project open is still stuck", async () => {
+    vi.useFakeTimers();
+    const { openProject } = await import("./project");
+    vi.mocked(openProject).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    const pending = ws.chooseProject("/tmp/stuck-project");
+
+    await vi.advanceTimersByTimeAsync(1_100);
+
+    expect(ws.screen).toBe("app");
+    expect(ws.loading?.step).toMatch(/switching/i);
+    expect(ws.transitioning).toBe(false);
+    expect(ws.transitionPhase).toBe("idle");
+    expect(ws.loadError).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    await pending;
+  });
+
+  it("backToSelector invalidates a stuck load so stale results cannot repopulate the app", async () => {
+    let finishNetwork!: (
+      value: Awaited<ReturnType<typeof repo.loadNetwork>>
+    ) => void;
+    vi.mocked(repo.loadNetwork).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishNetwork = resolve;
+        })
+    );
+
+    const pending = ws.loadStore();
+    await vi.waitUntil(
+      () => vi.mocked(repo.loadNetwork).mock.calls.length === 1
+    );
+
+    ws.backToSelector();
+    finishNetwork({
+      proxies: [],
+      profiles: [
+        { id: "stale", name: "stale", userAgent: "", headers: [], proxyId: "" },
+      ],
+    });
+    await pending;
+
+    expect(ws.screen).toBe("selector");
+    expect(ws.network.profiles).toEqual([]);
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toBeNull();
+  });
+
   it("loadStore times out a stuck internal boot step and exposes recovery actions", async () => {
     vi.useFakeTimers();
     vi.mocked(repo.runMigrations).mockImplementationOnce(

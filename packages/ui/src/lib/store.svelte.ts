@@ -314,57 +314,50 @@ class Workspace {
       step: `switching to ${dir ?? "global"}…`,
       log: [{ ts: Date.now(), step: `switching to ${dir ?? "global"}…` }],
     };
-    const ready = (async () => {
-      const nextProject = await openProject(dir).catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
+    const ready = withTimeout(
+      (async () => {
+        const nextProject = await openProject(dir).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          appLog(
+            "error",
+            `chooseProject: open_project(${dir ?? "global"}) failed: ${msg}`
+          );
+          throw new Error(msg);
+        });
+        if (generation !== this.projectOpenGeneration) return;
+        this.project = nextProject;
         appLog(
-          "error",
-          `chooseProject: open_project(${dir ?? "global"}) failed: ${msg}`
+          "info",
+          `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
         );
-        throw new Error(msg);
-      });
-      if (generation !== this.projectOpenGeneration) return;
-      this.project = nextProject;
-      appLog(
-        "info",
-        `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
-      );
-      await this.loadStore();
-    })();
+        await this.loadStore();
+      })(),
+      PROJECT_OPEN_TIMEOUT_MS,
+      `Opening project timed out after ${Math.round(
+        PROJECT_OPEN_TIMEOUT_MS / 1000
+      )}s: ${dir ?? "global"}`
+    ).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error })
+    );
 
     try {
       await delay(CLOSE_MS);
-      this.transitionPhase = "hold";
-      appLog(
-        "debug",
-        "chooseProject: awaiting ready (openProject+loadStore) under black"
-      );
-      await Promise.race([
-        ready,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Opening project timed out after ${Math.round(
-                    PROJECT_OPEN_TIMEOUT_MS / 1000
-                  )}s: ${dir ?? "global"}`
-                )
-              ),
-            PROJECT_OPEN_TIMEOUT_MS
-          )
-        ),
-      ]); // black covers the swap below
-      appLog(
-        "debug",
-        "chooseProject: ready resolved → screen=app, opening iris"
-      );
       this.screen = "app";
+      this.transitionPhase = "hold";
       await delay(HOLD_MS);
+      appLog("debug", "chooseProject: opening iris over loading screen");
       this.transitionPhase = "opening";
       await delay(OPEN_MS);
+      this.transitioning = false;
+      this.transitionPhase = "idle";
+      appLog("debug", "chooseProject: waiting for project readiness");
+      const result = await ready;
+      if (generation !== this.projectOpenGeneration) return;
+      if (!result.ok) throw result.error;
     } catch (e) {
       ++this.projectOpenGeneration;
+      ++this.loadStoreGeneration;
       const msg = e instanceof Error ? e.message : String(e);
       this.loadError = msg;
       this.loading = null;
@@ -455,6 +448,7 @@ class Workspace {
   /** Return to the project selector. */
   backToSelector(): void {
     this.projectOpenGeneration++;
+    this.loadStoreGeneration++;
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.loading = null;

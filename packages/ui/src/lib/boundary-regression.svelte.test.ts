@@ -4,7 +4,7 @@
 // and surface the error with a Retry / Reload button.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { collectionFileSchema, newRequest } from "@red-request/core";
-import { render, waitFor, fireEvent } from "@testing-library/svelte";
+import { render, screen, waitFor } from "@testing-library/svelte";
 
 vi.mock("./tauri", () => ({ isTauri: true }));
 vi.mock("./project", () => ({
@@ -96,5 +96,23 @@ describe("+page error boundary", () => {
     } finally {
       (storeMod.ws as unknown as { view: string }).view = "requests";
     }
+  });
+
+  it("keeps titlebar and recovery actions visible during a stuck project load", async () => {
+    const repo = await import("./repo");
+    vi.mocked(repo.runMigrations).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    render(Page);
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("running migrations");
+    });
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Export crash report" })
+    ).toBeTruthy();
   });
 });
