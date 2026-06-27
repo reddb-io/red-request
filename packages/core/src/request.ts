@@ -10,11 +10,15 @@ import {
 export const httpMethodSchema = z.enum(HTTP_METHODS);
 export type HttpMethod = z.infer<typeof httpMethodSchema>;
 
-/** A header / query-param entry. `enabled: false` keeps it in the file but skips sending. */
+/** A header / query-param entry. `enabled: false` keeps it in the file but skips sending.
+ *  `fromProfile` flags rows that were merged from a bound Profile — the UI renders them
+ *  with a brand-tinted pill so the user knows which headers come from the profile vs.
+ *  which are request-local. Set by `Workspace.syncProfileHeaders`. */
 export const kvSchema = z.object({
   name: z.string(),
   value: z.string().default(""),
   enabled: z.boolean().default(true),
+  fromProfile: z.boolean().optional(),
 });
 export type Kv = z.infer<typeof kvSchema>;
 

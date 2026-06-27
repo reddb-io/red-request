@@ -15,7 +15,15 @@
   import type { RequestDefinition } from "@red-request/core/request";
   import { resolveRequest } from "@red-request/core/resolver";
 
-  let { onClose }: { onClose: () => void } = $props();
+  // Two render modes:
+//   • `embedded: true` — used as a tab in the Request panel. No modal
+//     wrapper, no close button. Tab styling owns the chrome.
+//   • `embedded: false` (default) — used as a modal. Wraps the body in
+//     <Modal> + a close button.
+  let { onClose, embedded = false }: {
+    onClose?: () => void;
+    embedded?: boolean;
+  } = $props();
 
   let lang = $state<SnippetLang>("curl");
   let copied = $state(false);
@@ -52,7 +60,7 @@
   }
 </script>
 
-<Modal {onClose} class="flex w-[680px] max-w-[92vw] flex-col rounded-xl">
+{#snippet body()}
   <div class="flex items-center gap-2 border-b border-border px-4 py-2">
     <h2 class="text-sm font-semibold text-fg">Code</h2>
     <Select
@@ -64,8 +72,31 @@
     <Button onclick={copy} variant="outline" size="xs" class="ml-auto"
       >{copied ? "Copied ✓" : "Copy"}</Button
     >
-    <Button onclick={onClose} variant="ghost" size="icon-xs" aria-label="close">✕</Button>
   </div>
   <pre
-    class="mono max-h-[60vh] overflow-auto p-4 text-xs whitespace-pre text-fg">{snippet}</pre>
-</Modal>
+    class="mono flex-1 overflow-auto p-4 text-xs whitespace-pre text-fg">{snippet}</pre>
+{/snippet}
+
+{#if embedded}
+  <div class="flex h-full flex-col overflow-hidden">
+    {@render body()}
+  </div>
+{:else if onClose}
+  <Modal {onClose} class="flex w-[680px] max-w-[92vw] flex-col rounded-xl">
+    <div class="flex items-center gap-2 border-b border-border px-4 py-2">
+      <h2 class="text-sm font-semibold text-fg">Code</h2>
+      <Select
+        bind:value={lang}
+        items={SNIPPET_LANGS.map((l) => ({ value: l.id, label: l.label }))}
+        ariaLabel="language"
+        class="ml-2 w-auto"
+      />
+      <Button onclick={copy} variant="outline" size="xs" class="ml-auto"
+        >{copied ? "Copied ✓" : "Copy"}</Button
+      >
+      <Button onclick={onClose} variant="ghost" size="icon-xs" aria-label="close">✕</Button>
+    </div>
+    <pre
+      class="mono max-h-[60vh] overflow-auto p-4 text-xs whitespace-pre text-fg">{snippet}</pre>
+  </Modal>
+{/if}

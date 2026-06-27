@@ -33,8 +33,11 @@
   {#each items as item, i (i)}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="flex items-center gap-2 rounded {dragIndex === i ? 'opacity-40' : ''} {overIndex ===
-        i && dragIndex !== i
+      class="flex items-center gap-2 rounded {item.fromProfile
+        ? 'bg-[var(--color-brand)]/8 ring-1 ring-[var(--color-brand)]/40'
+        : ''} {dragIndex === i
+        ? 'opacity-40'
+        : ''} {overIndex === i && dragIndex !== i
         ? 'ring-1 ring-[var(--color-brand)]'
         : ''}"
       ondragover={(e) => {
@@ -73,6 +76,15 @@
       <div class="flex-1">
         <VarField bind:value={item.value} known={ws.knownVars} values={ws.varTitles} dense placeholder="value" />
       </div>
+      {#if item.fromProfile}
+        <span
+          class="rounded bg-[var(--color-brand)]/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-[var(--color-brand)] uppercase"
+          title="Injected by the bound profile. Edit the value to override (badge clears)."
+          aria-label="from profile"
+        >
+          profile
+        </span>
+      {/if}
       <Button
         onclick={() => removeAt(i)}
         variant="ghost"

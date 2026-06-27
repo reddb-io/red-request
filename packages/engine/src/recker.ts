@@ -3,6 +3,7 @@
 // (`recker/client`, `recker/plugins`) — importing the root barrel throws on a missing
 // `raffel` package (packaging bug in 1.0.103).
 import { createClient } from "recker/client";
+import { inspectTLS } from "recker/utils/tls-inspector";
 import {
   basicAuthPlugin,
   bearerAuthPlugin,
@@ -167,7 +168,49 @@ async function mapResponse(
     timings: res.timings,
   };
   if (!isText && buf.length > 0) result.bodyBase64 = buf.toString("base64");
+  // TLS panel needs handshake details (protocol/cipher/cert/SAN). recker's HTTP
+  // client surfaces only the response, so we open a parallel tls inspector
+  // connection against the same origin. Cost: ~1 extra TLS handshake per
+  // https request; worth it for the diagnostic value.
+  if (result.url.startsWith("https://")) {
+    try {
+      const u = new URL(result.url);
+      const info = await inspectTLS(u.hostname, u.port ? Number(u.port) : 443);
+      result.meta = {
+        ...(result.meta ?? {}),
+        tls: {
+          version: info.protocol,
+          cipher: info.cipher
+            ? `${info.cipher.name} (${info.cipher.version})`
+            : null,
+          sni: u.hostname,
+          cert: {
+            subject: formatDN(info.subject),
+            issuer: formatDN(info.issuer),
+            validFrom: info.validFrom.toISOString(),
+            validTo: info.validTo.toISOString(),
+            san: info.altNames ?? [],
+          },
+        },
+      };
+    } catch {
+      /* inspector failed (e.g. server requires SNI we couldn't compute) —
+       * leave meta.tls unset so the TLS panel shows its "metadata unavailable"
+       * hint instead of pretending we know something we don't. */
+    }
+  }
   return result;
+}
+
+function formatDN(
+  dn: Record<string, string> | string | null | undefined
+): string {
+  if (!dn) return "";
+  if (typeof dn === "string") return dn;
+  // OpenSSL-style DN: pair in display order, RFC 4514 style.
+  return Object.entries(dn)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(", ");
 }
 
 /** Dispatch an already variable-resolved request through recker. Never throws.

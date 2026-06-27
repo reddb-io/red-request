@@ -1,5 +1,5 @@
 // Generate a runnable code snippet from an HTTP request — curl / HTTPie / JS fetch / axios /
-// Python requests / Go. Pass an already-resolved RequestDefinition (so {{vars}} are real).
+// Python requests / Go / recker CLI. Pass an already-resolved RequestDefinition (so {{vars}} are real).
 import type { RequestDefinition, Kv } from "./request.js";
 import type { AuthConfig } from "./auth.js";
 
@@ -9,7 +9,8 @@ export type SnippetLang =
   | "fetch"
   | "axios"
   | "python"
-  | "go";
+  | "go"
+  | "recker";
 
 export const SNIPPET_LANGS: { id: SnippetLang; label: string }[] = [
   { id: "curl", label: "cURL" },
@@ -18,6 +19,7 @@ export const SNIPPET_LANGS: { id: SnippetLang; label: string }[] = [
   { id: "axios", label: "JS · axios" },
   { id: "python", label: "Python · requests" },
   { id: "go", label: "Go" },
+  { id: "recker", label: "recker CLI (rek)" },
 ];
 
 interface HttpModel {
@@ -215,6 +217,47 @@ ${hdrs}
 }`;
 }
 
+/**
+ * recker CLI (the `rek` binary) — curl replacement with better DX.
+ * `rek <url>` does GET by default; explicit method via positional arg.
+ * Headers: `-H 'Key: Value'`. Body: `--json '{...}'` or `-d '<text>'`.
+ * Auth: `-u user:pass` for basic, `-H 'Authorization: Bearer …'` otherwise.
+ * Install with `npm install -g recker` (see https://forattini-dev.github.io/recker).
+ */
+function recker(m: HttpModel): string {
+  // Start by lifting basic-auth out of the Authorization header so we can
+  // render it as `-u user:pass` (friendlier copy-paste than base64). The
+  // base64 decode must happen in the same environment where the snippet
+  // is shown (browser / Node / Bun), so use the universal atob.
+  const headers = [...m.headers];
+  const flags: string[] = [];
+  for (let i = 0; i < headers.length; i++) {
+    const h = headers[i]!;
+    if (
+      h.name.toLowerCase() === "authorization" &&
+      h.value.startsWith("Basic ")
+    ) {
+      try {
+        const decoded = atob(h.value.slice("Basic ".length).trim());
+        flags.push(`-u ${sq(decoded)}`);
+        continue; // skip emitting the original Authorization header
+      } catch {
+        /* malformed base64 — fall through and emit the header as-is */
+      }
+    }
+    flags.push(`-H ${sq(`${h.name}: ${h.value}`)}`);
+  }
+  if (m.body != null) {
+    if (m.contentType?.includes("json")) flags.push(`--json ${sq(m.body)}`);
+    else flags.push(`-d ${sq(m.body)}`);
+  }
+  // GET is the default verb — only emit it explicitly when the user might
+  // otherwise miss it (i.e. when there are flags below).
+  const verb =
+    m.method.toUpperCase() === "GET" ? "" : `${m.method.toUpperCase()} `;
+  return `# recker: npm install -g recker (https://forattini-dev.github.io/recker)\nrek ${verb}${m.url}${flags.length ? " " + flags.join(" ") : ""}`;
+}
+
 const pyStr = (s: string) =>
   `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 const pyDict = (h: { name: string; value: string }[]) =>
@@ -227,6 +270,7 @@ const EMITTERS: Record<SnippetLang, (m: HttpModel) => string> = {
   axios,
   python,
   go,
+  recker,
 };
 
 /** Generate a snippet for an (already variable-resolved) HTTP request. */

@@ -248,6 +248,106 @@ describe("Workspace persistence coordination", () => {
     expect(repo.saveEnvironmentOrder).toHaveBeenCalledWith(["prod"]);
   });
 
+  it("syncProfileHeaders mirrors the profile into activeReq.headers with fromProfile badge", async () => {
+    // Set up a project with one collection, one request, and one profile
+    // that injects a UA + custom header. The request has neither.
+    const profile = {
+      id: "pf-1",
+      name: "work",
+      userAgent: "red-request/test",
+      headers: [{ name: "X-Workspace", value: "engineering", enabled: true }],
+      proxyId: "",
+    };
+    const colId = "c1";
+    const reqId = "r1";
+    ws.network.profiles = [profile];
+    ws.collections = [
+      {
+        id: colId,
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          vars: {},
+          order: [reqId],
+          folders: [],
+          defaultProfileId: profile.id,
+        }),
+        requests: [
+          {
+            ...request(reqId),
+            headers: [],
+            profileId: "",
+          },
+        ],
+        environments: [],
+      },
+    ];
+    ws.selectRequest(colId, reqId);
+
+    // selectRequest already calls syncProfileHeaders → UA + X-Workspace should
+    // now be in activeReq.headers, each tagged fromProfile: true.
+    expect(ws.activeReq?.headers).toContainEqual(
+      expect.objectContaining({
+        name: "User-Agent",
+        value: "red-request/test",
+        fromProfile: true,
+      })
+    );
+    expect(ws.activeReq?.headers).toContainEqual(
+      expect.objectContaining({
+        name: "X-Workspace",
+        value: "engineering",
+        fromProfile: true,
+      })
+    );
+
+    // User edits the X-Workspace value → badge clears (now request-local).
+    const wsHeader = ws.activeReq!.headers.find(
+      (h) => h.name === "X-Workspace"
+    );
+    wsHeader!.value = "engineering-overridden";
+    ws.syncProfileHeaders();
+    expect(ws.activeReq!.headers).toContainEqual(
+      expect.objectContaining({
+        name: "X-Workspace",
+        value: "engineering-overridden",
+        fromProfile: false,
+      })
+    );
+
+    // Profile changes its header value → re-sync restores the badge.
+    profile.headers = [{ name: "X-Workspace", value: "design", enabled: true }];
+    ws.syncProfileHeaders();
+    // The user's overridden row stays (still no badge); the profile value
+    // did not override a user edit.
+    expect(ws.activeReq!.headers).toContainEqual(
+      expect.objectContaining({
+        name: "X-Workspace",
+        value: "engineering-overridden",
+        fromProfile: false,
+      })
+    );
+
+    // A brand-new profile header should land as fromProfile. Replace the whole
+    // profiles array so Svelte's $state proxy observes the change.
+    ws.network.profiles = [
+      {
+        ...profile,
+        headers: [
+          { name: "X-Workspace", value: "design", enabled: true },
+          { name: "X-New", value: "1", enabled: true },
+        ],
+      },
+    ];
+    ws.syncProfileHeaders();
+    expect(ws.activeReq!.headers).toContainEqual(
+      expect.objectContaining({
+        name: "X-New",
+        value: "1",
+        fromProfile: true,
+      })
+    );
+  });
+
   it("rebuildStore wipes the on-disk store and reloads without re-healing", async () => {
     const { resetIncompatibleDb } = await import("./project");
     vi.mocked(resetIncompatibleDb).mockResolvedValue(undefined);
