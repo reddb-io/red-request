@@ -72,6 +72,7 @@ import {
 /** Reserved name for the always-on base environment (vars + secrets) that every
  *  named environment layers on top of. Stored alongside the others. */
 const GLOBALS_ENV = "Globals";
+const PROJECT_OPEN_TIMEOUT_MS = 15_000;
 export type AppView = "home" | "requests" | "settings" | "database";
 
 const emptyGlobals = (): StoredEnvironment =>
@@ -132,6 +133,7 @@ class Workspace {
   running = $state(false);
   runResult = $state<RunnerResult | null>(null);
   runError = $state<string | null>(null);
+  private projectOpenGeneration = 0;
 
   /** History for the active request (newest first) — powers the Timings panel. */
   reqHistory = $state<HistoryEntry[]>([]);
@@ -260,6 +262,7 @@ class Workspace {
    *  the selector→workspace cut is never visible. Phase durations below must stay in
    *  sync with ProjectTransition.svelte's CSS transitions. */
   async chooseProject(dir: string | null): Promise<void> {
+    const generation = ++this.projectOpenGeneration;
     // Persist any pending edit on the CURRENT project before we swap reddb.
     await this.flushSave();
     // A hair longer than the matching CSS transitions so each extreme is reached.
@@ -291,14 +294,16 @@ class Workspace {
       log: [{ ts: Date.now(), step: `switching to ${dir ?? "global"}…` }],
     };
     const ready = (async () => {
-      this.project = await openProject(dir).catch((e) => {
-        this.loadError = e instanceof Error ? e.message : String(e);
+      const nextProject = await openProject(dir).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
         appLog(
           "error",
-          `chooseProject: open_project(${dir ?? "global"}) failed: ${this.loadError}`
+          `chooseProject: open_project(${dir ?? "global"}) failed: ${msg}`
         );
-        return this.project;
+        throw new Error(msg);
       });
+      if (generation !== this.projectOpenGeneration) return;
+      this.project = nextProject;
       appLog(
         "info",
         `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
@@ -313,7 +318,22 @@ class Workspace {
         "debug",
         "chooseProject: awaiting ready (openProject+loadStore) under black"
       );
-      await ready; // black covers the swap below
+      await Promise.race([
+        ready,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Opening project timed out after ${Math.round(
+                    PROJECT_OPEN_TIMEOUT_MS / 1000
+                  )}s: ${dir ?? "global"}`
+                )
+              ),
+            PROJECT_OPEN_TIMEOUT_MS
+          )
+        ),
+      ]); // black covers the swap below
       appLog(
         "debug",
         "chooseProject: ready resolved → screen=app, opening iris"
@@ -322,6 +342,22 @@ class Workspace {
       await delay(HOLD_MS);
       this.transitionPhase = "opening";
       await delay(OPEN_MS);
+    } catch (e) {
+      ++this.projectOpenGeneration;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.loadError = msg;
+      this.loading = null;
+      this.project =
+        this.project ??
+        ({
+          db_path: dir ?? "global",
+          project_dir: dir,
+          is_project: dir !== null,
+          arg_launched: false,
+          name: null,
+        } satisfies ProjectInfo);
+      this.screen = "app";
+      appLog("error", `chooseProject failed: ${msg}`);
     } finally {
       this.transitioning = false;
       this.transitionPhase = "idle";
@@ -329,8 +365,38 @@ class Workspace {
     }
   }
 
+  async chooseConnectionString(raw: string): Promise<void> {
+    const value = raw.trim();
+    const supported = /^(reds?|https?|docker):\/\//i.test(value);
+    this.projectOpenGeneration++;
+    this.transitioning = false;
+    this.transitionPhase = "idle";
+    this.loading = null;
+    this.screen = "app";
+    this.view = "requests";
+    this.activeColId = null;
+    this.activeReq = null;
+    this.collections = [];
+    this.project = {
+      db_path: value,
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      name: "Remote RedDB",
+    };
+    this.loadError = supported
+      ? `Remote RedDB connection string recognized but not wired in this build yet: ${value}. This path needs native EmbeddedDb support for remote red connect targets before it can safely open shared projects.`
+      : `Unsupported RedDB connection string: ${value}`;
+    appLog("warn", `chooseConnectionString blocked: ${this.loadError}`);
+  }
+
   /** Return to the project selector. */
   backToSelector(): void {
+    this.projectOpenGeneration++;
+    this.transitioning = false;
+    this.transitionPhase = "idle";
+    this.loading = null;
+    this.loadError = null;
     this.screen = "selector";
   }
 
@@ -363,6 +429,33 @@ class Workspace {
       this.loadError = e instanceof Error ? e.message : String(e);
     });
     this.backToSelector();
+  }
+
+  async exportCrashReport(): Promise<string | null> {
+    const path = await saveDialog({
+      defaultPath: `red-request-open-crash-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")}.json`,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (!path) return null;
+    const report = {
+      kind: "red-request-project-open-crash",
+      createdAt: new Date().toISOString(),
+      project: $state.snapshot(this.project),
+      screen: this.screen,
+      view: this.view,
+      transitioning: this.transitioning,
+      transitionPhase: this.transitionPhase,
+      loadError: this.loadError,
+      loading: this.loading ? $state.snapshot(this.loading) : null,
+      collections: this.collections.length,
+      activeColId: this.activeColId,
+      activeReqId: this.activeReq?.id ?? null,
+    };
+    await fs.writeTextExternal(path, JSON.stringify(report, null, 2));
+    appLog("info", `exportCrashReport: wrote ${path}`);
+    return path;
   }
 
   // ---- Backups (manual; an auto-backup also runs once per launch in loadStore) ----

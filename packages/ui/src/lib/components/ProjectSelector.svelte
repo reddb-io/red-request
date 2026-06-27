@@ -13,6 +13,7 @@
   let recents = $state<RecentProject[]>([]);
   let busy = $state(false);
   let query = $state("");
+  let connectionString = $state("");
   let appVer = $state<string | null>(null);
   let reddbVer = $state<string | null>(null);
 
@@ -55,12 +56,26 @@
   async function choose(dir: string | null) {
     if (busy) return;
     busy = true;
-    await ws.chooseProject(dir);
+    try {
+      await ws.chooseProject(dir);
+    } finally {
+      busy = false;
+    }
   }
 
   async function openFolder() {
     const picked = await open({ directory: true, title: "Open a project folder" });
     if (typeof picked === "string") await choose(picked);
+  }
+
+  async function connectString() {
+    if (busy || !connectionString.trim()) return;
+    busy = true;
+    try {
+      await ws.chooseConnectionString(connectionString);
+    } finally {
+      busy = false;
+    }
   }
 </script>
 
@@ -97,6 +112,23 @@
         variant="outline"
         size="xs"
         title="Use the global store (~/.red/request/app.rdb)">Global</Button
+      >
+    </div>
+
+    <div class="mb-4 flex gap-2">
+      <Input
+        bind:value={connectionString}
+        placeholder="reds://host:port/project or docker://container"
+        class="h-7 flex-1"
+        onkeydown={(event) => {
+          if (event.key === "Enter") void connectString();
+        }}
+      />
+      <Button
+        onclick={connectString}
+        disabled={busy || !connectionString.trim()}
+        variant="outline"
+        size="xs">Connect</Button
       >
     </div>
 

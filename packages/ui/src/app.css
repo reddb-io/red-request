@@ -279,7 +279,7 @@ body {
 /* ProjectTransition — cartoon iris wipe (black circle that closes then opens). */
 .iris {
   position: fixed;
-  inset: 0;
+  inset: 2rem 0 0 0;
   z-index: 100;
   overflow: hidden;
 }

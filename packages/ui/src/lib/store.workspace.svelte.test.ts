@@ -101,6 +101,15 @@ function collection(
 function resetWorkspace() {
   vi.useRealTimers();
   vi.clearAllMocks();
+  ws.ready = true;
+  ws.bridgeMissing = false;
+  ws.loadError = null;
+  ws.closing = false;
+  ws.screen = "selector";
+  ws.transitioning = false;
+  ws.transitionPhase = "idle";
+  ws.loading = null;
+  ws.project = null;
   ws.collections = [];
   ws.activeColId = null;
   ws.activeReq = null;
@@ -116,6 +125,77 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
+  it("chooseProject times out a stuck project open instead of leaving the black transition mounted forever", async () => {
+    vi.useFakeTimers();
+    const { openProject } = await import("./project");
+    vi.mocked(openProject).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    const pending = ws.chooseProject("/tmp/stuck-project");
+
+    await Promise.resolve();
+    expect(ws.transitioning).toBe(true);
+    expect(ws.loading?.step).toMatch(/switching/i);
+
+    await vi.advanceTimersByTimeAsync(16_000);
+    await pending;
+
+    expect(ws.transitioning).toBe(false);
+    expect(ws.transitionPhase).toBe("idle");
+    expect(ws.screen).toBe("app");
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toMatch(/timed out/i);
+    expect(ws.loadError).toContain("/tmp/stuck-project");
+  });
+
+  it("chooseConnectionString records a remote target as a recoverable app error, not a fake folder open", async () => {
+    const { openProject } = await import("./project");
+
+    await ws.chooseConnectionString("reds://team.reddb.io/workspace");
+
+    expect(openProject).not.toHaveBeenCalled();
+    expect(ws.screen).toBe("app");
+    expect(ws.project?.db_path).toBe("reds://team.reddb.io/workspace");
+    expect(ws.loadError).toMatch(/connection string/i);
+  });
+
+  it("exportCrashReport writes the current project recovery state to a user-picked JSON file", async () => {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const fs = await import("./fs");
+    vi.mocked(save).mockResolvedValueOnce("/tmp/red-request-crash.json");
+    vi.mocked(fs.writeTextExternal).mockResolvedValueOnce(undefined);
+    ws.project = {
+      db_path: "/tmp/fake/.red/request/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: "fake",
+    };
+    ws.loadError = "opening project timed out";
+    ws.loading = {
+      startedAt: 1,
+      step: "opening database file",
+      log: [{ ts: 1, step: "opening database file" }],
+    };
+
+    await ws.exportCrashReport();
+
+    expect(fs.writeTextExternal).toHaveBeenCalledTimes(1);
+    const [, contents] = vi.mocked(fs.writeTextExternal).mock.calls[0]!;
+    expect(JSON.parse(contents)).toMatchObject({
+      kind: "red-request-project-open-crash",
+      project: {
+        db_path: "/tmp/fake/.red/request/app.rdb",
+        project_dir: "/tmp/fake",
+      },
+      loadError: "opening project timed out",
+      loading: {
+        step: "opening database file",
+      },
+    });
+  });
+
   it("flushes a debounced request save to the original request after fast selection changes", async () => {
     const first = request("r1", { name: "Before" });
     const second = request("r2", { name: "Second" });
