@@ -17,6 +17,14 @@ vi.mock("./repo", () => ({
   saveEnvironmentSecret: vi.fn(async () => {}),
   removeEnvironmentSecret: vi.fn(async () => {}),
   deleteRequest: vi.fn(async () => {}),
+  ensureStore: vi.fn(async () => {}),
+  runMigrations: vi.fn(async () => {}),
+  ensureSample: vi.fn(async () => {}),
+  loadNetwork: vi.fn(async () => ({ proxies: [], certificates: [] })),
+  loadUiSettings: vi.fn(async () => ({ redUiEnabled: false })),
+  loadEnvironments: vi.fn(async () => []),
+  loadAll: vi.fn(async () => []),
+  loadGlobals: vi.fn(async () => null),
 }));
 
 vi.mock("./rpc", () => ({
@@ -238,5 +246,39 @@ describe("Workspace persistence coordination", () => {
     expect(ws.environments[0]!.name).toBe("prod");
     expect(ws.activeEnvName).toBe("prod");
     expect(repo.saveEnvironmentOrder).toHaveBeenCalledWith(["prod"]);
+  });
+
+  it("rebuildStore wipes the on-disk store and reloads without re-healing", async () => {
+    const { resetIncompatibleDb } = await import("./project");
+    vi.mocked(resetIncompatibleDb).mockResolvedValue(undefined);
+    ws.loadError = "model mismatch: …";
+
+    await ws.rebuildStore();
+
+    expect(resetIncompatibleDb).toHaveBeenCalledTimes(1);
+    // The wipe clears the previous error: success means loadError is gone.
+    expect(ws.loadError).toBeNull();
+  });
+
+  it("rebuildStore surfaces a follow-up failure instead of swallowing it", async () => {
+    const { resetIncompatibleDb } = await import("./project");
+    vi.mocked(resetIncompatibleDb).mockRejectedValue(new Error("disk full"));
+    ws.loadError = "model mismatch: …";
+
+    await ws.rebuildStore();
+
+    expect(ws.loadError).toMatch(/Rebuild failed/);
+    expect(ws.loadError).toContain("disk full");
+  });
+
+  it("backToSelector returns to the project picker without touching data", async () => {
+    const { resetIncompatibleDb } = await import("./project");
+    ws.screen = "app";
+    vi.mocked(resetIncompatibleDb).mockClear();
+
+    ws.backToSelector();
+
+    expect(ws.screen).toBe("selector");
+    expect(resetIncompatibleDb).not.toHaveBeenCalled();
   });
 });
