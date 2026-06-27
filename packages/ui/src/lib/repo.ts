@@ -218,6 +218,12 @@ async function syncClientId(): Promise<string> {
   return id;
 }
 
+export const currentSyncClientId = () => syncClientId();
+
+export async function syncConsumerName(): Promise<string> {
+  return `rr_${hexUtf8(await syncClientId()).slice(0, 56) || "client"}`;
+}
+
 async function emitSyncEvent(
   kind: ProjectSyncEventKind,
   entity: ProjectSyncEntity,
@@ -236,6 +242,36 @@ async function emitSyncEvent(
   await db.queuePush(SYNC_EVENTS, event);
   return event;
 }
+
+export interface ProjectSyncQueueMessage {
+  messageId: string;
+  deliveryId?: string;
+  event: ProjectSyncEvent | null;
+}
+
+export async function readSyncEvents(
+  consumer: string,
+  waitMs = 15_000,
+  count = 20
+): Promise<ProjectSyncQueueMessage[]> {
+  const messages = await db.queueReadWait<unknown>(
+    SYNC_EVENTS,
+    consumer,
+    count,
+    waitMs
+  );
+  return messages.map((message) => {
+    const parsed = projectSyncEventSchema.safeParse(message.payload);
+    return {
+      messageId: message.messageId,
+      deliveryId: message.deliveryId,
+      event: parsed.success ? parsed.data : null,
+    };
+  });
+}
+
+export const ackSyncEvent = (messageId: string, deliveryId?: string) =>
+  db.queueAck(SYNC_EVENTS, messageId, deliveryId);
 
 function colIdFromReqKey(key: string): string | null {
   const sep = key.indexOf(".");

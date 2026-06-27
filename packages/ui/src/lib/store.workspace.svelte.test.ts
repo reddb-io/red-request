@@ -25,6 +25,10 @@ vi.mock("./repo", () => ({
   loadEnvironments: vi.fn(async () => []),
   loadAll: vi.fn(async () => []),
   loadGlobals: vi.fn(async () => null),
+  syncConsumerName: vi.fn(async () => "rr_client"),
+  currentSyncClientId: vi.fn(async () => "client-1"),
+  readSyncEvents: vi.fn(async () => []),
+  ackSyncEvent: vi.fn(async () => {}),
 }));
 
 vi.mock("./rpc", () => ({
@@ -106,6 +110,7 @@ function collection(
 function resetWorkspace() {
   vi.useRealTimers();
   vi.clearAllMocks();
+  (ws as unknown as { stopSyncLoop: () => void }).stopSyncLoop();
   ws.ready = true;
   ws.bridgeMissing = false;
   ws.loadError = null;
@@ -125,6 +130,9 @@ function resetWorkspace() {
     secrets: {},
   });
   ws.activeEnvName = null;
+  vi.mocked(repo.readSyncEvents).mockImplementation(
+    () => new Promise<never>(() => {})
+  );
 }
 
 beforeEach(resetWorkspace);
@@ -293,6 +301,93 @@ describe("Workspace persistence coordination", () => {
 
     expect(ws.network.profiles.map((p) => p.id)).toEqual(["fresh"]);
     expect(ws.loadError).toBeNull();
+  });
+
+  it("reloads silently when a remote sync event arrives from the project queue", async () => {
+    vi.useFakeTimers();
+    let readCalls = 0;
+    vi.mocked(repo.readSyncEvents).mockImplementation(async () => {
+      readCalls++;
+      if (readCalls === 1)
+        return [
+          {
+            messageId: "m-remote",
+            deliveryId: "did-remote",
+            event: {
+              v: 1,
+              id: "evt-remote",
+              ts: 1,
+              source: "red-request",
+              clientId: "client-2",
+              kind: "request.saved",
+              entity: {
+                type: "request",
+                id: "r2",
+                parentId: "c1",
+                name: "Remote",
+              },
+              payload: {},
+            },
+          },
+        ];
+      return new Promise<never>(() => {});
+    });
+    vi.mocked(repo.loadAll)
+      .mockResolvedValueOnce([collection("c1", [request("r1")])])
+      .mockResolvedValueOnce([collection("c1", [request("r2")])]);
+
+    ws.screen = "app";
+    await ws.loadStore();
+    expect(ws.collections[0]?.requests.map((req) => req.id)).toEqual(["r1"]);
+
+    await vi.waitUntil(
+      () => vi.mocked(repo.ackSyncEvent).mock.calls.length > 0
+    );
+    await vi.advanceTimersByTimeAsync(300);
+    await vi.waitUntil(() => vi.mocked(repo.loadAll).mock.calls.length >= 2);
+
+    expect(repo.ackSyncEvent).toHaveBeenCalledWith("m-remote", "did-remote");
+    expect(ws.collections[0]?.requests.map((req) => req.id)).toEqual(["r2"]);
+    expect(ws.loading).toBeNull();
+  });
+
+  it("acks local sync events without reloading the project", async () => {
+    vi.useFakeTimers();
+    let readCalls = 0;
+    vi.mocked(repo.readSyncEvents).mockImplementation(async () => {
+      readCalls++;
+      if (readCalls === 1)
+        return [
+          {
+            messageId: "m-local",
+            deliveryId: "did-local",
+            event: {
+              v: 1,
+              id: "evt-local",
+              ts: 1,
+              source: "red-request",
+              clientId: "client-1",
+              kind: "request.saved",
+              entity: { type: "request", id: "r1", parentId: "c1" },
+              payload: {},
+            },
+          },
+        ];
+      return new Promise<never>(() => {});
+    });
+    vi.mocked(repo.loadAll).mockResolvedValue([
+      collection("c1", [request("r1")]),
+    ]);
+
+    ws.screen = "app";
+    await ws.loadStore();
+    await vi.waitUntil(
+      () => vi.mocked(repo.ackSyncEvent).mock.calls.length > 0
+    );
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(repo.ackSyncEvent).toHaveBeenCalledWith("m-local", "did-local");
+    expect(repo.loadAll).toHaveBeenCalledTimes(1);
   });
 
   it("chooseConnectionString opens an HTTP RedDB project source and loads the store", async () => {
