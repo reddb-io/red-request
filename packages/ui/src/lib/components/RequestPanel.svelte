@@ -201,6 +201,9 @@
   //   • the profile's own header/UA list changes (user edits the profile).
   // Track profile content (not just id) so editing the profile mid-session
   // propagates to any request that references it.
+  // NOTE: the chain uses `(profile?.headers ?? [])` — `profile?.headers` alone
+  // is undefined when no profile is bound, and `.map()` on undefined throws,
+  // which used to break the effect and freeze the panel.
   $effect(() => {
     const req = ws.activeReq;
     if (!req) return;
@@ -209,7 +212,7 @@
     // Touch profile.userAgent + headers so this effect re-runs on edits.
     void profile?.userAgent;
     void profile?.headers.length;
-    void profile?.headers.map((h) => `${h.name}=${h.value}=${h.enabled}`).join("|");
+    void (profile?.headers ?? []).map((h) => `${h.name}=${h.value}=${h.enabled}`).join("|");
     ws.syncProfileHeaders();
   });
 
