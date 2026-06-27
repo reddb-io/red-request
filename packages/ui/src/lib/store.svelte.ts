@@ -417,22 +417,13 @@ class Workspace {
         this.project = nextProject;
         await this.loadStore();
       })();
-      await Promise.race([
+      await withTimeout(
         ready,
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Connecting to RedDB timed out after ${Math.round(
-                    PROJECT_OPEN_TIMEOUT_MS / 1000
-                  )}s: ${value}`
-                )
-              ),
-            PROJECT_OPEN_TIMEOUT_MS
-          )
-        ),
-      ]);
+        PROJECT_OPEN_TIMEOUT_MS,
+        `Connecting to RedDB timed out after ${Math.round(
+          PROJECT_OPEN_TIMEOUT_MS / 1000
+        )}s: ${value}`
+      );
     } catch (e) {
       ++this.projectOpenGeneration;
       const msg = e instanceof Error ? e.message : String(e);
@@ -781,6 +772,16 @@ class Workspace {
   }
 
   async retry(): Promise<void> {
+    const target = this.project ? $state.snapshot(this.project) : null;
+    const connection = target?.connection_string;
+    if (connection) {
+      await this.chooseConnectionString(connection);
+      return;
+    }
+    if (target) {
+      await this.chooseProject(target.project_dir);
+      return;
+    }
     this.project = await projectInfo().catch(() => this.project);
     await this.loadStore();
   }

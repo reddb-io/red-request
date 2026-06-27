@@ -232,6 +232,70 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toMatch(/timed out while running migrations/i);
   });
 
+  it("retry reopens the failed local project instead of only reloading the current store", async () => {
+    vi.useFakeTimers();
+    const { openProject } = await import("./project");
+    ws.screen = "app";
+    ws.loadError = "Opening project timed out after 15s: /tmp/stuck-project";
+    ws.project = {
+      db_path: "/tmp/stuck-project/.red/request/app.rdb",
+      project_dir: "/tmp/stuck-project",
+      is_project: true,
+      arg_launched: false,
+      name: "stuck-project",
+    };
+    vi.mocked(openProject).mockResolvedValueOnce({
+      db_path: "/tmp/stuck-project/.red/request/app.rdb",
+      project_dir: "/tmp/stuck-project",
+      is_project: true,
+      arg_launched: false,
+      name: "stuck-project",
+    });
+
+    const pending = ws.retry();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await pending;
+
+    expect(openProject).toHaveBeenCalledWith("/tmp/stuck-project");
+    expect(repo.runMigrations).toHaveBeenCalled();
+    expect(ws.loadError).toBeNull();
+    expect(ws.loading).toBeNull();
+  });
+
+  it("retry reconnects the failed connection-string project source", async () => {
+    const { openConnectionString } = await import("./project");
+    ws.screen = "app";
+    ws.loadError =
+      "Connecting to RedDB timed out after 15s: wss://team.reddb.io/redwire";
+    ws.project = {
+      db_path: "wss://team.reddb.io/redwire",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "wss://team.reddb.io/redwire",
+      name: "Remote RedDB",
+    };
+    vi.mocked(openConnectionString).mockResolvedValueOnce({
+      db_path: "wss://team.reddb.io/redwire",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "wss://team.reddb.io/redwire",
+      name: "Remote RedDB",
+    });
+
+    await ws.retry();
+
+    expect(openConnectionString).toHaveBeenCalledWith(
+      "wss://team.reddb.io/redwire"
+    );
+    expect(repo.runMigrations).toHaveBeenCalled();
+    expect(ws.loadError).toBeNull();
+    expect(ws.loading).toBeNull();
+  });
+
   it("init does not leave an arg-launched project stuck on the startup loading screen", async () => {
     vi.useFakeTimers();
     const { projectInfo } = await import("./project");
@@ -464,6 +528,24 @@ describe("Workspace persistence coordination", () => {
     expect(ws.project?.source).toBe("remote-http");
     expect(ws.project?.db_path).toBe("wss://team.reddb.io/redwire");
     expect(ws.loadError).toBeNull();
+  });
+
+  it("chooseConnectionString clears its timeout after a successful connection", async () => {
+    vi.useFakeTimers();
+    const { openConnectionString } = await import("./project");
+    vi.mocked(openConnectionString).mockResolvedValueOnce({
+      db_path: "https://team.reddb.io",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "https://team.reddb.io",
+      name: "Remote RedDB",
+    });
+
+    await ws.chooseConnectionString("https://team.reddb.io");
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("exportCrashReport writes the current project recovery state to a user-picked JSON file", async () => {
