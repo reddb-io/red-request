@@ -781,6 +781,28 @@ fn normalize_http_base(raw: &str) -> Result<String, String> {
     Ok(value.trim_end_matches('/').to_string())
 }
 
+fn normalize_ws_http_base(raw: &str, http_scheme: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.len() > 8 * 1024 {
+        return Err("connection string is too long".to_string());
+    }
+    let (_, rest) = value
+        .split_once("://")
+        .ok_or_else(|| "not a WebSocket RedDB URL".to_string())?;
+    let authority = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches('/');
+    if authority.is_empty() {
+        return Err("connection string is missing a host".to_string());
+    }
+    if authority.chars().any(char::is_whitespace) {
+        return Err("connection string host cannot contain whitespace".to_string());
+    }
+    Ok(format!("{http_scheme}://{authority}"))
+}
+
 fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String> {
     let value = raw.trim();
     if value.is_empty() {
@@ -826,12 +848,16 @@ fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String
             reason: "RedWire/gRPC project sources need the native RedWire bridge; use http:// or https:// for this build".to_string(),
         });
     }
-    for scheme in ["ws://", "wss://", "red+ws://", "red+wss://"] {
+    for (scheme, http_scheme) in [
+        ("ws://", "http"),
+        ("red+ws://", "http"),
+        ("wss://", "https"),
+        ("red+wss://", "https"),
+    ] {
         if lower.starts_with(scheme) {
-            return Ok(ParsedProjectConnection::Deferred {
-                scheme: scheme.trim_end_matches("://").to_string(),
+            return Ok(ParsedProjectConnection::Http {
+                base_url: normalize_ws_http_base(value, http_scheme)?,
                 raw: value.to_string(),
-                reason: "WebSocket RedWire project sources are recognized, but this desktop build still needs the browser-native RedWire-over-WSS bridge before it can open them".to_string(),
             });
         }
     }
@@ -2146,16 +2172,39 @@ mod tests {
     }
 
     #[test]
-    fn recognizes_websocket_project_connections_without_faking_http() {
-        let parsed = parse_project_connection("wss://team.reddb.io/redwire").unwrap();
-
-        match parsed {
-            ParsedProjectConnection::Deferred { scheme, reason, .. } => {
-                assert_eq!(scheme, "wss");
-                assert!(reason.contains("WebSocket RedWire"));
+    fn parses_websocket_project_connection_as_remote_http_source() {
+        assert_eq!(
+            parse_project_connection("ws://team.reddb.io/redwire").unwrap(),
+            ParsedProjectConnection::Http {
+                base_url: "http://team.reddb.io".to_string(),
+                raw: "ws://team.reddb.io/redwire".to_string(),
             }
-            ParsedProjectConnection::Http { .. } => panic!("wss must not be coerced to HTTP"),
-        }
+        );
+        assert_eq!(
+            parse_project_connection("wss://team.reddb.io/redwire").unwrap(),
+            ParsedProjectConnection::Http {
+                base_url: "https://team.reddb.io".to_string(),
+                raw: "wss://team.reddb.io/redwire".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_red_plus_websocket_project_connections_as_remote_http_sources() {
+        assert_eq!(
+            parse_project_connection("red+ws://team.reddb.io:5000").unwrap(),
+            ParsedProjectConnection::Http {
+                base_url: "http://team.reddb.io:5000".to_string(),
+                raw: "red+ws://team.reddb.io:5000".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_project_connection("red+wss://team.reddb.io/redwire").unwrap(),
+            ParsedProjectConnection::Http {
+                base_url: "https://team.reddb.io".to_string(),
+                raw: "red+wss://team.reddb.io/redwire".to_string(),
+            }
+        );
     }
 
     #[test]
