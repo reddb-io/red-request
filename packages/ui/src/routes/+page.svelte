@@ -273,7 +273,47 @@
   <div class="flex h-screen w-screen flex-col overflow-hidden">
     <Titlebar />
     <div class="min-h-0 flex-1 overflow-hidden">
-      {#if !ws.ready}
+      <svelte:boundary
+        onerror={(err) => appLog("error", `boundary caught: ${err instanceof Error ? err.stack : err}`)}
+      >
+        {#snippet failed(err, reset)}
+          <!-- Last-resort screen: any uncaught error in the main app tree
+               (a mounted RequestPanel with a stale profileId, a lazy import
+               that resolves to undefined, anything) lands here instead of a
+               black screen. The user gets an actionable message + the full
+               error in the DeveloperConsole (search for "boundary caught")
+               so a bug report has what it needs. -->
+          <div class="grid h-full place-items-center px-8 text-center">
+            <div class="max-w-lg">
+              <h1 class="mb-2 text-lg font-semibold text-red-400">Something went wrong</h1>
+              <p class="mb-4 text-sm text-fg-muted">
+                A rendering error stopped the layout from mounting. The full stack trace landed
+                in the DeveloperConsole (right-hand panel). Try the actions below, or file a
+                bug with the error text.
+              </p>
+              <pre
+                class="mono mb-4 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-1)] p-3 text-left text-[11px] text-fg-muted"
+              >{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
+              <div class="flex flex-wrap items-center justify-center gap-2">
+                <Button onclick={reset} size="xs" variant="outline">Retry render</Button>
+                <Button
+                  onclick={() => {
+                    try {
+                      location.reload();
+                    } catch {
+                      /* webview shell will handle it */
+                    }
+                  }}
+                  size="xs"
+                  variant="ghost"
+                >
+                  Reload window
+                </Button>
+              </div>
+            </div>
+          </div>
+        {/snippet}
+        {#if !ws.ready}
         <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
       {:else if ws.bridgeMissing}
         <div class="grid h-full place-items-center px-8 text-center">
@@ -401,6 +441,7 @@
           <CommandPaletteComponent bind:open={cmdOpen} />
         {/if}
       {/if}
+      </svelte:boundary>
     </div>
   </div>
   {#if ws.transitioning}
