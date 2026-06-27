@@ -195,6 +195,24 @@
     }
   });
 
+  // Resync profile → headers whenever:
+  //   • the bound profile id changes (request-level profileId, falls back to
+  //     the collection default), or
+  //   • the profile's own header/UA list changes (user edits the profile).
+  // Track profile content (not just id) so editing the profile mid-session
+  // propagates to any request that references it.
+  $effect(() => {
+    const req = ws.activeReq;
+    if (!req) return;
+    const pid = req.profileId || ws.activeCollection?.collection.defaultProfileId || "";
+    const profile = pid ? ws.profiles.find((p) => p.id === pid) : undefined;
+    // Touch profile.userAgent + headers so this effect re-runs on edits.
+    void profile?.userAgent;
+    void profile?.headers.length;
+    void profile?.headers.map((h) => `${h.name}=${h.value}=${h.enabled}`).join("|");
+    ws.syncProfileHeaders();
+  });
+
   // Path params with a value count as "resolved" (green); detected-but-empty stay red.
   const pathOk = $derived(
     (ws.activeReq?.pathParams ?? [])
@@ -367,7 +385,7 @@
           class="tab"
           class:is-active={tab === t}
         >
-          {t}{#if t === "params" && detected.length}<span class="ml-1 text-xs text-fg-subtle" title="path params">:{detected.length}</span>{/if}
+          {t.charAt(0).toUpperCase() + t.slice(1)}{#if t === "params" && detected.length}<span class="ml-1 text-xs text-fg-subtle" title="path params">:{detected.length}</span>{/if}
         </button>
       {/each}
     </div>
@@ -424,38 +442,10 @@
           </section>
         </div>
       {:else if tab === "headers"}
-        <!-- Live preview of the profile bound to this request (or the
-             collection default). User-Agent + custom headers that will be
-             injected on send — shown as a dim, read-only block so the user
-             sees what the profile contributes without it bleeding into the
-             editable headers list. -->
-        {@const boundProfile = (() => {
-          const pid = ws.activeReq?.profileId
-            || ws.activeCollection?.collection.defaultProfileId
-            || "";
-          return pid ? ws.profiles.find((p) => p.id === pid) : undefined;
-        })()}
-        {#if boundProfile}
-          <div
-            class="mb-3 rounded-md border border-[var(--color-brand)]/40 bg-[var(--color-brand)]/5 p-2.5 text-xs"
-          >
-            <div class="mb-1 flex items-center gap-2 font-semibold text-fg-strong">
-              <span>👤 Profile: {boundProfile.name || "(unnamed)"}</span>
-              <span class="text-fg-faint">applied on send</span>
-            </div>
-            <ul class="space-y-0.5 text-fg-muted">
-              {#if boundProfile.userAgent}
-                <li class="mono">User-Agent: {boundProfile.userAgent}</li>
-              {/if}
-              {#each boundProfile.headers.filter((h) => h.enabled && h.name.trim()) as h (h.name)}
-                <li class="mono">{h.name}: {h.value}</li>
-              {/each}
-              {#if !boundProfile.userAgent && boundProfile.headers.length === 0}
-                <li class="italic text-fg-faint">No headers or user agent set.</li>
-              {/if}
-            </ul>
-          </div>
-        {/if}
+        <!-- Profile-injected headers are now real rows in the list below —
+             see syncProfileHeaders() in the store + the "profile" badge
+             that KeyValueEditor renders for fromProfile rows. No preview
+             banner needed; the user can edit/disable/delete like any other row. -->
         <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
       {:else if tab === "auth"}
         <AuthEditor bind:auth={ws.activeReq.auth} />
@@ -572,7 +562,7 @@
           {#await ensureRunnerLoaded()}{/await}
         {/if}
         {#if RunnerTabComponent}
-          <RunnerTabComponent />
+          <RunnerTabComponent embedded />
         {:else}
           <p class="text-fg-faint">Loading runner…</p>
         {/if}
@@ -581,7 +571,7 @@
           {#await ensureCodeLoaded()}{/await}
         {/if}
         {#if CodeTabComponent}
-          <CodeTabComponent />
+          <CodeTabComponent embedded />
         {:else}
           <p class="text-fg-faint">Loading code generators…</p>
         {/if}
@@ -677,14 +667,8 @@
     {/if}
   </section>
 
-  {#if showCode && CodeModalComponent}
-    <CodeModalComponent onClose={() => (showCode = false)} />
-  {/if}
   {#if showSchema && GraphQlSchemaComponent}
     <GraphQlSchemaComponent onClose={() => (showSchema = false)} />
-  {/if}
-  {#if showRunner && RunnerPanelComponent}
-    <RunnerPanelComponent onClose={() => (showRunner = false)} />
   {/if}
 {:else}
   <section

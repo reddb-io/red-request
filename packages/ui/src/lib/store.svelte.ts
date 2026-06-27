@@ -4,6 +4,7 @@ import {
   INTROSPECTION_QUERY,
   parseSchema,
   type GqlSchema,
+  type Kv,
   newRequest,
   collectionFileSchema,
   proxyToUrl,
@@ -509,6 +510,12 @@ class Workspace {
     this.exampleView = null;
     this.errorMsg = null;
     this.unresolved = [];
+    // Sync profile → headers so the user sees profile-injected headers in the
+    // Headers tab (with a brand-tinted "from profile" badge), not just at send
+    // time. Same merge applyProfile() does in send(), but as a real edit so
+    // the KeyValueEditor picks it up. The badge flips off the moment the user
+    // edits the value, so they can tell which rows they overrode.
+    this.syncProfileHeaders();
     // reset the stream panel; close any connection from the previously selected request
     if (this.wsConnId && this.wsConnId !== reqId) {
       const id = this.wsConnId;
@@ -881,6 +888,89 @@ class Workspace {
     if (proxy?.host.trim() && !snap.proxy?.trim())
       snap.proxy = proxyToUrl(proxy);
     return snap;
+  }
+
+  /**
+   * Mirror `applyProfile` into the live `activeReq.headers` so the Headers tab
+   * shows profile-injected rows the user can edit / disable / re-enable.
+   * Rows merged in by the profile get `fromProfile: true`; rows the user has
+   * since edited lose the badge (they're now "request-local"). Called when
+   * activeReq changes, when profileId flips, or when the profile's own
+   * headers/UA change.
+   */
+  syncProfileHeaders(): void {
+    const req = this.activeReq;
+    if (!req) return;
+    // Build the profile's "expected contribution" from scratch — User-Agent
+    // (when set) + every enabled profile header — instead of running
+    // applyProfile against the live request. The previous approach mixed
+    // user-edited values into the baseline so we couldn't tell which live
+    // rows the user had actually overridden.
+    const pid =
+      req.profileId || this.activeCollection?.collection.defaultProfileId || "";
+    const profile = pid
+      ? this.network.profiles.find((p) => p.id === pid)
+      : undefined;
+    const profileHeaders: Kv[] = [];
+    if (profile?.userAgent)
+      profileHeaders.push({
+        name: "User-Agent",
+        value: profile.userAgent,
+        enabled: true,
+      });
+    if (profile)
+      for (const h of profile.headers)
+        if (h.enabled && h.name.trim()) profileHeaders.push({ ...h });
+
+    // Merge the user's request-local headers with the profile's contribution
+    // to form the "merged view" — that's what applyProfile produced before,
+    // just rebuilt without the live side leaking into the baseline.
+    const mergedHeaders: Kv[] = [...req.headers];
+    for (const ph of profileHeaders) {
+      if (
+        !mergedHeaders.some(
+          (h) => h.name.toLowerCase() === ph.name.toLowerCase()
+        )
+      ) {
+        mergedHeaders.push(ph);
+      }
+    }
+    // Diff: anything in `mergedHeaders` that's not in the live `req.headers`
+    // is a profile-injected row (newly added). Anything in the live list with
+    // fromProfile=true whose value drifted from the profile's value is now
+    // user-overridden — clear the badge.
+    const liveNames = new Set(req.headers.map((h) => h.name.toLowerCase()));
+    // profileByName: lower-cased name → profile header (the canonical source,
+    // built from the profile, NOT from the live request — so we can spot
+    // user edits by comparing live against this).
+    const profileByName = new Map<string, Kv>(
+      profileHeaders.map((h) => [h.name.toLowerCase(), h])
+    );
+    // 1) Add profile-injected rows that aren't in the live list yet.
+    for (const h of mergedHeaders) {
+      if (!liveNames.has(h.name.toLowerCase())) {
+        req.headers.push({ ...h, fromProfile: true });
+      }
+    }
+    // 2) Clear the badge on rows that were fromProfile but the user edited
+    //    (value no longer matches the profile's value), or whose underlying
+    //    profile header disappeared.
+    for (const live of req.headers) {
+      if (!live.fromProfile) continue;
+      const src = profileByName.get(live.name.toLowerCase());
+      if (!src) {
+        live.fromProfile = false;
+        continue;
+      }
+      if (src.value !== live.value || src.enabled !== live.enabled) {
+        live.fromProfile = false;
+      }
+    }
+    // 3) Drop fromProfile rows whose underlying profile header disappeared
+    //    entirely (only safe when the user hadn't edited them).
+    req.headers = req.headers.filter(
+      (h) => !h.fromProfile || profileByName.has(h.name.toLowerCase())
+    );
   }
 
   private rid(prefix: string): string {
