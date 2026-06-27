@@ -57,6 +57,10 @@ vi.mock("./project", () => ({
   projectLabel: vi.fn(() => "project"),
 }));
 
+vi.mock("./tauri", () => ({
+  isTauri: true,
+}));
+
 vi.mock("./backup", () => ({
   createBackup: vi.fn(),
   listBackups: vi.fn(),
@@ -148,6 +152,95 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loading).toBeNull();
     expect(ws.loadError).toMatch(/timed out/i);
     expect(ws.loadError).toContain("/tmp/stuck-project");
+  });
+
+  it("loadStore times out a stuck internal boot step and exposes recovery actions", async () => {
+    vi.useFakeTimers();
+    vi.mocked(repo.runMigrations).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    const pending = ws.loadStore();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.loading?.step).toBe("running migrations");
+
+    await vi.advanceTimersByTimeAsync(16_000);
+    await pending;
+
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toMatch(/timed out while running migrations/i);
+  });
+
+  it("init does not leave an arg-launched project stuck on the startup loading screen", async () => {
+    vi.useFakeTimers();
+    const { projectInfo } = await import("./project");
+    ws.ready = false;
+    vi.mocked(projectInfo).mockResolvedValueOnce({
+      db_path: "/tmp/stuck/.red/request/app.rdb",
+      project_dir: "/tmp/stuck",
+      is_project: true,
+      arg_launched: true,
+      name: "stuck",
+    });
+    vi.mocked(repo.runMigrations).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    const pending = ws.init().then(() => "resolved");
+
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    await expect(pending).resolves.toBe("resolved");
+    expect(ws.ready).toBe(true);
+    expect(ws.screen).toBe("app");
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toMatch(/timed out while running migrations/i);
+  });
+
+  it("ignores stale loadStore results when a newer load starts", async () => {
+    let finishStaleNetwork!: (
+      value: Awaited<ReturnType<typeof repo.loadNetwork>>
+    ) => void;
+    const staleNetwork = new Promise<
+      Awaited<ReturnType<typeof repo.loadNetwork>>
+    >((resolve) => {
+      finishStaleNetwork = resolve;
+    });
+    vi.mocked(repo.loadNetwork)
+      .mockImplementationOnce(() => staleNetwork)
+      .mockResolvedValueOnce({
+        proxies: [],
+        profiles: [
+          {
+            id: "fresh",
+            name: "fresh",
+            userAgent: "",
+            headers: [],
+            proxyId: "",
+          },
+        ],
+      });
+
+    const staleLoad = ws.loadStore();
+    await vi.waitUntil(
+      () => vi.mocked(repo.loadNetwork).mock.calls.length === 1
+    );
+
+    const freshLoad = ws.loadStore();
+    await freshLoad;
+    expect(ws.network.profiles.map((p) => p.id)).toEqual(["fresh"]);
+
+    finishStaleNetwork({
+      proxies: [],
+      profiles: [
+        { id: "stale", name: "stale", userAgent: "", headers: [], proxyId: "" },
+      ],
+    });
+    await staleLoad;
+
+    expect(ws.network.profiles.map((p) => p.id)).toEqual(["fresh"]);
+    expect(ws.loadError).toBeNull();
   });
 
   it("chooseConnectionString opens an HTTP RedDB project source and loads the store", async () => {
