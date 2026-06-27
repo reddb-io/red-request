@@ -48,6 +48,7 @@ vi.mock("./rpc", () => ({
 vi.mock("./project", () => ({
   projectInfo: vi.fn(),
   openProject: vi.fn(),
+  openConnectionString: vi.fn(),
   resetIncompatibleDb: vi.fn(),
   recentSetCount: vi.fn(),
   recentRename: vi.fn(),
@@ -149,15 +150,44 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toContain("/tmp/stuck-project");
   });
 
-  it("chooseConnectionString records a remote target as a recoverable app error, not a fake folder open", async () => {
-    const { openProject } = await import("./project");
+  it("chooseConnectionString opens an HTTP RedDB project source and loads the store", async () => {
+    const { openConnectionString, openProject } = await import("./project");
+    vi.mocked(openConnectionString).mockResolvedValueOnce({
+      db_path: "https://team.reddb.io",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "https://team.reddb.io",
+      name: "Remote RedDB",
+    });
 
-    await ws.chooseConnectionString("reds://team.reddb.io/workspace");
+    await ws.chooseConnectionString("https://team.reddb.io");
 
     expect(openProject).not.toHaveBeenCalled();
+    expect(openConnectionString).toHaveBeenCalledWith("https://team.reddb.io");
+    expect(repo.runMigrations).toHaveBeenCalled();
     expect(ws.screen).toBe("app");
-    expect(ws.project?.db_path).toBe("reds://team.reddb.io/workspace");
-    expect(ws.loadError).toMatch(/connection string/i);
+    expect(ws.project?.source).toBe("remote-http");
+    expect(ws.project?.db_path).toBe("https://team.reddb.io");
+    expect(ws.loadError).toBeNull();
+  });
+
+  it("chooseConnectionString keeps WebSocket targets as recoverable app errors until the WS bridge exists", async () => {
+    const { openConnectionString, openProject } = await import("./project");
+    vi.mocked(openConnectionString).mockRejectedValueOnce(
+      new Error("wss project source recognized but not available yet")
+    );
+
+    await ws.chooseConnectionString("wss://team.reddb.io/redwire");
+
+    expect(openProject).not.toHaveBeenCalled();
+    expect(openConnectionString).toHaveBeenCalledWith(
+      "wss://team.reddb.io/redwire"
+    );
+    expect(ws.screen).toBe("app");
+    expect(ws.project?.db_path).toBe("wss://team.reddb.io/redwire");
+    expect(ws.loadError).toMatch(/wss project source/i);
   });
 
   it("exportCrashReport writes the current project recovery state to a user-picked JSON file", async () => {

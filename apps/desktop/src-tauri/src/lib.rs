@@ -634,6 +634,19 @@ struct EmbeddedDb {
     /// project switch (kill old child → spawn new) can't have the old child's async
     /// Terminated event null the URL the new sidecar just published (black screen).
     gen: std::sync::atomic::AtomicU64,
+    /// Active project source. Local projects are backed by the managed sidecar; remote
+    /// HTTP/HTTPS projects use the server directly and do not spawn/own a child.
+    source: Mutex<ProjectSource>,
+}
+
+#[derive(Clone, Debug, Default)]
+enum ProjectSource {
+    #[default]
+    Local,
+    RemoteHttp {
+        base_url: String,
+        raw: String,
+    },
 }
 
 /// A persistent `red connect <grpc> --json` REPL: write an RQL line to stdin, read one
@@ -699,6 +712,8 @@ struct ProjectInfo {
     project_dir: Option<String>,
     is_project: bool,
     arg_launched: bool,
+    source: String,
+    connection_string: Option<String>,
     /// Custom display name from recents (falls back to the folder name on the UI side).
     name: Option<String>,
 }
@@ -708,17 +723,30 @@ fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
     let db_path = s.db_path.lock().map_err(|e| e.to_string())?.clone();
     let project_dir = s.project_dir.lock().map_err(|e| e.to_string())?.clone();
     let arg_launched = *s.arg_launched.lock().map_err(|e| e.to_string())?;
-    let name = project_dir.as_ref().and_then(|d| {
-        recent_list()
-            .into_iter()
-            .find(|r| &r.dir == d)
-            .map(|r| r.name)
-    });
+    let source = s.source.lock().map_err(|e| e.to_string())?.clone();
+    let (source_name, connection_string, name) = match source {
+        ProjectSource::Local => {
+            let name = project_dir.as_ref().and_then(|d| {
+                recent_list()
+                    .into_iter()
+                    .find(|r| &r.dir == d)
+                    .map(|r| r.name)
+            });
+            ("local".to_string(), None, name)
+        }
+        ProjectSource::RemoteHttp { raw, .. } => (
+            "remote-http".to_string(),
+            Some(raw),
+            Some("Remote RedDB".to_string()),
+        ),
+    };
     Ok(ProjectInfo {
         is_project: project_dir.is_some(),
         db_path,
         project_dir,
         arg_launched,
+        source: source_name,
+        connection_string,
         name,
     })
 }
@@ -726,6 +754,99 @@ fn project_info_for(app: &tauri::AppHandle) -> Result<ProjectInfo, String> {
 #[tauri::command]
 fn project_info(app: tauri::AppHandle) -> Result<ProjectInfo, String> {
     project_info_for(&app)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedProjectConnection {
+    Http {
+        base_url: String,
+        raw: String,
+    },
+    Deferred {
+        scheme: String,
+        raw: String,
+        reason: String,
+    },
+}
+
+fn normalize_http_base(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.len() > 8 * 1024 {
+        return Err("connection string is too long".to_string());
+    }
+    let lower = value.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err("not an HTTP RedDB URL".to_string());
+    }
+    Ok(value.trim_end_matches('/').to_string())
+}
+
+fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err("connection string cannot be empty".to_string());
+    }
+    let lower = value.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return Ok(ParsedProjectConnection::Http {
+            base_url: normalize_http_base(value)?,
+            raw: value.to_string(),
+        });
+    }
+    if lower.starts_with("red://") {
+        if lower.contains("proto=https") {
+            let rest = value
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(value)
+                .split_once('?')
+                .map(|(host, _)| host)
+                .unwrap_or(value);
+            return Ok(ParsedProjectConnection::Http {
+                base_url: format!("https://{}", rest.trim_end_matches('/')),
+                raw: value.to_string(),
+            });
+        }
+        if lower.contains("proto=http") {
+            let rest = value
+                .split_once("://")
+                .map(|(_, rest)| rest)
+                .unwrap_or(value)
+                .split_once('?')
+                .map(|(host, _)| host)
+                .unwrap_or(value);
+            return Ok(ParsedProjectConnection::Http {
+                base_url: format!("http://{}", rest.trim_end_matches('/')),
+                raw: value.to_string(),
+            });
+        }
+        return Ok(ParsedProjectConnection::Deferred {
+            scheme: "red".to_string(),
+            raw: value.to_string(),
+            reason: "RedWire/gRPC project sources need the native RedWire bridge; use http:// or https:// for this build".to_string(),
+        });
+    }
+    for scheme in ["ws://", "wss://", "red+ws://", "red+wss://"] {
+        if lower.starts_with(scheme) {
+            return Ok(ParsedProjectConnection::Deferred {
+                scheme: scheme.trim_end_matches("://").to_string(),
+                raw: value.to_string(),
+                reason: "WebSocket RedWire project sources are recognized, but this desktop build still needs the browser-native RedWire-over-WSS bridge before it can open them".to_string(),
+            });
+        }
+    }
+    for scheme in ["reds://", "grpc://", "grpcs://", "docker://"] {
+        if lower.starts_with(scheme) {
+            return Ok(ParsedProjectConnection::Deferred {
+                scheme: scheme.trim_end_matches("://").to_string(),
+                raw: value.to_string(),
+                reason: "this transport is recognized but not wired as a red-request project source in this build".to_string(),
+            });
+        }
+    }
+    Err(format!(
+        "unsupported RedDB project connection string: {value}. Try http://host:port or https://host:port."
+    ))
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -918,6 +1039,9 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     if let Ok(mut g) = st.grpc.lock() {
         *g = None;
     }
+    if let Ok(mut s) = st.source.lock() {
+        *s = ProjectSource::Local;
+    }
     if let Ok(mut p) = st.db_path.lock() {
         *p = db_path;
     }
@@ -932,6 +1056,81 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     log::debug!(
         target: "perf",
         "project.open {} in {}ms",
+        if result.is_ok() { "ok" } else { "err" },
+        perf_ms(started)
+    );
+    result
+}
+
+#[tauri::command]
+async fn open_connection_string(
+    app: tauri::AppHandle,
+    connection: String,
+) -> Result<ProjectInfo, String> {
+    let started = Instant::now();
+    let parsed = parse_project_connection(&connection)?;
+    let (base_url, raw) = match parsed {
+        ParsedProjectConnection::Http { base_url, raw } => (base_url, raw),
+        ParsedProjectConnection::Deferred {
+            scheme,
+            raw,
+            reason,
+        } => {
+            return Err(format!(
+                "{scheme} project source recognized but not available yet: {reason}. target={raw}"
+            ));
+        }
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let ready = format!("{base_url}/ready/query");
+    let res = client
+        .get(&ready)
+        .send()
+        .await
+        .map_err(|e| format!("remote RedDB did not answer readiness check at {ready}: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!(
+            "remote RedDB readiness check failed at {ready}: HTTP {}",
+            res.status().as_u16()
+        ));
+    }
+
+    let st = app.state::<EmbeddedDb>();
+    let _guard = st.spawn_lock.lock().await;
+    let old_child = st.child.lock().ok().and_then(|mut c| c.take());
+    if let Some(child) = old_child {
+        graceful_kill_reddb(child);
+    }
+    if let Some(sess) = st.rql.lock().await.take() {
+        let _ = sess.child.kill();
+    }
+    if let Ok(mut u) = st.url.lock() {
+        *u = Some(base_url.clone());
+    }
+    if let Ok(mut g) = st.grpc.lock() {
+        *g = None;
+    }
+    if let Ok(mut p) = st.db_path.lock() {
+        *p = raw.clone();
+    }
+    if let Ok(mut d) = st.project_dir.lock() {
+        *d = None;
+    }
+    if let Ok(mut a) = st.arg_launched.lock() {
+        *a = false;
+    }
+    if let Ok(mut s) = st.source.lock() {
+        *s = ProjectSource::RemoteHttp { base_url, raw };
+    }
+
+    let result = project_info_for(&app);
+    log::debug!(
+        target: "perf",
+        "project.open_connection {} in {}ms",
         if result.is_ok() { "ok" } else { "err" },
         perf_ms(started)
     );
@@ -1694,6 +1893,18 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
     let db = app.state::<EmbeddedDb>();
     let preview: String = query.replace('\n', " ").chars().take(120).collect();
     log::debug!(target: "rql", "query: {preview}");
+
+    let remote_http_base = {
+        let source = db.source.lock().map_err(|e| e.to_string())?.clone();
+        match source {
+            ProjectSource::RemoteHttp { base_url, .. } => Some(base_url),
+            ProjectSource::Local => None,
+        }
+    };
+    if let Some(base_url) = remote_http_base {
+        return reddb_rql_http(&base_url, &query, &preview, started).await;
+    }
+
     let mut guard = db.rql.lock().await;
 
     // Drive the query once on the live session; respawn + retry on a dead/missing session.
@@ -1742,11 +1953,92 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
     Err("RQL session could not be established".to_string())
 }
 
+async fn reddb_rql_http(
+    base_url: &str,
+    query: &str,
+    preview: &str,
+    started: Instant,
+) -> Result<HttpReply, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let res = client
+        .post(format!("{base_url}/query"))
+        .header("content-type", "application/json")
+        .body(serde_json::json!({ "query": query }).to_string())
+        .send()
+        .await
+        .map_err(|e| {
+            log::warn!(target: "rql", "remote HTTP query failed: {e}; query={preview}");
+            e.to_string()
+        })?;
+    let status = res.status().as_u16();
+    let text = res.text().await.unwrap_or_default();
+    let body = normalize_http_query_response(status, &text)?;
+    log_perf_slow(
+        "reddb.rql.remote_http",
+        &format!("ok {} bytes query={preview}", body.len()),
+        started,
+    );
+    Ok(HttpReply { status: 200, body })
+}
+
+fn normalize_http_query_response(status: u16, text: &str) -> Result<String, String> {
+    if !(200..300).contains(&status) {
+        let msg = serde_json::from_str::<serde_json::Value>(text)
+            .ok()
+            .and_then(|v| {
+                v.get("error")
+                    .or_else(|| v.get("message"))
+                    .and_then(|m| m.as_str())
+                    .map(ToOwned::to_owned)
+            })
+            .unwrap_or_else(|| text.chars().take(300).collect());
+        return Ok(serde_json::json!({ "ok": false, "error": msg }).to_string());
+    }
+    let parsed: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+        format!(
+            "remote RedDB returned non-JSON query response: {e}: {}",
+            text.chars().take(300).collect::<String>()
+        )
+    })?;
+    if parsed.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let msg = parsed
+            .get("error")
+            .or_else(|| parsed.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("remote query failed");
+        return Ok(serde_json::json!({ "ok": false, "error": msg }).to_string());
+    }
+    let result = parsed
+        .get("result")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let columns = result
+        .get("columns")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    let records = result
+        .get("records")
+        .cloned()
+        .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+    Ok(serde_json::json!({
+        "ok": true,
+        "data": {
+            "columns": columns,
+            "records": records
+        }
+    })
+    .to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_reddb_vault_certificate, is_vault_certificate, open_with_key,
-        reddb_server_argv_matches_db, reddb_vault_cert_path, seal_with_key, sidecar_env,
+        ensure_reddb_vault_certificate, is_vault_certificate, normalize_http_query_response,
+        open_with_key, parse_project_connection, reddb_server_argv_matches_db,
+        reddb_vault_cert_path, seal_with_key, sidecar_env, ParsedProjectConnection,
         EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
@@ -1825,6 +2117,68 @@ mod tests {
         std::env::remove_var("REDDB_STORAGE_PRESET");
         std::env::remove_var("REDDB_STORAGE_PROFILE");
         std::env::remove_var("REDDB_STORAGE_PACKAGING");
+    }
+
+    #[test]
+    fn parses_http_project_connection_as_remote_http_source() {
+        let parsed = parse_project_connection("https://team.reddb.io/").unwrap();
+
+        assert_eq!(
+            parsed,
+            ParsedProjectConnection::Http {
+                base_url: "https://team.reddb.io".to_string(),
+                raw: "https://team.reddb.io/".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_red_proto_https_project_connection_as_remote_http_source() {
+        let parsed = parse_project_connection("red://team.reddb.io:55555?proto=https").unwrap();
+
+        assert_eq!(
+            parsed,
+            ParsedProjectConnection::Http {
+                base_url: "https://team.reddb.io:55555".to_string(),
+                raw: "red://team.reddb.io:55555?proto=https".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn recognizes_websocket_project_connections_without_faking_http() {
+        let parsed = parse_project_connection("wss://team.reddb.io/redwire").unwrap();
+
+        match parsed {
+            ParsedProjectConnection::Deferred { scheme, reason, .. } => {
+                assert_eq!(scheme, "wss");
+                assert!(reason.contains("WebSocket RedWire"));
+            }
+            ParsedProjectConnection::Http { .. } => panic!("wss must not be coerced to HTTP"),
+        }
+    }
+
+    #[test]
+    fn normalizes_http_query_response_to_red_connect_envelope() {
+        let body = normalize_http_query_response(
+            200,
+            r#"{"ok":true,"result":{"columns":["id"],"records":[{"id":1}]}}"#,
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["data"]["columns"][0], "id");
+        assert_eq!(parsed["data"]["records"][0]["id"], 1);
+    }
+
+    #[test]
+    fn normalizes_http_query_error_to_recoverable_rql_error() {
+        let body = normalize_http_query_response(500, r#"{"error":"bad migration"}"#).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(parsed["ok"], false);
+        assert_eq!(parsed["error"], "bad migration");
     }
 
     #[test]
@@ -2312,6 +2666,9 @@ pub fn run() {
             if let Ok(mut d) = app.state::<EmbeddedDb>().project_dir.lock() {
                 *d = project_dir;
             }
+            if let Ok(mut s) = app.state::<EmbeddedDb>().source.lock() {
+                *s = ProjectSource::Local;
+            }
 
             // Start the embedded RedDB sidecar (async; the UI polls reddb_url()
             // until it is ready).
@@ -2347,6 +2704,7 @@ pub fn run() {
             reddb_rql,
             project_info,
             open_project,
+            open_connection_string,
             reset_incompatible_db,
             recent_list,
             recent_pin,
