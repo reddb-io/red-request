@@ -430,6 +430,9 @@
               <Button onclick={() => ws.retry()} size="xs" variant="outline">
                 Retry
               </Button>
+              <Button onclick={() => ws.exportCrashReport()} size="xs" variant="outline">
+                Export crash report
+              </Button>
               <Button
                 onclick={() => ws.rebuildStore()}
                 size="xs"
@@ -445,6 +448,26 @@
               >
                 Choose another project
               </Button>
+              {#if ws.project?.project_dir}
+                <Button onclick={() => ws.forgetProject()} size="xs" variant="ghost">
+                  Forget project
+                </Button>
+                <Button
+                  onclick={() => {
+                    if (
+                      confirm(
+                        "Delete this project's .red/request data and return to the project picker? This cannot be undone."
+                      )
+                    )
+                      void ws.deleteProjectData();
+                  }}
+                  size="xs"
+                  variant="ghost"
+                  title="Deletes only this project's .red/request data, not the source folder"
+                >
+                  Delete local data
+                </Button>
+              {/if}
             </div>
             {#if ws.project}
               <p class="mt-4 text-xs text-fg-faint">
