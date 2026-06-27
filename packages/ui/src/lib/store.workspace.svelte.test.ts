@@ -248,6 +248,38 @@ describe("Workspace persistence coordination", () => {
     expect(repo.saveEnvironmentOrder).toHaveBeenCalledWith(["prod"]);
   });
 
+  it("syncProfileHeaders does not throw when no profile is bound", async () => {
+    // Repro for the v0.40.1 black-screen: when the request has a profileId
+    // that doesn't resolve (deleted profile, fresh project, etc.) the sync
+    // helper must be a no-op, not throw. Previously the RequestPanel's
+    // `$effect` ran `profile?.headers.map(...)` which crashed with
+    // "cannot read properties of undefined" the moment activeReq was set.
+    ws.collections = [
+      {
+        id: "c1",
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          vars: {},
+          order: ["r1"],
+          folders: [],
+          defaultProfileId: "", // no collection default
+        }),
+        requests: [
+          {
+            ...request("r1"),
+            headers: [],
+            profileId: "pf-deleted",
+          },
+        ],
+        environments: [],
+      },
+    ];
+    ws.network = { proxies: [], profiles: [] };
+    expect(() => ws.selectRequest("c1", "r1")).not.toThrow();
+    expect(ws.activeReq?.headers).toEqual([]);
+    expect(ws.loadError).toBeNull();
+  });
+
   it("syncProfileHeaders mirrors the profile into activeReq.headers with fromProfile badge", async () => {
     // Set up a project with one collection, one request, and one profile
     // that injects a UA + custom header. The request has neither.
