@@ -74,10 +74,29 @@ import {
  *  named environment layers on top of. Stored alongside the others. */
 const GLOBALS_ENV = "Globals";
 const PROJECT_OPEN_TIMEOUT_MS = 15_000;
+const LOAD_STEP_TIMEOUT_MS = 15_000;
 export type AppView = "home" | "requests" | "settings" | "database";
 
 const emptyGlobals = (): StoredEnvironment =>
   storedEnvironmentSchema.parse({ name: GLOBALS_ENV, vars: {}, secrets: {} });
+
+async function withTimeout<T>(
+  work: Promise<T>,
+  ms: number,
+  message: string
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 class Workspace {
   ready = $state(false);
@@ -135,6 +154,7 @@ class Workspace {
   runResult = $state<RunnerResult | null>(null);
   runError = $state<string | null>(null);
   private projectOpenGeneration = 0;
+  private loadStoreGeneration = 0;
 
   /** History for the active request (newest first) — powers the Timings panel. */
   reqHistory = $state<HistoryEntry[]>([]);
@@ -523,6 +543,8 @@ class Workspace {
    *  `canHeal` allows one automatic recovery from incompatible on-disk data
    *  (a collection in the wrong model) — back it up + recreate, then retry once. */
   async loadStore(canHeal = true): Promise<void> {
+    const generation = ++this.loadStoreGeneration;
+    const isCurrent = () => generation === this.loadStoreGeneration;
     this.loadError = null;
     this.loading = {
       startedAt: Date.now(),
@@ -530,6 +552,7 @@ class Workspace {
       log: [],
     };
     const step = (s: string, detail?: string) => {
+      if (!isCurrent()) return;
       this.loading = this.loading
         ? {
             ...this.loading,
@@ -542,21 +565,60 @@ class Workspace {
     };
     try {
       step("opening database file");
-      await repo.ensureStore();
+      await withTimeout(
+        repo.ensureStore(),
+        LOAD_STEP_TIMEOUT_MS,
+        `Loading project timed out while opening database file after ${Math.round(
+          LOAD_STEP_TIMEOUT_MS / 1000
+        )}s`
+      );
+      if (!isCurrent()) return;
       step("running migrations");
       // RedDB-native migrations: register + APPLY MIGRATION * (pending → applied in
       // dependency order). No-op when nothing's pending; runs on every project boot.
-      await repo.runMigrations();
+      await withTimeout(
+        repo.runMigrations(),
+        LOAD_STEP_TIMEOUT_MS,
+        `Loading project timed out while running migrations after ${Math.round(
+          LOAD_STEP_TIMEOUT_MS / 1000
+        )}s`
+      );
+      if (!isCurrent()) return;
       step("loading network settings");
-      this.network = await repo.loadNetwork();
+      const network = await withTimeout(
+        repo.loadNetwork(),
+        LOAD_STEP_TIMEOUT_MS,
+        `Loading project timed out while loading network settings after ${Math.round(
+          LOAD_STEP_TIMEOUT_MS / 1000
+        )}s`
+      );
+      if (!isCurrent()) return;
+      this.network = network;
       step("loading UI settings");
-      this.redUiEnabled = (await repo.loadUiSettings()).redUiEnabled;
+      const uiSettings = await withTimeout(
+        repo.loadUiSettings(),
+        LOAD_STEP_TIMEOUT_MS,
+        `Loading project timed out while loading UI settings after ${Math.round(
+          LOAD_STEP_TIMEOUT_MS / 1000
+        )}s`
+      );
+      if (!isCurrent()) return;
+      this.redUiEnabled = uiSettings.redUiEnabled;
       if (!this.redUiEnabled && this.view === "database")
         this.view = "requests";
       step("loading collections + requests");
-      await this.reload();
+      const collections = await withTimeout(
+        repo.loadAll(),
+        LOAD_STEP_TIMEOUT_MS,
+        `Loading project timed out while loading collections and requests after ${Math.round(
+          LOAD_STEP_TIMEOUT_MS / 1000
+        )}s`
+      );
+      if (!isCurrent()) return;
+      this.applyLoadedCollections(collections);
       step("loading environments + secrets");
-      await this.reloadEnvironments();
+      await this.reloadEnvironmentsForLoadStore(generation);
+      if (!isCurrent()) return;
       step("done");
       // Snapshot the good loaded state once per launch — a safety net next to the .rdb while
       // native VCS commit lands (reddb-io/reddb#1382). No-op if the store is empty.
@@ -571,6 +633,7 @@ class Workspace {
       }
       this.loading = null;
     } catch (e) {
+      if (!isCurrent()) return;
       const msg = e instanceof Error ? e.message : String(e);
       // Incompatible project data (a collection in the wrong on-disk model, e.g. a
       // legacy table where we expect kv) — back it up + recreate fresh, then retry
@@ -598,11 +661,7 @@ class Workspace {
       this.loadError = msg;
       appLog("error", `loadStore failed: ${msg}`);
       step("failed", msg);
-      // Keep loading visible briefly so the user sees what failed; the
-      // error-boundary / loadError panel takes over from there.
-      setTimeout(() => {
-        if (this.loading?.step === "failed") this.loading = null;
-      }, 4000);
+      this.loading = null;
     }
   }
 
@@ -641,25 +700,67 @@ class Workspace {
    *  else from the union of every collection's legacy `vars`. */
   async reloadEnvironments(): Promise<void> {
     const all = await repo.loadEnvironments();
+    await this.applyLoadedEnvironments(all);
+  }
+
+  private async reloadEnvironmentsForLoadStore(
+    generation: number
+  ): Promise<void> {
+    const timeoutMessage = `Loading project timed out while loading environments and secrets after ${Math.round(
+      LOAD_STEP_TIMEOUT_MS / 1000
+    )}s`;
+    const all = await withTimeout(
+      repo.loadEnvironments(),
+      LOAD_STEP_TIMEOUT_MS,
+      timeoutMessage
+    );
+    if (generation !== this.loadStoreGeneration) return;
+    await this.applyLoadedEnvironments(all, generation, timeoutMessage);
+  }
+
+  private async applyLoadedEnvironments(
+    all: StoredEnvironment[],
+    generation?: number,
+    timeoutMessage?: string
+  ): Promise<void> {
+    const isCurrent = () =>
+      generation === undefined || generation === this.loadStoreGeneration;
     const gi = all.findIndex((e) => e.name === GLOBALS_ENV);
     if (gi >= 0) {
+      if (!isCurrent()) return;
       this.globals = all[gi]!;
       this.environments = all.filter((_, i) => i !== gi);
     } else {
-      const legacy = await repo.loadGlobals();
+      const legacy = generation
+        ? await withTimeout(
+            repo.loadGlobals(),
+            LOAD_STEP_TIMEOUT_MS,
+            timeoutMessage ?? "Loading project timed out"
+          )
+        : await repo.loadGlobals();
+      if (!isCurrent()) return;
       const seed: Record<string, string> = legacy ? { ...legacy } : {};
       if (!legacy)
         for (const c of this.collections)
           for (const [k, v] of Object.entries(c.collection.vars))
             if (!(k in seed)) seed[k] = v;
-      this.globals = storedEnvironmentSchema.parse({
+      const globals = storedEnvironmentSchema.parse({
         name: GLOBALS_ENV,
         vars: seed,
         secrets: {},
       });
-      await repo.saveEnvironment(
-        $state.snapshot(this.globals) as StoredEnvironment
-      );
+      if (generation)
+        await withTimeout(
+          repo.saveEnvironment($state.snapshot(globals) as StoredEnvironment),
+          LOAD_STEP_TIMEOUT_MS,
+          timeoutMessage ?? "Loading project timed out"
+        );
+      else
+        await repo.saveEnvironment(
+          $state.snapshot(globals) as StoredEnvironment
+        );
+      if (!isCurrent()) return;
+      this.globals = globals;
       this.environments = all;
     }
     this.activeEnvName =
@@ -667,7 +768,11 @@ class Workspace {
   }
 
   async reload(): Promise<void> {
-    this.collections = await repo.loadAll();
+    this.applyLoadedCollections(await repo.loadAll());
+  }
+
+  private applyLoadedCollections(collections: LoadedCollection[]): void {
+    this.collections = collections;
     const first = this.collections[0];
     if (first && !this.activeColId) {
       this.activeColId = first.id;
