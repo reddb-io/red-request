@@ -315,6 +315,43 @@
         {/snippet}
         {#if !ws.ready}
         <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
+      {:else if ws.loading}
+        <!-- Visible "Opening project…" overlay. Replaces the dreaded black
+             iris with a real, labelled progress screen: shows the current
+             step, a step-by-step log so the user can see where it stalled,
+             and the elapsed time. Without this the user gets a silent black
+             window and has no way to know whether the app is hung or
+             just slow. -->
+        <div class="grid h-full place-items-center px-8 text-center">
+          <div class="w-full max-w-md">
+            <div class="mx-auto mb-4 grid h-10 w-10 place-items-center rounded-full bg-[var(--color-brand)]/15 text-[var(--color-brand)]">
+              <span class="mono text-xs font-bold">
+                {Math.floor((Date.now() - ws.loading.startedAt) / 1000)}s
+              </span>
+            </div>
+            <h1 class="mb-1 text-base font-semibold text-fg-strong">
+              {ws.transitioning ? "Opening project…" : "Working…"}
+            </h1>
+            <p class="mb-4 text-sm text-fg-muted">{ws.loading.step}</p>
+            {#if ws.loading.detail}
+              <p class="mono mb-4 break-all rounded bg-[var(--color-bg-1)] px-3 py-2 text-[11px] text-fg-faint">
+                {ws.loading.detail}
+              </p>
+            {/if}
+            <ol
+              class="mx-auto max-h-48 w-full max-w-sm space-y-1 overflow-auto rounded border border-border bg-[var(--color-bg-1)] p-3 text-left text-[11px]"
+            >
+              {#each ws.loading.log as entry, i (i)}
+                <li class="flex gap-2">
+                  <span class="mono shrink-0 text-fg-faint">
+                    +{Math.max(0, Math.floor((entry.ts - ws.loading.startedAt) / 100)) / 10}s
+                  </span>
+                  <span class="text-fg-muted">{entry.step}</span>
+                </li>
+              {/each}
+            </ol>
+          </div>
+        </div>
       {:else if ws.bridgeMissing}
         <div class="grid h-full place-items-center px-8 text-center">
           <div>

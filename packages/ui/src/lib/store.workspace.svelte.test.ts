@@ -280,6 +280,51 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toBeNull();
   });
 
+  it("loading overlay state: emits steps during loadStore so the user sees progress", async () => {
+    // Repro for the v0.40.x black-screen-with-no-feedback pattern: if
+    // loadStore takes >100ms the user sees *nothing* without an overlay.
+    // loadStore now writes `ws.loading.step` at every checkpoint so the
+    // "Opening project…" overlay in +page.svelte can show what's happening.
+    const { resetIncompatibleDb } = await import("./project");
+    vi.mocked(resetIncompatibleDb).mockResolvedValue(undefined);
+    vi.mocked(repo.ensureStore).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    vi.mocked(repo.runMigrations).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    vi.mocked(repo.loadNetwork).mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return { proxies: [], profiles: [] };
+    });
+    ws.collections = [
+      {
+        id: "c1",
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          vars: {},
+          order: ["r1"],
+          folders: [],
+        }),
+        requests: [{ ...request("r1") }],
+        environments: [],
+      },
+    ];
+    ws.network = { proxies: [], profiles: [] };
+    ws.loadError = null;
+
+    const inFlight = ws.loadStore();
+    // While the load is running, the overlay must be populated.
+    expect(ws.loading).toBeTruthy();
+    expect(ws.loading?.step).toMatch(
+      /starting|database|migrations|network|collections|environments/i
+    );
+    expect(ws.loading?.log.length).toBeGreaterThan(0);
+    await inFlight;
+    // After completion, loading is cleared.
+    expect(ws.loading).toBeNull();
+  });
+
   it("syncProfileHeaders mirrors the profile into activeReq.headers with fromProfile badge", async () => {
     // Set up a project with one collection, one request, and one profile
     // that injects a UA + custom header. The request has neither.

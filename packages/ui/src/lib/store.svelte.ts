@@ -89,6 +89,16 @@ class Workspace {
    *  the circle. Durations live in chooseProject(); the overlay CSS mirrors them. */
   transitioning = $state(false);
   transitionPhase = $state<"idle" | "closing" | "hold" | "opening">("idle");
+  /** Live progress while a project opens. The "Opening project…" overlay reads
+   *  these so the user always sees what's happening — better than the dreaded
+   *  black screen with no feedback. Reset to `null` when the load settles. */
+  loading = $state<{
+    startedAt: number;
+    step: string;
+    detail?: string;
+    /** Step-by-step trace so far, newest at the end. */
+    log: { ts: number; step: string; detail?: string }[];
+  } | null>(null);
   project = $state<ProjectInfo | null>(null);
   collections = $state<LoadedCollection[]>([]);
 
@@ -270,7 +280,16 @@ class Workspace {
 
     // Load in parallel with the closing animation, but defer the visible screen
     // swap until we're fully black (avoids a flash inside the shrinking circle).
+    // While the iris is closed the user sees an "Opening project…" overlay with
+    // live step text so they always know what's happening (see <LoadingOverlay>
+    // in +page.svelte). If `loadStore` fails inside `loading`, that overlay
+    // stays visible long enough for the user to read the error.
     appLog("info", `chooseProject: switching to ${dir ?? "global"}`);
+    this.loading = {
+      startedAt: Date.now(),
+      step: `switching to ${dir ?? "global"}…`,
+      log: [{ ts: Date.now(), step: `switching to ${dir ?? "global"}…` }],
+    };
     const ready = (async () => {
       this.project = await openProject(dir).catch((e) => {
         this.loadError = e instanceof Error ? e.message : String(e);
@@ -370,27 +389,40 @@ class Workspace {
    *  (a collection in the wrong model) — back it up + recreate, then retry once. */
   async loadStore(canHeal = true): Promise<void> {
     this.loadError = null;
+    this.loading = {
+      startedAt: Date.now(),
+      step: "starting…",
+      log: [],
+    };
+    const step = (s: string, detail?: string) => {
+      this.loading = this.loading
+        ? {
+            ...this.loading,
+            step: s,
+            detail,
+            log: [...this.loading.log, { ts: Date.now(), step: s, detail }],
+          }
+        : null;
+      appLog("info", `loadStore: ${s}${detail ? ` (${detail})` : ""}`);
+    };
     try {
-      appLog("debug", "loadStore: ensureStore…");
+      step("opening database file");
       await repo.ensureStore();
+      step("running migrations");
       // RedDB-native migrations: register + APPLY MIGRATION * (pending → applied in
       // dependency order). No-op when nothing's pending; runs on every project boot.
-      appLog("debug", "loadStore: runMigrations…");
       await repo.runMigrations();
-      // No sample seed — first-run projects stay empty so the user starts from
-      // a true zero state. `repo.ensureSample` is kept available behind a CLI
-      // flag / docs link for users who want a starter collection.
-      appLog("debug", "loadStore: loadNetwork…");
+      step("loading network settings");
       this.network = await repo.loadNetwork();
-      appLog("debug", "loadStore: loadUiSettings…");
+      step("loading UI settings");
       this.redUiEnabled = (await repo.loadUiSettings()).redUiEnabled;
       if (!this.redUiEnabled && this.view === "database")
         this.view = "requests";
-      appLog("debug", "loadStore: reload…");
+      step("loading collections + requests");
       await this.reload();
-      appLog("debug", "loadStore: reloadEnvironments…");
+      step("loading environments + secrets");
       await this.reloadEnvironments();
-      appLog("debug", "loadStore: done");
+      step("done");
       // Snapshot the good loaded state once per launch — a safety net next to the .rdb while
       // native VCS commit lands (reddb-io/reddb#1382). No-op if the store is empty.
       void backup.autoBackup();
@@ -402,6 +434,7 @@ class Workspace {
         );
         void recentSetCount(this.project.project_dir, total);
       }
+      this.loading = null;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       // Incompatible project data (a collection in the wrong on-disk model, e.g. a
@@ -413,19 +446,28 @@ class Workspace {
           "warn",
           `loadStore: incompatible data (${msg}) — backing up + recreating fresh`
         );
+        step("incompatible data — recreating fresh", msg);
         try {
           await resetIncompatibleDb();
+          step("retrying load after recreate");
           await this.loadStore(false); // retry once on the fresh store
           return;
         } catch (healErr) {
           this.loadError =
             healErr instanceof Error ? healErr.message : String(healErr);
           appLog("error", `loadStore: heal failed: ${this.loadError}`);
+          this.loading = null;
           return;
         }
       }
       this.loadError = msg;
       appLog("error", `loadStore failed: ${msg}`);
+      step("failed", msg);
+      // Keep loading visible briefly so the user sees what failed; the
+      // error-boundary / loadError panel takes over from there.
+      setTimeout(() => {
+        if (this.loading?.step === "failed") this.loading = null;
+      }, 4000);
     }
   }
 
