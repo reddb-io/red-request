@@ -157,6 +157,7 @@ class Workspace {
   runError = $state<string | null>(null);
   private projectOpenGeneration = 0;
   private loadStoreGeneration = 0;
+  private loadingGeneration = 0;
   private syncLoopGeneration = 0;
   private syncLoopRunning = false;
   private syncReloadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -552,15 +553,25 @@ class Workspace {
     const showLoading = options.showLoading !== false;
     const generation = ++this.loadStoreGeneration;
     const isCurrent = () => generation === this.loadStoreGeneration;
+    const clearOwnedLoading = () => {
+      if (this.loadingGeneration === generation) this.loading = null;
+    };
+    const abortIfStale = () => {
+      if (isCurrent()) return false;
+      clearOwnedLoading();
+      return true;
+    };
     this.loadError = null;
-    if (showLoading)
+    if (showLoading) {
+      this.loadingGeneration = generation;
       this.loading = {
         startedAt: Date.now(),
         step: "starting…",
         log: [],
       };
+    }
     const step = (s: string, detail?: string) => {
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       this.loading =
         showLoading && this.loading
           ? {
@@ -581,7 +592,7 @@ class Workspace {
           LOAD_STEP_TIMEOUT_MS / 1000
         )}s`
       );
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       step("running migrations");
       // RedDB-native migrations: register + APPLY MIGRATION * (pending → applied in
       // dependency order). No-op when nothing's pending; runs on every project boot.
@@ -592,7 +603,7 @@ class Workspace {
           LOAD_STEP_TIMEOUT_MS / 1000
         )}s`
       );
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       step("loading network settings");
       const network = await withTimeout(
         repo.loadNetwork(),
@@ -601,7 +612,7 @@ class Workspace {
           LOAD_STEP_TIMEOUT_MS / 1000
         )}s`
       );
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       this.network = network;
       step("loading UI settings");
       const uiSettings = await withTimeout(
@@ -611,7 +622,7 @@ class Workspace {
           LOAD_STEP_TIMEOUT_MS / 1000
         )}s`
       );
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       this.redUiEnabled = uiSettings.redUiEnabled;
       if (!this.redUiEnabled && this.view === "database")
         this.view = "requests";
@@ -623,11 +634,11 @@ class Workspace {
           LOAD_STEP_TIMEOUT_MS / 1000
         )}s`
       );
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       this.applyLoadedCollections(collections);
       step("loading environments + secrets");
       await this.reloadEnvironmentsForLoadStore(generation);
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       step("done");
       // Snapshot the good loaded state once per launch — a safety net next to the .rdb while
       // native VCS commit lands (reddb-io/reddb#1382). No-op if the store is empty.
@@ -640,10 +651,10 @@ class Workspace {
         );
         void recentSetCount(this.project.project_dir, total);
       }
-      if (showLoading) this.loading = null;
+      if (showLoading) clearOwnedLoading();
       if (this.screen === "app") this.startSyncLoop();
     } catch (e) {
-      if (!isCurrent()) return;
+      if (abortIfStale()) return;
       const msg = e instanceof Error ? e.message : String(e);
       // Incompatible project data (a collection in the wrong on-disk model, e.g. a
       // legacy table where we expect kv) — back it up + recreate fresh, then retry
@@ -664,14 +675,14 @@ class Workspace {
           this.loadError =
             healErr instanceof Error ? healErr.message : String(healErr);
           appLog("error", `loadStore: heal failed: ${this.loadError}`);
-          if (showLoading) this.loading = null;
+          if (showLoading) clearOwnedLoading();
           return;
         }
       }
       this.loadError = msg;
       appLog("error", `loadStore failed: ${msg}`);
       step("failed", msg);
-      if (showLoading) this.loading = null;
+      if (showLoading) clearOwnedLoading();
     }
   }
 

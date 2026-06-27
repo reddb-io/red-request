@@ -366,7 +366,7 @@
       >
         {#if !ws.ready}
         <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
-      {:else if ws.loading}
+      {:else if ws.loading && !ws.loadError}
         <!-- Visible "Opening project…" overlay. Replaces the dreaded black
              iris with a real, labelled progress screen: shows the current
              step, a step-by-step log so the user can see where it stalled,

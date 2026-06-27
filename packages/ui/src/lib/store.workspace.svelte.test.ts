@@ -303,6 +303,34 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toBeNull();
   });
 
+  it("clears visible loading when a newer silent reload invalidates it", async () => {
+    let finishVisibleNetwork!: (
+      value: Awaited<ReturnType<typeof repo.loadNetwork>>
+    ) => void;
+    vi.mocked(repo.loadNetwork)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishVisibleNetwork = resolve;
+          })
+      )
+      .mockResolvedValueOnce({ proxies: [], profiles: [] });
+
+    const visibleLoad = ws.loadStore();
+    await vi.waitUntil(
+      () => vi.mocked(repo.loadNetwork).mock.calls.length === 1
+    );
+    expect(ws.loading?.step).toBe("loading network settings");
+
+    await ws.loadStore(true, { showLoading: false });
+    finishVisibleNetwork({ proxies: [], profiles: [] });
+    await visibleLoad;
+
+    expect(repo.loadNetwork).toHaveBeenCalledTimes(2);
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toBeNull();
+  });
+
   it("reloads silently when a remote sync event arrives from the project queue", async () => {
     vi.useFakeTimers();
     let readCalls = 0;

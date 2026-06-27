@@ -16,6 +16,7 @@ describe("project transition CSS", () => {
     expect(irisRule).toContain("position: fixed");
     expect(irisRule).toContain("inset: 2rem 0 0 0");
     expect(irisRule).toContain("z-index: 100");
+    expect(irisRule).toContain("pointer-events: none");
     expect(irisRule).not.toContain("inset: 0;");
     expect(titlebar).toContain("relative z-[130]");
   });

@@ -282,6 +282,7 @@ body {
   inset: 2rem 0 0 0;
   z-index: 100;
   overflow: hidden;
+  pointer-events: none;
 }
 .iris .hole {
   position: absolute;
