@@ -84,14 +84,15 @@ describe("+page error boundary", () => {
     (storeMod.ws as unknown as { view: string }).view = "home";
     try {
       render(Page);
+      // v0.43: each panel has its own nested boundary that names the
+      // failing panel — so the user sees "Home failed to render" plus
+      // the actual error, not a generic "Something went wrong" full-screen.
       await waitFor(() => {
-        expect(document.body.textContent).toContain("Something went wrong");
+        expect(document.body.textContent).toContain("Home failed to render");
       });
       // The synthetic message must be surfaced verbatim so the user can
       // grep for it in the bug report.
       expect(document.body.textContent).toContain("synthetic HomeView crash");
-      // The Retry button is there to attempt a re-render.
-      expect(document.body.textContent).toContain("Retry render");
     } finally {
       (storeMod.ws as unknown as { view: string }).view = "requests";
     }

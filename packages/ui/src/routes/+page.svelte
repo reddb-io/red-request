@@ -269,50 +269,103 @@
 
 <svelte:head><title>{brand.productName}</title></svelte:head>
 
+{#snippet pageFailed(err: unknown, reset: () => void)}
+  <!-- Last-resort screen: any uncaught error in the main app tree
+       (a mounted RequestPanel with a stale profileId, a lazy import
+       that resolves to undefined, anything) lands here instead of a
+       black screen. The user gets an actionable message + the full
+       error in the DeveloperConsole (search for "boundary caught")
+       so a bug report has what it needs. -->
+  <div class="grid h-full place-items-center px-8 text-center">
+    <div class="max-w-lg">
+      <h1 class="mb-2 text-lg font-semibold text-red-400">Something went wrong</h1>
+      <p class="mb-4 text-sm text-fg-muted">
+        A rendering error stopped the layout from mounting. The full stack trace landed
+        in the DeveloperConsole (right-hand panel). Try the actions below, or file a
+        bug with the error text.
+      </p>
+      <pre
+        class="mono mb-4 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-1)] p-3 text-left text-[11px] text-fg-muted"
+      >{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <Button onclick={reset} size="xs" variant="outline">Retry render</Button>
+        <Button
+          onclick={() => {
+            try {
+              location.reload();
+            } catch {
+              /* webview shell will handle it */
+            }
+          }}
+          size="xs"
+          variant="ghost"
+        >
+          Reload window
+        </Button>
+      </div>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet homeFailed(err: unknown)}
+  <div class="grid h-full place-items-center px-8 text-center text-sm">
+    <div>
+      <p class="mb-1 font-semibold text-red-400">Home failed to render</p>
+      <pre class="mono max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-fg-faint">{err instanceof Error ? err.message : String(err)}</pre>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet dbFailed(err: unknown)}
+  <div class="grid h-full place-items-center px-8 text-center text-sm">
+    <div>
+      <p class="mb-1 font-semibold text-red-400">Database view failed</p>
+      <pre class="mono max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-fg-faint">{err instanceof Error ? err.message : String(err)}</pre>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet settingsFailed(err: unknown)}
+  <div class="grid h-full place-items-center px-8 text-center text-sm">
+    <div>
+      <p class="mb-1 font-semibold text-red-400">Settings failed to render</p>
+      <pre class="mono max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-fg-faint">{err instanceof Error ? err.message : String(err)}</pre>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet sidebarFailed()}
+  <div class="grid h-full place-items-center px-2 text-center text-xs text-red-400">
+    Sidebar failed
+  </div>
+{/snippet}
+
+{#snippet requestFailed(err: unknown)}
+  <div class="grid h-full place-items-center px-4 text-center text-sm">
+    <div>
+      <p class="mb-1 font-semibold text-red-400">Request panel failed</p>
+      <pre class="mono max-h-40 overflow-auto whitespace-pre-wrap text-left text-[11px] text-fg-faint">{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet responseFailed(err: unknown)}
+  <div class="grid h-full place-items-center px-4 text-center text-sm">
+    <div>
+      <p class="mb-1 font-semibold text-red-400">Response panel failed</p>
+      <pre class="mono max-h-40 overflow-auto whitespace-pre-wrap text-left text-[11px] text-fg-faint">{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
+    </div>
+  </div>
+{/snippet}
+
 <Tooltip.Provider delayDuration={250} disableHoverableContent>
   <div class="flex h-screen w-screen flex-col overflow-hidden">
     <Titlebar />
     <div class="min-h-0 flex-1 overflow-hidden">
       <svelte:boundary
+        failed={pageFailed}
         onerror={(err) => appLog("error", `boundary caught: ${err instanceof Error ? err.stack : err}`)}
       >
-        {#snippet failed(err, reset)}
-          <!-- Last-resort screen: any uncaught error in the main app tree
-               (a mounted RequestPanel with a stale profileId, a lazy import
-               that resolves to undefined, anything) lands here instead of a
-               black screen. The user gets an actionable message + the full
-               error in the DeveloperConsole (search for "boundary caught")
-               so a bug report has what it needs. -->
-          <div class="grid h-full place-items-center px-8 text-center">
-            <div class="max-w-lg">
-              <h1 class="mb-2 text-lg font-semibold text-red-400">Something went wrong</h1>
-              <p class="mb-4 text-sm text-fg-muted">
-                A rendering error stopped the layout from mounting. The full stack trace landed
-                in the DeveloperConsole (right-hand panel). Try the actions below, or file a
-                bug with the error text.
-              </p>
-              <pre
-                class="mono mb-4 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-1)] p-3 text-left text-[11px] text-fg-muted"
-              >{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
-              <div class="flex flex-wrap items-center justify-center gap-2">
-                <Button onclick={reset} size="xs" variant="outline">Retry render</Button>
-                <Button
-                  onclick={() => {
-                    try {
-                      location.reload();
-                    } catch {
-                      /* webview shell will handle it */
-                    }
-                  }}
-                  size="xs"
-                  variant="ghost"
-                >
-                  Reload window
-                </Button>
-              </div>
-            </div>
-          </div>
-        {/snippet}
         {#if !ws.ready}
         <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
       {:else if ws.loading}
@@ -408,11 +461,27 @@
           <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
             <div class="min-h-0 flex-1 overflow-hidden">
               {#if ws.view === "home"}
-                <div class="h-full overflow-hidden"><HomeView /></div>
+                <!-- Nested boundary per panel: if HomeView / RequestPanel /
+                     ResponsePanel throws on mount, the parent boundary still
+                     catches it but the message names the actual panel that
+                     blew up — way more useful than "something went wrong" in
+                     the full layout. The fallback uses `h-full` so it
+                     actually fills its slot. -->
+                <svelte:boundary
+                  failed={homeFailed}
+                  onerror={(err) => appLog("error", `HomeView boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                >
+                  <div class="h-full overflow-hidden"><HomeView /></div>
+                </svelte:boundary>
               {:else if ws.view === "database" && ws.redUiEnabled}
                 <div class="h-full overflow-hidden">
                   {#if RedUiDatabaseViewComponent}
-                    <RedUiDatabaseViewComponent />
+                    <svelte:boundary
+                      failed={dbFailed}
+                      onerror={(err) => appLog("error", `RedUiDatabaseView boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                    >
+                      <RedUiDatabaseViewComponent />
+                    </svelte:boundary>
                   {:else if lazyLoadError}
                     <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
                   {:else}
@@ -422,7 +491,12 @@
               {:else if ws.view === "settings"}
                 <div class="h-full overflow-hidden">
                   {#if SettingsViewComponent}
-                    <SettingsViewComponent />
+                    <svelte:boundary
+                      failed={settingsFailed}
+                      onerror={(err) => appLog("error", `SettingsView boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                    >
+                      <SettingsViewComponent />
+                    </svelte:boundary>
                   {:else if lazyLoadError}
                     <div class="grid h-full place-items-center text-sm text-red-400">{lazyLoadError}</div>
                   {:else}
@@ -436,7 +510,12 @@
                     class="shrink-0 overflow-hidden"
                     style="width: {sidebarPx}px"
                   >
-                    <Sidebar />
+                    <svelte:boundary
+                      failed={sidebarFailed}
+                      onerror={(err) => appLog("error", `Sidebar boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                    >
+                      <Sidebar />
+                    </svelte:boundary>
                   </div>
                   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                   <div
@@ -451,7 +530,12 @@
                   ></div>
                   <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
                     <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
-                      <RequestPanel />
+                      <svelte:boundary
+                        failed={requestFailed}
+                        onerror={(err) => appLog("error", `RequestPanel boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                      >
+                        <RequestPanel />
+                      </svelte:boundary>
                     </div>
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
                     <div
@@ -465,7 +549,12 @@
                         : ''}"
                     ></div>
                     <div class="min-w-0 flex-1 overflow-hidden">
-                      <ResponsePanel />
+                      <svelte:boundary
+                        failed={responseFailed}
+                        onerror={(err) => appLog("error", `ResponsePanel boundary caught: ${err instanceof Error ? err.stack : err}`)}
+                      >
+                        <ResponsePanel />
+                      </svelte:boundary>
                     </div>
                   </div>
                 </div>
