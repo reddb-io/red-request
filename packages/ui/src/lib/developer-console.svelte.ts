@@ -13,7 +13,18 @@ export interface DeveloperConsoleEntry {
   level: DeveloperConsoleLevel;
   source: DeveloperConsoleSource;
   message: string;
+  /**
+   * The query / request body sent to RedDB. Always shown in the right pane so the
+   * user can see exactly what was issued (especially useful when teaching RedDB:
+   * students can read the RQL/SQL the app generated).
+   */
   detail?: string;
+  /**
+   * The response payload RedDB returned. Distinct from `detail` so the UI can
+   * render them as separate sections (request above, response below). Truncated
+   * to fit the on-screen detail pane; the full body is still in the bridge log.
+   */
+  payload?: string;
   durationMs?: number;
   status?: number;
   rows?: number;
@@ -37,6 +48,9 @@ export interface ReddbRqlLogInput {
   durationMs: number;
   rows?: number;
   attempts?: number;
+  /** Raw RQL response rows as JSON (already stringified). Optional so callers
+   *  can skip it when the result is huge — the row count is still surfaced. */
+  payload?: string;
   error?: string;
 }
 
@@ -47,6 +61,9 @@ export interface ReddbHttpLogInput {
   status: number;
   durationMs: number;
   bodyBytes?: number;
+  /** Raw HTTP response body as text/JSON. Skipped for 4xx/5xx with non-JSON
+   *  bodies to keep the log readable. */
+  payload?: string;
   error?: string;
 }
 
@@ -207,6 +224,7 @@ export class DeveloperConsoleStore {
       ts,
       message: truncate(input.message, 240),
       detail: input.detail ? truncate(input.detail) : undefined,
+      payload: input.payload ? truncate(input.payload) : undefined,
     };
     this.entries = [entry, ...this.entries].slice(0, this.maxEntries);
     this.notify();
@@ -258,6 +276,7 @@ export class DeveloperConsoleStore {
         ? rqlSummary(input.query)
         : `RQL failed: ${rqlSummary(input.query).replace(/^RQL\s+/, "")}`,
       detail: input.error ? `${detail}\n${input.error}` : detail,
+      payload: input.payload,
       durationMs: input.durationMs,
       rows: input.rows,
       attempts: input.attempts,
@@ -270,6 +289,7 @@ export class DeveloperConsoleStore {
       source: "reddb",
       message: `${input.method.toUpperCase()} ${input.path}`,
       detail: input.error,
+      payload: input.payload,
       durationMs: input.durationMs,
       status: input.status,
       bytes: input.bodyBytes,

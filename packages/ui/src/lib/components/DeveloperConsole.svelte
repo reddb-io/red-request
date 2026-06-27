@@ -3,6 +3,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Copy from "@lucide/svelte/icons/copy";
   import Database from "@lucide/svelte/icons/database";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import TerminalSquare from "@lucide/svelte/icons/terminal-square";
@@ -97,6 +98,27 @@
         return `${line.slice(0, i).padEnd(width)}= ${line.slice(i + 3)}`;
       })
       .join("\n");
+  }
+
+  // Human-readable byte size for the Response header (e.g. "1.4 KB", "512 B").
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+  }
+
+  // Copy the selected entry (or just its payload) to the clipboard. Both shapes
+  // are useful: full entry for "send this to support", payload-only for "paste
+  // a RedDB response into a script".
+  function copyPayload() {
+    const sel = developerConsole.selected;
+    if (!sel) return;
+    const text = sel.payload ?? sel.detail ?? sel.message;
+    navigator.clipboard
+      ?.writeText(text)
+      .catch(() => {
+        /* clipboard may be unavailable (HTTP, sandboxed); ignore silently */
+      });
   }
 </script>
 
@@ -208,9 +230,47 @@
             <span class="capitalize {levelClass(selected.level)}">{sourceLabel(selected.source)}</span>
             <span class="truncate text-fg">{selected.message}</span>
             <span class="mono whitespace-nowrap text-fg-subtle">{meta(selected)}</span>
+            <button
+              type="button"
+              class="ml-auto rounded p-1 text-fg-subtle transition-colors hover:bg-[var(--color-bg-2)] hover:text-fg"
+              aria-label="copy entry payload"
+              title="Copy entry payload"
+              onclick={copyPayload}
+            >
+              <Copy size={13} />
+            </button>
           </div>
-          <pre
-            class="mono min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-[11px] leading-5 text-fg-muted">{alignKv(prettify(selected.detail ?? selected.message))}</pre>
+          <div class="min-h-0 flex-1 overflow-auto px-3 py-2">
+            {#if selected.detail}
+              <div class="mb-2">
+                <div
+                  class="mb-1 text-[10px] font-semibold tracking-wide text-fg-faint uppercase"
+                >
+                  Request
+                </div>
+                <pre
+                  class="mono whitespace-pre-wrap break-words rounded bg-[var(--color-bg-0)] px-2 py-1.5 text-[11px] leading-5 text-fg-muted">{alignKv(prettify(selected.detail))}</pre>
+              </div>
+            {/if}
+            {#if selected.payload}
+              <div>
+                <div
+                  class="mb-1 flex items-center gap-2 text-[10px] font-semibold tracking-wide text-fg-faint uppercase"
+                >
+                  <span>Response</span>
+                  {#if selected.bytes !== undefined}
+                    <span class="mono font-normal">({formatBytes(selected.bytes)})</span>
+                  {/if}
+                </div>
+                <pre
+                  class="mono whitespace-pre-wrap break-words rounded bg-[var(--color-bg-0)] px-2 py-1.5 text-[11px] leading-5 text-fg-muted">{alignKv(prettify(selected.payload))}</pre>
+              </div>
+            {:else if !selected.detail}
+              <!-- Fallback when the entry has neither detail nor payload (e.g. app logs). -->
+              <pre
+                class="mono whitespace-pre-wrap break-words rounded bg-[var(--color-bg-0)] px-2 py-1.5 text-[11px] leading-5 text-fg-muted">{alignKv(prettify(selected.message))}</pre>
+            {/if}
+          </div>
         {:else}
           <div class="grid h-full place-items-center px-4 text-center text-xs text-fg-subtle">
             {#if latest}
