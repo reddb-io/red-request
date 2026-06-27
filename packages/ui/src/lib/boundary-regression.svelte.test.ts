@@ -119,4 +119,45 @@ describe("+page error boundary", () => {
       screen.getByRole("button", { name: "Export crash report" })
     ).toBeTruthy();
   });
+
+  it("prioritizes project recovery over a stale loading overlay", async () => {
+    const project = await import("./project");
+    const storeMod = await import("./store.svelte");
+    vi.mocked(project.projectInfo).mockResolvedValueOnce({
+      db_path: "/tmp/fake/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: null,
+    });
+    render(Page);
+
+    await waitFor(() => {
+      expect(storeMod.ws.ready).toBe(true);
+    });
+
+    storeMod.ws.ready = true;
+    storeMod.ws.screen = "app";
+    storeMod.ws.project = {
+      db_path: "/tmp/fake/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: "fake",
+    };
+    storeMod.ws.loadError = "Opening project timed out after 15s: /tmp/fake";
+    storeMod.ws.loading = {
+      startedAt: Date.now(),
+      step: "opening database file",
+      log: [{ ts: Date.now(), step: "opening database file" }],
+    };
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("Retry");
+    });
+    expect(document.body.textContent).toContain("Rebuild database");
+    expect(document.body.textContent).toContain("Choose another project");
+    expect(document.body.textContent).not.toContain("Opening project…");
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+  });
 });
