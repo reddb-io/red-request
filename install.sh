@@ -13,6 +13,10 @@
 #   • macOS / Windows → downloads + verifies the GUI installer (.dmg / .exe) and hands it to
 #               you to open (GUI installers need a click).
 # A platform with no published build yet degrades to a clear message. Remove with uninstall.sh.
+#
+# UI: when stdout is a TTY (and NO_COLOR isn't set) the installer paints a colored banner,
+# shows a spinner while downloading, and frames the final report in a box. In non-TTY
+# contexts (CI logs, `... > install.log`) it falls back to plain text so logs stay greppable.
 set -euo pipefail
 
 REPO="reddb-io/red-request"
@@ -25,6 +29,7 @@ VERSION=""
 FORCE=0
 MODIFY_PATH=1
 LINUX_FORMAT="deb" # deb (default) | appimage
+FORCE_NO_COLOR=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     --deb) LINUX_FORMAT="deb"; shift ;;
     --force) FORCE=1; shift ;;
     --no-modify-path) MODIFY_PATH=0; shift ;;
+    --no-color) FORCE_NO_COLOR=1; shift ;;
     -h|--help)
       cat <<EOF
 Red Request installer
@@ -45,20 +51,131 @@ Usage: install.sh [OPTIONS]
   --install-dir <path>   AppImage only — where to put the binary (default: ~/.local/bin)
   --force                Reinstall even if already on the latest version
   --no-modify-path       AppImage only — don't touch your shell rc; just print the PATH hint
+  --no-color             Plain output (no ANSI colors / spinner / box) for CI logs
   -h, --help             This help
 
-Env: RED_REQUEST_INSTALL_DIR overrides --install-dir.
+Env: RED_REQUEST_INSTALL_DIR overrides --install-dir; NO_COLOR=1 forces plain output.
 EOF
       exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-# ── tiny ui ────────────────────────────────────────────────────────────────
-say()  { printf '→ %s\n' "$*"; }
-ok()   { printf '✓ %s\n' "$*"; }
-warn() { printf '! %s\n' "$*" >&2; }
-err()  { printf '✗ %s\n' "$*" >&2; exit 1; }
+# ── ui: colors / spinner / box ─────────────────────────────────────────────
+# ANSI helpers. We only emit escapes when (a) stdout is a TTY, (b) NO_COLOR
+# is unset, and (c) the user didn't pass --no-color. That keeps `... > log`
+# and CI runs greppable while giving interactive users a colored view.
+if [[ -t 1 && -z "${NO_COLOR:-}" && "$FORCE_NO_COLOR" != "1" ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_BLUE=$'\033[34m'
+  C_CYAN=$'\033[36m'
+  C_BRAND=$'\033[38;5;203m'  # warm red, matches the red-request wordmark
+else
+  C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""
+  C_YELLOW=""; C_BLUE=""; C_CYAN=""; C_BRAND=""
+fi
+UI_IS_TTY=0
+[[ -t 1 && -z "${NO_COLOR:-}" && "$FORCE_NO_COLOR" != "1" ]] && UI_IS_TTY=1
+
+# Unicode glyphs render fine on every modern terminal (macOS Terminal, iTerm2,
+# gnome-terminal, Windows Terminal). When UI is off we fall back to ASCII so
+# plain logs still read correctly.
+if [[ "$UI_IS_TTY" == "1" ]]; then
+  G_ARROW="▸"
+  G_OK="✓"
+  G_WARN="!"
+  G_ERR="✗"
+  G_SPINNER='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+else
+  G_ARROW="→"; G_OK="✓"; G_WARN="!"; G_ERR="✗"
+  G_SPINNER='|/-\'
+fi
+
+# ── ui primitives ─────────────────────────────────────────────────────────
+say()  { printf '%s%s%s %s\n' "$C_DIM" "$G_ARROW" "$C_RESET" "$*"; }
+ok()   { printf '%s%s%s %s\n' "$C_GREEN" "$G_OK" "$C_RESET" "$*"; }
+warn() { printf '%s%s%s %s\n' "$C_YELLOW" "$G_WARN" "$C_RESET" "$*" >&2; }
+err()  { printf '%s%s%s %s\n' "$C_RED" "$G_ERR" "$C_RESET" "$*" >&2; exit 1; }
+
+# Print a numbered step header (e.g. "Step 2/4 · Resolving latest release").
+# Stops any leftover spinner first so the cursor isn't stomping into the next line.
+step() {
+  stop_spinner 2>/dev/null || true
+  local n="$1" total="$2" title="$3"
+  printf '\n%s%s Step %s/%s %s%s\n' \
+    "$C_BOLD" "$C_BRAND" "$n" "$total" "$title" "$C_RESET"
+}
+
+# Animate a spinner while a background job runs. Caller spawns the work,
+# captures its PID, and we poll `kill -0` until it goes away. No-op when UI
+# is off — installs stay fast and logs stay readable.
+SPIN_PID=""
+SPIN_ACTIVE=0
+SPIN_WATCHER=""
+spin_start() {
+  [[ "$UI_IS_TTY" == "1" ]] || return 0
+  local label="$1" pid="$2"
+  SPIN_PID="$pid"
+  SPIN_ACTIVE=1
+  # Hide the cursor while we draw over the same line.
+  printf '\033[?25l' >&2
+  (
+    local i=0 frame
+    while kill -0 "$SPIN_PID" 2>/dev/null; do
+      frame="${G_SPINNER:$((i % ${#G_SPINNER})):1}"
+      printf '\r%s%s%s %s' "$C_CYAN" "$frame" "$C_RESET" "$label" >&2
+      i=$((i + 1))
+      sleep 0.08
+    done
+  ) &
+  SPIN_WATCHER=$!
+}
+
+stop_spinner() {
+  [[ "${SPIN_ACTIVE:-0}" == "1" ]] || return 0
+  SPIN_ACTIVE=0
+  wait "$SPIN_WATCHER" 2>/dev/null || true
+  # Erase the spinner line and restore the cursor. No-op when UI is off so
+  # non-TTY logs (CI, `... > install.log`) stay free of stray escapes.
+  if [[ "$UI_IS_TTY" == "1" ]]; then
+    printf '\r\033[2K\033[?25h' >&2
+  fi
+  SPIN_PID=""
+}
+
+# Frame a multi-line message in a Unicode box. Used for the success / error
+# summaries at the end so the final result stands out from the log noise.
+# `box "title" "line1" "line2" …` — `title` is required, body lines optional.
+box() {
+  local title="$1"; shift
+  local width=64 pad
+  (( ${#title} + 4 > width )) && width=$((${#title} + 4))
+  pad=$(printf '%*s' "$((width - ${#title} - 2))" "")
+  printf '%s╭─ %s %s%s%s╮\n' "$C_BRAND$C_BOLD" "$title" "$pad" "$C_RESET" "$C_BRAND"
+  if [[ $# -gt 0 ]]; then
+    local line
+    for line in "$@"; do
+      printf '%s│%s %-*s %s│\n' "$C_BRAND" "$C_RESET" "$((width - 2))" "$line" "$C_BRAND"
+    done
+  fi
+  printf '%s╰%s╯%s\n' "$C_BRAND" "$(printf '─%.0s' $(seq 1 "$width"))" "$C_RESET"
+}
+
+# OS-aware banner. Only on interactive runs — CI doesn't need the logo.
+banner() {
+  [[ "$UI_IS_TTY" == "1" ]] || return 0
+  printf '%s%s  R E D · R E Q U E S T%s\n' "$C_BRAND$C_BOLD" "" "$C_RESET"
+  printf '%sOpen-source API client · powered by recker + RedDB%s\n' "$C_DIM" "$C_RESET"
+}
+
+# Make sure the spinner is cleared on any exit path so a stray ^C doesn't
+# leave the cursor hidden or a half-drawn frame on screen.
+trap 'stop_spinner; [[ "$UI_IS_TTY" == "1" ]] && printf "\033[?25h" >&2' EXIT INT TERM
 
 # ── platform ──────────────────────────────────────────────────────────────
 detect_platform() {
@@ -89,10 +206,23 @@ asset_name() {
 # ── network ────────────────────────────────────────────────────────────────
 have() { command -v "$1" >/dev/null 2>&1; }
 
-download() { # url dest
-  if have curl; then curl -fSL --retry 3 -o "$2" "$1"
-  elif have wget; then wget -qO "$2" "$1"
-  else err "need curl or wget"; fi
+download() { # url dest [label]
+  # Spin in the foreground while curl/wget runs in the background. We need
+  # curl's exit status, so capture it through $? after `wait`. The asset is
+  # 80–120 MB on Linux; the spinner is the difference between "is it hung?"
+  # and "I can see it's moving".
+  local url="$1" dest="$2" label="${3:-downloading}"
+  (
+    if have curl; then curl -fSL --retry 3 -o "$dest" "$url"
+    elif have wget; then wget -qO "$dest" "$url"
+    else err "need curl or wget"
+    fi
+  ) &
+  local dl_pid=$!
+  spin_start "$label" "$dl_pid"
+  wait "$dl_pid"; local rc=$?
+  stop_spinner
+  return $rc
 }
 
 # Resolve the release tag without hitting the rate-limited JSON API: GitHub's
@@ -138,9 +268,9 @@ verify_sha256() { # file checksums_text asset_name
 fetch_verified() { # tag asset dir
   local tag="$1" asset="$2" dir="$3" url ck_text
   url="$(asset_url "$tag" "$asset")"
-  say "downloading $asset"
-  download "$url" "$dir/$asset" || err "download failed — is $asset published in $tag? ($url)"
-  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout 2>/dev/null || true)"
+  download "$url" "$dir/$asset" "downloading $asset" \
+    || err "download failed — is $asset published in $tag? ($url)"
+  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout "fetching checksums.txt" 2>/dev/null || true)"
   if [[ -n "$ck_text" ]]; then verify_sha256 "$dir/$asset" "$ck_text" "$asset"
   else warn "no checksums.txt in $tag — skipping verify"; fi
   DL="$dir/$asset"
@@ -192,7 +322,10 @@ install_deb() {
     return 0
   fi
 
+  step 1 4 "Resolving latest release"
   say "${cur:+upgrading $cur → }${tag} (.deb · $OS/$ARCH)"
+
+  step 2 4 "Downloading + verifying"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
   fetch_verified "$tag" "$asset" "$tmp"
@@ -202,8 +335,9 @@ install_deb() {
   # performed unsandboxed as root … Permission denied". Widen the path it reads.
   chmod 755 "$tmp" && chmod 644 "$DL"
 
+  step 3 4 "Installing via apt"
   [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
-  say "installing via apt (you may be prompted for your password)…"
+  say "you may be prompted for your password…"
   if have apt-get; then
     $sudo apt-get install -y ${FORCE:+--reinstall --allow-downgrades} "$DL"
   else
@@ -212,8 +346,14 @@ install_deb() {
   ok "${cur:+upgraded to }Red Request $tag installed (.deb)"
   clear_appimage_shadow
   ensure_deb_shortcut
+
+  step 4 4 "Verifying"
   verify_install "$(deb_binary_path)"
-  say "launch it from your app menu, or run:  $BIN_NAME   (or  $SHORTCUT .  to open the current folder)"
+
+  box "✔ Red Request $tag ready" \
+    "" \
+    "  $BIN_NAME              # run the desktop app" \
+    "  $SHORTCUT .            # open the current folder as a project"
 }
 
 # ── path wiring (AppImage only) ─────────────────────────────────────────────
@@ -283,7 +423,10 @@ install_appimage() {
     return 0
   fi
 
+  step 1 4 "Resolving latest release"
   if [[ -n "$cur" ]]; then say "upgrading $cur → $tag (AppImage · $OS/$ARCH)"; else say "installing $tag (AppImage · $OS/$ARCH)"; fi
+
+  step 2 4 "Downloading + verifying"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
   fetch_verified "$tag" "$asset" "$tmp"
@@ -296,6 +439,7 @@ install_appimage() {
     warn "prefer the .deb (re-run without --appimage), or remove it: sudo apt remove $BIN_NAME"
   fi
 
+  step 3 4 "Installing"
   mkdir -p "$INSTALL_DIR" "$DATA_DIR"
   chmod +x "$DL"
   mv -f "$DL" "$INSTALL_DIR/$BIN_NAME.new"
@@ -305,9 +449,15 @@ install_appimage() {
   write_desktop_entry
   ensure_path
 
-  ok "${cur:+upgraded to }Red Request $tag → $INSTALL_DIR/$BIN_NAME"
+  step 4 4 "Verifying"
   verify_install "$INSTALL_DIR/$BIN_NAME"
-  say "run it:  $BIN_NAME        (or  $SHORTCUT .  to open the current folder as a project)"
+
+  box "✔ Red Request $tag ready" \
+    "" \
+    "  $BIN_NAME              # run the desktop app" \
+    "  $SHORTCUT .            # open the current folder as a project" \
+    "" \
+    "binary: $INSTALL_DIR/$BIN_NAME"
 }
 
 # ── macOS / Windows: download + verify, then hand off the GUI installer ─────
@@ -318,24 +468,43 @@ install_gui() {
   local tag asset tmp ck_text dest
   tag="$(resolve_tag)" || err "could not resolve the latest release tag"
   asset="$(asset_name)"
+
+  step 1 3 "Resolving latest release"
   say "Red Request $tag · $OS/$ARCH"
+
+  step 2 3 "Downloading + verifying"
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
   trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
 
-  if ! download "$(asset_url "$tag" "$asset")" "$tmp/$asset" 2>/dev/null; then
+  if ! download "$(asset_url "$tag" "$asset")" "$tmp/$asset" "downloading $asset"; then
     warn "no $OS/$ARCH build published in $tag yet."
     say  "browse all assets: https://github.com/$REPO/releases/tag/$tag"
     return 0
   fi
-  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout 2>/dev/null || true)"
+  ck_text="$(download "$(checksum_url "$tag")" /dev/stdout "fetching checksums.txt" 2>/dev/null || true)"
   [[ -n "$ck_text" ]] && verify_sha256 "$tmp/$asset" "$ck_text" "$asset"
 
+  step 3 3 "Saving installer"
   dest="$HOME/Downloads"; [[ -d "$dest" ]] || dest="$PWD"
   mv -f "$tmp/$asset" "$dest/$asset"
-  ok "downloaded + verified → $dest/$asset"
+
   case "$OS" in
-    darwin)  say "open it, drag Red Request to Applications. First launch: right-click → Open (unsigned build)." ;;
-    windows) say "run $asset to install." ;;
+    darwin)
+      box "✔ Red Request $tag downloaded" \
+        "" \
+        "  $dest/$asset" \
+        "" \
+        "1. open the .dmg" \
+        "2. drag Red Request into Applications" \
+        "3. first launch: right-click → Open (unsigned build)"
+      ;;
+    windows)
+      box "✔ Red Request $tag downloaded" \
+        "" \
+        "  $dest/$asset" \
+        "" \
+        "run the .exe to install."
+      ;;
   esac
 }
 
@@ -366,6 +535,7 @@ verify_install() { # red_request_path
 }
 
 main() {
+  banner
   detect_platform
   case "$OS" in
     linux)          [[ "$LINUX_FORMAT" == "appimage" ]] && install_appimage || install_deb ;;
