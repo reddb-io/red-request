@@ -78,6 +78,9 @@ const LOAD_STEP_TIMEOUT_MS = 15_000;
 const SYNC_QUEUE_WAIT_MS = 15_000;
 const SYNC_RELOAD_DELAY_MS = 250;
 export type AppView = "home" | "requests" | "settings" | "database";
+type OpeningTarget =
+  | { kind: "local"; dir: string | null }
+  | { kind: "connection"; connection: string };
 
 const emptyGlobals = (): StoredEnvironment =>
   storedEnvironmentSchema.parse({ name: GLOBALS_ENV, vars: {}, secrets: {} });
@@ -122,6 +125,7 @@ class Workspace {
     /** Step-by-step trace so far, newest at the end. */
     log: { ts: number; step: string; detail?: string }[];
   } | null>(null);
+  openingTarget = $state<OpeningTarget | null>(null);
   project = $state<ProjectInfo | null>(null);
   collections = $state<LoadedCollection[]>([]);
 
@@ -258,6 +262,11 @@ class Workspace {
     return out;
   }
 
+  get recoveryProjectDir(): string | null {
+    if (this.project?.project_dir) return this.project.project_dir;
+    return this.openingTarget?.kind === "local" ? this.openingTarget.dir : null;
+  }
+
   async init(): Promise<void> {
     if (!isTauri) {
       this.bridgeMissing = true;
@@ -275,14 +284,15 @@ class Workspace {
     // Launched via `rr <dir>` → straight into the project; otherwise show the selector.
     if (this.project?.arg_launched) {
       appLog("info", "init: arg_launched → entering app directly");
-      await this.loadStore();
       this.screen = "app";
-      this.startSyncLoop();
+      this.ready = true;
+      await this.loadStore();
+      if (!this.loadError) this.startSyncLoop();
     } else {
       appLog("info", "init: not arg-launched → showing project selector");
       this.screen = "selector";
+      this.ready = true;
     }
-    this.ready = true;
   }
 
   /** Open a project dir (or global with `null`): switch reddb, reset, load, enter app.
@@ -302,6 +312,7 @@ class Workspace {
 
     this.transitioning = true;
     this.transitionPhase = "closing";
+    this.openingTarget = { kind: "local", dir };
     this.activeColId = null;
     this.activeReq = null;
     this.activeEnvName = null;
@@ -363,6 +374,7 @@ class Workspace {
       const result = await ready;
       if (generation !== this.projectOpenGeneration) return;
       if (!result.ok) throw result.error;
+      this.openingTarget = null;
     } catch (e) {
       ++this.projectOpenGeneration;
       ++this.loadStoreGeneration;
@@ -395,6 +407,7 @@ class Workspace {
     await this.flushSave();
     this.transitioning = false;
     this.transitionPhase = "idle";
+    this.openingTarget = { kind: "connection", connection: value };
     this.loadError = null;
     this.loading = {
       startedAt: Date.now(),
@@ -424,6 +437,7 @@ class Workspace {
           PROJECT_OPEN_TIMEOUT_MS / 1000
         )}s: ${value}`
       );
+      this.openingTarget = null;
     } catch (e) {
       ++this.projectOpenGeneration;
       const msg = e instanceof Error ? e.message : String(e);
@@ -452,6 +466,7 @@ class Workspace {
     this.stopSyncLoop();
     this.transitioning = false;
     this.transitionPhase = "idle";
+    this.openingTarget = null;
     this.loading = null;
     this.loadError = null;
     this.screen = "selector";
@@ -478,7 +493,7 @@ class Workspace {
 
   /** Permanently delete the current project's data (.red/request) and return to the selector. */
   async deleteProjectData(): Promise<void> {
-    const dir = this.project?.project_dir;
+    const dir = this.recoveryProjectDir;
     if (!dir) return;
     // Switch reddb off this dir first so the sidecar releases app.rdb before we delete it.
     await openProject(null).catch(() => {});
@@ -773,17 +788,62 @@ class Workspace {
 
   async retry(): Promise<void> {
     const target = this.project ? $state.snapshot(this.project) : null;
+    const openingTarget = this.openingTarget
+      ? $state.snapshot(this.openingTarget)
+      : null;
     const connection = target?.connection_string;
     if (connection) {
       await this.chooseConnectionString(connection);
+      return;
+    }
+    if (openingTarget?.kind === "connection") {
+      await this.chooseConnectionString(openingTarget.connection);
       return;
     }
     if (target) {
       await this.chooseProject(target.project_dir);
       return;
     }
+    if (openingTarget?.kind === "local") {
+      await this.chooseProject(openingTarget.dir);
+      return;
+    }
     this.project = await projectInfo().catch(() => this.project);
     await this.loadStore();
+  }
+
+  forceOpenRecovery(reason = "Project opening was stopped by the user."): void {
+    this.projectOpenGeneration++;
+    this.loadStoreGeneration++;
+    this.stopSyncLoop();
+    const target = this.openingTarget
+      ? $state.snapshot(this.openingTarget)
+      : null;
+    this.transitioning = false;
+    this.transitionPhase = "idle";
+    this.loading = null;
+    this.loadError = reason;
+    this.screen = "app";
+    if (!this.project && target?.kind === "local") {
+      this.project = {
+        db_path: target.dir ?? "global",
+        project_dir: target.dir,
+        is_project: target.dir !== null,
+        arg_launched: false,
+        name: null,
+      };
+    } else if (!this.project && target?.kind === "connection") {
+      this.project = {
+        db_path: target.connection,
+        project_dir: null,
+        is_project: false,
+        arg_launched: false,
+        source: "remote-http",
+        connection_string: target.connection,
+        name: "Remote RedDB",
+      };
+    }
+    appLog("warn", `forceOpenRecovery: ${reason}`);
   }
 
   /**

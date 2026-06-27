@@ -86,6 +86,7 @@ describe("+page icon-bar navigation", () => {
 
     await waitFor(() => expect(ws.screen).toBe("app"));
     await waitFor(() => expect(ws.redUiEnabled).toBe(true));
+    await waitFor(() => expect(ws.loading).toBeNull());
 
     await fireEvent.click(
       screen.getByRole("button", {
