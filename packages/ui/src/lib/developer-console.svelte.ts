@@ -4,7 +4,7 @@ export type DeveloperConsoleLevel =
   | "info"
   | "debug"
   | "trace";
-export type DeveloperConsoleSource = "app" | "reddb" | "engine";
+export type DeveloperConsoleSource = "app" | "reddb";
 export type DeveloperConsoleFilter = "all" | DeveloperConsoleSource;
 
 export interface DeveloperConsoleEntry {
@@ -27,6 +27,7 @@ export interface DeveloperConsoleSnapshot {
   filter: DeveloperConsoleFilter;
   filteredEntries: DeveloperConsoleEntry[];
   latest: DeveloperConsoleEntry | null;
+  selected: DeveloperConsoleEntry | null;
   errorCount: number;
 }
 
@@ -148,6 +149,7 @@ export class DeveloperConsoleStore {
   entries: DeveloperConsoleEntry[] = [];
   open = false;
   filter: DeveloperConsoleFilter = "all";
+  selectedId: string | null = null;
   private sequence = 0;
   private listeners = new Set<(snapshot: DeveloperConsoleSnapshot) => void>();
 
@@ -163,6 +165,13 @@ export class DeveloperConsoleStore {
     return this.entries[0] ?? null;
   }
 
+  get selected(): DeveloperConsoleEntry | null {
+    if (!this.selectedId) return null;
+    // Re-resolve on every read so the latest copy of the entry is shown (the
+    // log entries are immutable, but the user might clear and re-add).
+    return this.entries.find((entry) => entry.id === this.selectedId) ?? null;
+  }
+
   get errorCount(): number {
     return this.entries.filter((entry) => entry.level === "error").length;
   }
@@ -174,6 +183,7 @@ export class DeveloperConsoleStore {
       filter: this.filter,
       filteredEntries: this.filteredEntries,
       latest: this.latest,
+      selected: this.selected,
       errorCount: this.errorCount,
     };
   }
@@ -204,11 +214,25 @@ export class DeveloperConsoleStore {
 
   clear(): void {
     this.entries = [];
+    this.selectedId = null;
     this.notify();
   }
 
   setFilter(filter: DeveloperConsoleFilter): void {
     this.filter = filter;
+    // Selection might point at an entry hidden by the new filter — keep it only
+    // if still visible.
+    if (this.selectedId) {
+      const visible = this.filteredEntries.some(
+        (e) => e.id === this.selectedId
+      );
+      if (!visible) this.selectedId = null;
+    }
+    this.notify();
+  }
+
+  select(id: string | null): void {
+    this.selectedId = id;
     this.notify();
   }
 

@@ -432,6 +432,31 @@ class Workspace {
     await this.loadStore();
   }
 
+  /**
+   * Nuclear option for an unrecoverable store: back up app.rdb* and recreate
+   * fresh. Use when the on-disk format is from a very old build that no
+   * migration can upgrade, or when the user explicitly wants to start over.
+   * Sets loadError so the recovery UI can keep showing the previous failure
+   * until the wipe+reload round-trip succeeds.
+   */
+  async rebuildStore(): Promise<void> {
+    this.loadError = null;
+    try {
+      appLog(
+        "warn",
+        "loadStore: rebuilding store from scratch (user-initiated)"
+      );
+      await resetIncompatibleDb();
+      // Retry once without healing — the wipe was already done, so any further
+      // exception here is the real failure to surface.
+      await this.loadStore(false);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.loadError = `Rebuild failed: ${msg}`;
+      appLog("error", `rebuildStore failed: ${msg}`);
+    }
+  }
+
   /** Load project-level environments and split off the reserved "Globals" base env.
    *  Migrates first-run state: seeds Globals from a legacy `rr_settings.globals` doc,
    *  else from the union of every collection's legacy `vars`. */

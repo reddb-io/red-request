@@ -217,6 +217,52 @@
       void ws.send();
     }
   }
+
+  /**
+   * Translate a raw RedDB / red-request load error into user-facing copy.
+   * The error string is still shown verbatim below for support requests, but
+   * the title + summary tell the user what kind of failure this is so they can
+   * pick the right recovery button.
+   */
+  function classifyLoadError(message: string): {
+    title: string;
+    summary: string;
+  } {
+    const m = message.toLowerCase();
+    if (/model mismatch|expected kv|incompatible/.test(m)) {
+      return {
+        title: "Database format is outdated",
+        summary:
+          "This project's app.rdb was created by a much older version of red-request. Rebuild to migrate to the current schema — the old file is backed up next to it.",
+      };
+    }
+    if (/sidecar|reddb_url|connect|connection refused|unreachable|spawn/i.test(m)) {
+      return {
+        title: "Can't reach the embedded database",
+        summary:
+          "The RedDB sidecar didn't come up. Try Retry; if it keeps failing, restart the app or rebuild the database.",
+      };
+    }
+    if (/permission|denied|eacces/.test(m)) {
+      return {
+        title: "Permission denied",
+        summary:
+          "red-request can't read or write this app.rdb. Check the file's permissions or pick a different project folder.",
+      };
+    }
+    if (/no such file|not found|missing/.test(m)) {
+      return {
+        title: "Database file is missing",
+        summary:
+          "The app.rdb for this project no longer exists. Rebuild to create a fresh one.",
+      };
+    }
+    return {
+      title: "Storage error",
+      summary:
+        "The embedded RedDB store didn't come up. Retry first; if the error keeps repeating, rebuild the database or pick a different project.",
+    };
+  }
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -244,13 +290,39 @@
       {:else if ws.screen === "selector"}
         <ProjectSelector />
       {:else if ws.loadError}
+        {@const hint = classifyLoadError(ws.loadError)}
         <div class="grid h-full place-items-center px-8 text-center">
-          <div>
-            <h1 class="mb-2 text-lg font-semibold text-red-400">Storage error</h1>
-            <p class="mx-auto mb-4 max-w-md text-sm text-fg-muted">
-              The embedded RedDB store didn't come up: <span class="mono">{ws.loadError}</span>
+          <div class="max-w-lg">
+            <h1 class="mb-2 text-lg font-semibold text-red-400">{hint.title}</h1>
+            <p class="mx-auto mb-1 max-w-md text-sm text-fg-muted">{hint.summary}</p>
+            <p class="mono mx-auto mb-4 max-w-md text-xs text-fg-faint">
+              {ws.loadError}
             </p>
-            <Button onclick={() => ws.retry()} size="xs">Retry</Button>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+              <Button onclick={() => ws.retry()} size="xs" variant="outline">
+                Retry
+              </Button>
+              <Button
+                onclick={() => ws.rebuildStore()}
+                size="xs"
+                variant="outline"
+                title="Back up app.rdb and recreate from scratch — keeps a .incompatible backup next to the file so nothing is lost"
+              >
+                Rebuild database
+              </Button>
+              <Button
+                onclick={() => ws.backToSelector()}
+                size="xs"
+                variant="ghost"
+              >
+                Choose another project
+              </Button>
+            </div>
+            {#if ws.project}
+              <p class="mt-4 text-xs text-fg-faint">
+                Current project: <span class="mono">{ws.project.db_path}</span>
+              </p>
+            {/if}
           </div>
         </div>
       {:else}
