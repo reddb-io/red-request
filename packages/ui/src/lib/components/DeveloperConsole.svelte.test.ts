@@ -81,4 +81,80 @@ describe("DeveloperConsole", () => {
     const pre = document.querySelector("pre.mono");
     expect(pre?.textContent).toContain("boot");
   });
+
+  it("renders the RQL payload (the response RedDB sent back) in the right pane", async () => {
+    // Simulate a SELECT that returned 2 rows. The payload is what students
+    // would read to learn RedDB — the same JSON RedDB itself produced.
+    developerConsole.logReddbRql({
+      query: "SELECT name, model FROM red.collections",
+      ok: true,
+      durationMs: 7,
+      rows: 2,
+      payload: JSON.stringify(
+        {
+          columns: ["name", "model"],
+          records: [
+            { name: "rr_requests", model: "document" },
+            { name: "rr_collections", model: "kv" },
+          ],
+        },
+        null,
+        2
+      ),
+    });
+
+    render(DeveloperConsole);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Open developer console" })
+    );
+
+    const rows = screen.getAllByRole("button", { pressed: false });
+    await fireEvent.click(
+      rows.find((b) => b.textContent?.includes("SELECT red.collections"))!
+    );
+
+    // The right pane renders two labelled sections (REQUEST + RESPONSE) so the
+    // student sees both the query that was issued and the rows RedDB returned.
+    expect(screen.getByText("Request")).toBeTruthy();
+    expect(screen.getByText("Response")).toBeTruthy();
+    const pres = document.querySelectorAll("pre.mono");
+    const all = Array.from(pres)
+      .map((p) => p.textContent)
+      .join("\n");
+    expect(all).toContain("SELECT name, model FROM red.collections");
+    expect(all).toContain('"rr_requests"');
+    expect(all).toContain('"document"');
+  });
+
+  it("renders HTTP error response payload with the 5xx body", async () => {
+    developerConsole.logReddbHttp({
+      method: "POST",
+      path: "/v1/kv/rr_settings",
+      ok: false,
+      status: 500,
+      durationMs: 12,
+      bodyBytes: 47,
+      error: "internal error",
+      payload: '{"error":"internal: corrupt page header"}',
+    });
+
+    render(DeveloperConsole);
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Open developer console" })
+    );
+
+    const rows = screen.getAllByRole("button", { pressed: false });
+    await fireEvent.click(
+      rows.find((b) => b.textContent?.includes("POST /v1/kv"))!
+    );
+
+    const pres = document.querySelectorAll("pre.mono");
+    const all = Array.from(pres)
+      .map((p) => p.textContent)
+      .join("\n");
+    expect(all).toContain("corrupt page header");
+    // Byte size renders next to the RESPONSE label. `meta` also renders the
+    // status code "500" alongside the size, so use getAllByText to accept both.
+    expect(screen.getAllByText(/\d+ B/).length).toBeGreaterThan(0);
+  });
 });

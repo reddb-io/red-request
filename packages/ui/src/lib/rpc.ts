@@ -80,6 +80,11 @@ export function reddbRequest(
         status: reply.status,
         durationMs: developerConsoleDuration(started),
         bodyBytes: body?.length,
+        // Surface the response body in the dev console's right pane so users
+        // can see exactly what RedDB returned (or what 4xx/5xx said). Trim
+        // huge bodies via the store's truncate() so the on-screen buffer
+        // stays readable for big list/select responses.
+        payload: reply.body,
       });
       return reply;
     })

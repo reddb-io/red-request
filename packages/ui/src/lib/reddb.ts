@@ -121,12 +121,20 @@ export async function rql(query: string): Promise<RqlResult> {
     };
   }
   const records = j.data?.records ?? [];
+  const columns = j.data?.columns ?? [];
+  // Stringify the response so the dev console's right pane can render it
+  // pretty-printed (and so the response is preserved verbatim when the consumer
+  // throws the records away after this point). The store truncates to ~2000
+  // chars — enough to teach "this is what SELECT … returned" without flooding
+  // the on-screen buffer for queries that return a whole table.
+  const payload = JSON.stringify({ columns, records }, null, 2);
   developerConsole.logReddbRql({
     query,
     ok: true,
     durationMs: developerConsoleDuration(started),
     attempts,
     rows: records.length,
+    payload,
   });
   return {
     ok: true,
