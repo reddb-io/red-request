@@ -376,8 +376,9 @@ class Workspace {
       // dependency order). No-op when nothing's pending; runs on every project boot.
       appLog("debug", "loadStore: runMigrations…");
       await repo.runMigrations();
-      appLog("debug", "loadStore: ensureSample…");
-      await repo.ensureSample();
+      // No sample seed — first-run projects stay empty so the user starts from
+      // a true zero state. `repo.ensureSample` is kept available behind a CLI
+      // flag / docs link for users who want a starter collection.
       appLog("debug", "loadStore: loadNetwork…");
       this.network = await repo.loadNetwork();
       appLog("debug", "loadStore: loadUiSettings…");

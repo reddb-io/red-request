@@ -69,6 +69,35 @@
     showSchema = true;
   }
 
+  // Lazy-loaded tab bodies. Run / Code used to open as modals; they're now sibling
+  // tabs so the user doesn't lose request context when configuring them. Cast to
+  // Component<any> because Runner/Code expect onClose prop in modal mode but we
+  // render them in-place (no close button needed).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let RunnerTabComponent = $state<Component<any> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let CodeTabComponent = $state<Component<any> | null>(null);
+  async function ensureRunnerLoaded() {
+    if (RunnerTabComponent) return true;
+    try {
+      RunnerTabComponent = (await import("./RunnerPanel.svelte")).default;
+      return true;
+    } catch (error) {
+      reportLazyLoadFailure("Run", error);
+      return false;
+    }
+  }
+  async function ensureCodeLoaded() {
+    if (CodeTabComponent) return true;
+    try {
+      CodeTabComponent = (await import("./CodeModal.svelte")).default;
+      return true;
+    } catch (error) {
+      reportLazyLoadFailure("Code", error);
+      return false;
+    }
+  }
+
   const gqlVarsError = $derived.by(() => {
     if (ws.activeReq?.body.type !== "graphql") return null;
     const v = ws.activeReq.body.variables;
@@ -105,19 +134,24 @@
   type Tab =
     | "params"
     | "headers"
-    | "body"
     | "auth"
+    | "body"
     | "scripts"
+    | "run"
+    | "code"
     | "history"
     | "settings"
     | "config";
   let tab = $state<Tab>("params");
+  // Order is user-facing: most-edited → orchestration → outcomes → per-request knobs.
   const httpTabs: Tab[] = [
     "params",
     "headers",
-    "body",
     "auth",
+    "body",
     "scripts",
+    "run",
+    "code",
     "history",
     "settings",
   ];
@@ -283,32 +317,37 @@
         </span>
       {/if}
       {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
-        <Button
+        <!-- Send: brand-red paper-plane icon, like WhatsApp/Telegram. ⌘↵ / Ctrl+↵ to fire.
+             Icon (not text) saves ~40px of bar width — important now that Run and
+             Code moved out of this row into sibling tabs. -->
+        <button
+          type="button"
           onclick={() => ws.send()}
           disabled={ws.sending}
           title="Send (⌘↵ / Ctrl+↵)"
-          size="xs"
-          class="shrink-0"
-          >{ws.sending ? "…" : "Send"}</Button
+          aria-label="Send request"
+          class="grid h-7 w-9 shrink-0 place-items-center rounded-md bg-[var(--color-brand)] text-white shadow-sm transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
         >
-      {/if}
-      {#if ws.activeReq.kind !== "ws" && ws.activeReq.kind !== "sse" && ws.activeReq.kind !== "grpc"}
-        <Button
-          onclick={() => void openRunner()}
-          variant="outline"
-          size="xs"
-          class="shrink-0"
-          title="Run loops: repeat, data-driven, or flow">Run…</Button
-        >
-      {/if}
-      {#if ws.activeReq.kind === "http"}
-        <Button
-          onclick={() => void openCode()}
-          variant="outline"
-          size="xs"
-          class="shrink-0"
-          title="Generate code (curl, fetch, python…)">Code</Button
-        >
+          {#if ws.sending}
+            <span class="mono text-xs font-bold">…</span>
+          {:else}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M22 2L11 13" />
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+            </svg>
+          {/if}
+        </button>
       {/if}
     </div>
 
@@ -333,18 +372,16 @@
       {/each}
     </div>
 
-    <div class={tab === "history" ? "flex-1 overflow-hidden" : "flex-1 overflow-auto p-3"}>
+    <!-- Outer wrapper never scrolls, so the URL bar + tabs + env picker stay
+     pinned while the user scrolls a long body / headers list / history.
+     The inner <div class="h-full overflow-auto p-3"> carries the scroll. -->
+<div class="min-h-0 flex-1 overflow-hidden">
+<div class="h-full overflow-auto p-3">
       {#if tab === "params"}
         <div class="flex flex-col gap-5">
-          <section>
-            <h4 class="label mb-1.5">Query</h4>
-            <p class="hint mb-2">
-              Appended to the URL as <code class="mono">?key=value</code>. Values may use
-              <code class="mono">{"{{vars}}"}</code>.
-            </p>
-            <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
-          </section>
-
+          <!-- Path params first: usually only 1–3 of them, anchored to the URL's
+               structure (`:id`, `:slug`, …). Query string grows with usage and
+               is the longer-running editor, so it sits below. -->
           <section>
             <h4 class="label mb-1.5">Path</h4>
             {#if detected.length === 0}
@@ -376,8 +413,49 @@
               </div>
             {/if}
           </section>
+
+          <section>
+            <h4 class="label mb-1.5">Query</h4>
+            <p class="hint mb-2">
+              Appended to the URL as <code class="mono">?key=value</code>. Values may use
+              <code class="mono">{"{{vars}}"}</code>.
+            </p>
+            <KeyValueEditor bind:items={ws.activeReq.query} placeholder="param" />
+          </section>
         </div>
       {:else if tab === "headers"}
+        <!-- Live preview of the profile bound to this request (or the
+             collection default). User-Agent + custom headers that will be
+             injected on send — shown as a dim, read-only block so the user
+             sees what the profile contributes without it bleeding into the
+             editable headers list. -->
+        {@const boundProfile = (() => {
+          const pid = ws.activeReq?.profileId
+            || ws.activeCollection?.collection.defaultProfileId
+            || "";
+          return pid ? ws.profiles.find((p) => p.id === pid) : undefined;
+        })()}
+        {#if boundProfile}
+          <div
+            class="mb-3 rounded-md border border-[var(--color-brand)]/40 bg-[var(--color-brand)]/5 p-2.5 text-xs"
+          >
+            <div class="mb-1 flex items-center gap-2 font-semibold text-fg-strong">
+              <span>👤 Profile: {boundProfile.name || "(unnamed)"}</span>
+              <span class="text-fg-faint">applied on send</span>
+            </div>
+            <ul class="space-y-0.5 text-fg-muted">
+              {#if boundProfile.userAgent}
+                <li class="mono">User-Agent: {boundProfile.userAgent}</li>
+              {/if}
+              {#each boundProfile.headers.filter((h) => h.enabled && h.name.trim()) as h (h.name)}
+                <li class="mono">{h.name}: {h.value}</li>
+              {/each}
+              {#if !boundProfile.userAgent && boundProfile.headers.length === 0}
+                <li class="italic text-fg-faint">No headers or user agent set.</li>
+              {/if}
+            </ul>
+          </div>
+        {/if}
         <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
       {:else if tab === "auth"}
         <AuthEditor bind:auth={ws.activeReq.auth} />
@@ -401,73 +479,112 @@
           </div>
         </div>
       {:else if tab === "settings"}
+        <!-- Per-request settings. Wider container (was max-w-md) so the
+             labels/controls breathe, with subtitle groupings so timeout /
+             redirect / proxy / TLS knobs are visually distinct sections. -->
         {@const inputCls =
-          "h-7 w-28 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)]"}
-        <div class="flex max-w-md flex-col gap-3 text-sm">
-          <label class="flex items-center justify-between gap-3">
-            <span class="text-fg-muted">Timeout <span class="hint">ms</span></span>
-            <input
-              type="number"
-              min="0"
-              value={ws.activeReq.timeout ?? ""}
-              placeholder="none"
-              class={inputCls}
-              oninput={(e) => {
-                const v = e.currentTarget.value;
-                ws.activeReq!.timeout = v ? Math.max(0, Number(v)) : undefined;
-              }}
-            />
-          </label>
-          <label class="flex items-center justify-between gap-3">
-            <span class="text-fg-muted">Follow redirects</span>
-            <input
-              type="checkbox"
-              bind:checked={ws.activeReq.followRedirects}
-              class="accent-[var(--color-brand)]"
-            />
-          </label>
-          {#if ws.activeReq.followRedirects}
+          "h-7 w-32 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-sm text-fg outline-none focus:border-[var(--color-brand)]"}
+        <div class="flex flex-col gap-6 text-sm">
+          <section class="flex flex-col gap-3">
+            <h4 class="label">Network</h4>
+            <p class="hint -mt-2">How the request reaches its target.</p>
             <label class="flex items-center justify-between gap-3">
-              <span class="text-fg-muted">Max redirects</span>
+              <span class="text-fg-muted">Timeout <span class="hint">ms</span></span>
               <input
                 type="number"
                 min="0"
-                max="50"
-                value={ws.activeReq.maxRedirects}
+                value={ws.activeReq.timeout ?? ""}
+                placeholder="none"
                 class={inputCls}
                 oninput={(e) => {
                   const v = e.currentTarget.value;
-                  ws.activeReq!.maxRedirects = v ? Math.min(50, Number(v)) : 0;
+                  ws.activeReq!.timeout = v ? Math.max(0, Number(v)) : undefined;
                 }}
               />
             </label>
-          {/if}
-          <label class="flex items-center justify-between gap-3">
-            <span class="text-fg-muted"
-              >Skip TLS verification <span class="hint">self-signed / dev</span></span
-            >
-            <input
-              type="checkbox"
-              bind:checked={ws.activeReq.insecure}
-              class="accent-[var(--color-brand)]"
-            />
-          </label>
-          <label class="flex items-center justify-between gap-3">
-            <span class="text-fg-muted">Proxy <span class="hint">http/https/socks URL</span></span>
-            <input
-              type="text"
-              value={ws.activeReq.proxy ?? ""}
-              placeholder="http://127.0.0.1:8080"
-              class="mono h-7 w-56 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
-              oninput={(e) => {
-                const v = e.currentTarget.value.trim();
-                ws.activeReq!.proxy = v || undefined;
-              }}
-            />
-          </label>
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-fg-muted">Follow redirects</span>
+              <input
+                type="checkbox"
+                bind:checked={ws.activeReq.followRedirects}
+                class="accent-[var(--color-brand)]"
+              />
+            </label>
+            {#if ws.activeReq.followRedirects}
+              <label class="flex items-center justify-between gap-3 pl-4">
+                <span class="text-fg-muted">Max redirects</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="50"
+                  value={ws.activeReq.maxRedirects}
+                  class={inputCls}
+                  oninput={(e) => {
+                    const v = e.currentTarget.value;
+                    ws.activeReq!.maxRedirects = v ? Math.min(50, Number(v)) : 0;
+                  }}
+                />
+              </label>
+            {/if}
+          </section>
+
+          <section class="flex flex-col gap-3">
+            <h4 class="label">TLS</h4>
+            <p class="hint -mt-2">Certificate handling for https:// targets.</p>
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-fg-muted"
+                >Skip verification <span class="hint">self-signed / dev</span></span
+              >
+              <input
+                type="checkbox"
+                bind:checked={ws.activeReq.insecure}
+                class="accent-[var(--color-brand)]"
+              />
+            </label>
+          </section>
+
+          <section class="flex flex-col gap-3">
+            <h4 class="label">Proxy</h4>
+            <p class="hint -mt-2">Send the request through a proxy server.</p>
+            <label class="flex items-center justify-between gap-3">
+              <span class="text-fg-muted"
+                >URL <span class="hint">http/https/socks</span></span
+              >
+              <input
+                type="text"
+                value={ws.activeReq.proxy ?? ""}
+                placeholder="http://127.0.0.1:8080"
+                class="mono h-7 w-72 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
+                oninput={(e) => {
+                  const v = e.currentTarget.value.trim();
+                  ws.activeReq!.proxy = v || undefined;
+                }}
+              />
+            </label>
+          </section>
         </div>
       {:else if tab === "config"}
         <ProtocolForm kind={ws.activeReq.kind} bind:net={ws.activeReq.net} />
+      {:else if tab === "run"}
+        <!-- Lazy-load the runner on first switch — same component that used
+             to live in a modal, now in-place so headers/body context stays put. -->
+        {#if !RunnerTabComponent}
+          {#await ensureRunnerLoaded()}{/await}
+        {/if}
+        {#if RunnerTabComponent}
+          <RunnerTabComponent />
+        {:else}
+          <p class="text-fg-faint">Loading runner…</p>
+        {/if}
+      {:else if tab === "code"}
+        {#if !CodeTabComponent}
+          {#await ensureCodeLoaded()}{/await}
+        {/if}
+        {#if CodeTabComponent}
+          <CodeTabComponent />
+        {:else}
+          <p class="text-fg-faint">Loading code generators…</p>
+        {/if}
       {:else if tab === "history"}
         <HistoryTimeline embedded />
       {:else}
@@ -555,6 +672,7 @@
           {/if}
         </div>
       {/if}
+    </div>
     </div>
     {/if}
   </section>
