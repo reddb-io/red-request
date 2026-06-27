@@ -5,6 +5,8 @@ export interface ProjectInfo {
   project_dir: string | null;
   is_project: boolean;
   arg_launched: boolean;
+  source?: "local" | "remote-http" | string;
+  connection_string?: string | null;
   /** Custom display name from recents (null → fall back to the folder name). */
   name: string | null;
 }
@@ -45,6 +47,12 @@ export const deleteProjectData = (dir: string): Promise<void> =>
 export const openProject = (dir: string | null): Promise<ProjectInfo> =>
   invoke<ProjectInfo>("open_project", { dir });
 
+/** Switch the active RedDB source to a connection string-backed project. */
+export const openConnectionString = (
+  connection: string
+): Promise<ProjectInfo> =>
+  invoke<ProjectInfo>("open_connection_string", { connection });
+
 /** Heal an incompatible store: back up app.rdb* (model mismatch) and recreate fresh. */
 export const resetIncompatibleDb = (): Promise<void> =>
   invoke<void>("reset_incompatible_db");
@@ -52,6 +60,7 @@ export const resetIncompatibleDb = (): Promise<void> =>
 /** Short label for the header: the project folder name, or "global". */
 export function projectLabel(info: ProjectInfo | null): string {
   if (!info) return "";
+  if (info.source === "remote-http") return info.name ?? "Remote RedDB";
   if (!info.is_project || !info.project_dir) return "global";
   if (info.name) return info.name;
   const parts = info.project_dir.split("/").filter(Boolean);

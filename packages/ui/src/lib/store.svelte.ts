@@ -53,6 +53,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
 import {
   projectInfo,
+  openConnectionString,
   openProject,
   resetIncompatibleDb,
   recentSetCount,
@@ -367,27 +368,68 @@ class Workspace {
 
   async chooseConnectionString(raw: string): Promise<void> {
     const value = raw.trim();
-    const supported = /^(reds?|https?|docker):\/\//i.test(value);
-    this.projectOpenGeneration++;
+    if (!value) return;
+    const generation = ++this.projectOpenGeneration;
+    await this.flushSave();
     this.transitioning = false;
     this.transitionPhase = "idle";
-    this.loading = null;
+    this.loadError = null;
+    this.loading = {
+      startedAt: Date.now(),
+      step: `connecting to ${value}...`,
+      log: [{ ts: Date.now(), step: `connecting to ${value}...` }],
+    };
     this.screen = "app";
     this.view = "requests";
     this.activeColId = null;
     this.activeReq = null;
+    this.activeEnvName = null;
     this.collections = [];
-    this.project = {
-      db_path: value,
-      project_dir: null,
-      is_project: false,
-      arg_launched: false,
-      name: "Remote RedDB",
-    };
-    this.loadError = supported
-      ? `Remote RedDB connection string recognized but not wired in this build yet: ${value}. This path needs native EmbeddedDb support for remote red connect targets before it can safely open shared projects.`
-      : `Unsupported RedDB connection string: ${value}`;
-    appLog("warn", `chooseConnectionString blocked: ${this.loadError}`);
+    this.response = null;
+    this.runResult = null;
+
+    try {
+      const ready = (async () => {
+        const nextProject = await openConnectionString(value);
+        if (generation !== this.projectOpenGeneration) return;
+        this.project = nextProject;
+        await this.loadStore();
+      })();
+      await Promise.race([
+        ready,
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(
+                new Error(
+                  `Connecting to RedDB timed out after ${Math.round(
+                    PROJECT_OPEN_TIMEOUT_MS / 1000
+                  )}s: ${value}`
+                )
+              ),
+            PROJECT_OPEN_TIMEOUT_MS
+          )
+        ),
+      ]);
+    } catch (e) {
+      ++this.projectOpenGeneration;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.loadError = msg;
+      this.project = {
+        db_path: value,
+        project_dir: null,
+        is_project: false,
+        arg_launched: false,
+        source: "remote-http",
+        connection_string: value,
+        name: "Remote RedDB",
+      };
+      appLog("error", `chooseConnectionString failed: ${msg}`);
+    } finally {
+      this.loading = null;
+      this.transitioning = false;
+      this.transitionPhase = "idle";
+    }
   }
 
   /** Return to the project selector. */

@@ -118,7 +118,7 @@
     <div class="mb-4 flex gap-2">
       <Input
         bind:value={connectionString}
-        placeholder="reds://host:port/project or docker://container"
+        placeholder="https://host:port, red+ws://host/redwire, or docker://container"
         class="h-7 flex-1"
         onkeydown={(event) => {
           if (event.key === "Enter") void connectString();
