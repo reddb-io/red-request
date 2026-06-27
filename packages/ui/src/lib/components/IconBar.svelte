@@ -5,7 +5,6 @@
   // brighten toward brand on hover. The brand monogram sits at the top; the
   // project switcher anchors the bottom.
   import { ws } from "../store.svelte";
-  import Tooltip from "./ui/Tooltip.svelte";
   import { projectLabel } from "../project";
   import House from "@lucide/svelte/icons/house";
   import Send from "@lucide/svelte/icons/send";
@@ -39,34 +38,28 @@
 >
   {#each items as it (it.view)}
     {@const active = ws.view === it.view}
-    <Tooltip text={it.label} side="right">
-      {#snippet children(p)}
-        <button
-          {...p}
-          onclick={() => (ws.view = it.view)}
-          class="grid h-9 w-9 place-items-center rounded-lg transition-colors
-            {active
-            ? 'bg-[var(--color-bg-2)] text-[var(--color-brand)]'
-            : 'text-red-900 hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]'}"
-          aria-label={it.label}
-          aria-current={active ? "page" : undefined}
-        >
-          <it.icon size={18} strokeWidth={active ? 2.5 : 2} />
-        </button>
-      {/snippet}
-    </Tooltip>
+    <button
+      type="button"
+      title={it.label}
+      onclick={() => (ws.view = it.view)}
+      class="grid h-9 w-9 place-items-center rounded-lg transition-colors
+        {active
+        ? 'bg-[var(--color-bg-2)] text-[var(--color-brand)]'
+        : 'text-red-900 hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]'}"
+      aria-label={it.label}
+      aria-current={active ? "page" : undefined}
+    >
+      <it.icon size={18} strokeWidth={active ? 2.5 : 2} />
+    </button>
   {/each}
 
-  <Tooltip text="Switch project — {projectLabel(ws.project)}" side="right">
-    {#snippet children(p)}
-      <button
-        {...p}
-        onclick={() => ws.backToSelector()}
-        class="mt-auto grid h-9 w-9 place-items-center rounded-lg text-red-900 transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]"
-        aria-label="switch project"
-      >
-        <ArrowLeftRight size={16} strokeWidth={2} />
-      </button>
-    {/snippet}
-  </Tooltip>
+  <button
+    type="button"
+    title="Switch project — {projectLabel(ws.project)}"
+    onclick={() => ws.backToSelector()}
+    class="mt-auto grid h-9 w-9 place-items-center rounded-lg text-red-900 transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]"
+    aria-label="switch project"
+  >
+    <ArrowLeftRight size={16} strokeWidth={2} />
+  </button>
 </nav>
