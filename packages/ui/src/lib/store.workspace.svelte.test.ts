@@ -17,6 +17,7 @@ vi.mock("./repo", () => ({
   saveEnvironmentSecret: vi.fn(async () => {}),
   removeEnvironmentSecret: vi.fn(async () => {}),
   deleteRequest: vi.fn(async () => {}),
+  deleteCollection: vi.fn(async () => {}),
   ensureStore: vi.fn(async () => {}),
   runMigrations: vi.fn(async () => {}),
   ensureSample: vi.fn(async () => {}),
@@ -122,6 +123,9 @@ function resetWorkspace() {
   ws.openingTarget = null;
   ws.project = null;
   ws.collections = [];
+  ws.creatingCollection = false;
+  ws.deletingCollectionIds = {};
+  ws.deletingProjectData = false;
   ws.network = { proxies: [], profiles: [] };
   ws.activeColId = null;
   ws.activeReq = null;
@@ -1182,6 +1186,55 @@ describe("Workspace persistence coordination", () => {
         fromProfile: true,
       })
     );
+  });
+
+  it("coalesces overlapping collection creation into one persisted collection", async () => {
+    let release!: () => void;
+    vi.mocked(repo.saveCollectionMeta).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+
+    const first = ws.addCollection();
+    const second = await ws.addCollection();
+
+    expect(second).toBeNull();
+    expect(ws.creatingCollection).toBe(true);
+    expect(repo.saveCollectionMeta).toHaveBeenCalledTimes(1);
+
+    release();
+    await first;
+
+    expect(ws.creatingCollection).toBe(false);
+  });
+
+  it("coalesces overlapping collection deletion for the same collection", async () => {
+    let release!: () => void;
+    ws.collections = [
+      collection("c1", [request("r1")]),
+      collection("c2", [request("r2")]),
+    ];
+    ws.activeColId = "c1";
+    vi.mocked(repo.deleteCollection).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+
+    const first = ws.deleteCollection("c1");
+    await ws.deleteCollection("c1");
+
+    expect(ws.deletingCollectionIds.c1).toBe(true);
+    expect(repo.deleteCollection).toHaveBeenCalledTimes(1);
+
+    release();
+    await first;
+
+    expect(ws.deletingCollectionIds.c1).toBeUndefined();
+    expect(ws.collections.map((c) => c.id)).toEqual(["c2"]);
   });
 
   it("rebuildStore wipes the on-disk store and reloads without re-healing", async () => {

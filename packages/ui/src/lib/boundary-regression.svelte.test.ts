@@ -110,6 +110,9 @@ describe("+page error boundary", () => {
     ws.loading = null;
     ws.openingTarget = null;
     ws.project = null;
+    ws.creatingCollection = false;
+    ws.deletingCollectionIds = {};
+    ws.deletingProjectData = false;
     ws.view = "requests";
   });
 
@@ -228,6 +231,30 @@ describe("+page error boundary", () => {
     expect(document.body.textContent).not.toContain("Export crash report");
     expect(document.body.textContent).not.toContain("Retry opening");
     expect(document.body.textContent).not.toContain("Delete local data");
+  });
+
+  it("locks the onboarding collection create action while the first collection is saving", async () => {
+    const repo = await import("./repo");
+    vi.mocked(repo.saveCollectionMeta).mockImplementation(
+      () => new Promise<never>(() => {})
+    );
+    render(AppShellHarness);
+
+    const button = await screen.findByRole("button", {
+      name: "Create collection",
+    });
+
+    await fireEvent.click(button);
+    await fireEvent.click(button);
+
+    expect(repo.saveCollectionMeta).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Creating collection...",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true);
   });
 
   it("keeps titlebar and recovery visible when pending autosave blocks project switch", async () => {

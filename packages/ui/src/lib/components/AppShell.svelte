@@ -10,11 +10,13 @@
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import HomeView from "$lib/components/HomeView.svelte";
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
+  import ConfirmActionModal from "$lib/components/ui/ConfirmActionModal.svelte";
   import { appLog } from "$lib/log";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
   let cmdOpen = $state(false);
+  let deleteProjectDataConfirmOpen = $state(false);
   let lazyLoadError = $state("");
   let mountedAt = $state(Date.now());
   let SettingsViewComponent = $state<Component | null>(null);
@@ -275,6 +277,20 @@
     cmdOpen = true;
   }
 
+  async function createOnboardingCollection() {
+    if (ws.creatingCollection) return;
+    await ws.addCollection();
+  }
+
+  function openDeleteProjectDataConfirm() {
+    deleteProjectDataConfirmOpen = true;
+  }
+
+  async function confirmDeleteProjectData() {
+    await ws.deleteProjectData();
+    deleteProjectDataConfirmOpen = false;
+  }
+
   $effect(() => {
     if (ws.view === "settings") void loadSettingsView();
     if (ws.view === "database") void loadRedUiDatabaseView();
@@ -503,19 +519,14 @@
   {/if}
   {#if ws.recoveryProjectDir}
     <Button
-      onclick={() => {
-        if (
-          confirm(
-            "Delete this project's .red/request data and return to the project picker? This cannot be undone."
-          )
-        )
-          void ws.deleteProjectData();
-      }}
+      onclick={openDeleteProjectDataConfirm}
+      disabled={ws.deletingProjectData}
+      aria-busy={ws.deletingProjectData}
       size="xs"
       variant="ghost"
       title="Deletes only this project's .red/request data, not the source folder"
     >
-      Delete local data
+      {ws.deletingProjectData ? "Deleting local data..." : "Delete local data"}
     </Button>
   {/if}
 {/snippet}
@@ -547,19 +558,14 @@
   {/if}
   {#if ws.recoveryProjectDir}
     <Button
-      onclick={() => {
-        if (
-          confirm(
-            "Delete this project's .red/request data and return to the project picker? This cannot be undone."
-          )
-        )
-          void ws.deleteProjectData();
-      }}
+      onclick={openDeleteProjectDataConfirm}
+      disabled={ws.deletingProjectData}
+      aria-busy={ws.deletingProjectData}
       size="xs"
       variant="ghost"
       title="Deletes only this project's .red/request data, not the source folder"
     >
-      Delete local data
+      {ws.deletingProjectData ? "Deleting local data..." : "Delete local data"}
     </Button>
   {/if}
 {/snippet}
@@ -575,8 +581,13 @@
         you meant to open.
       </p>
       <div class="flex flex-wrap items-center justify-center gap-2">
-        <Button onclick={() => ws.addCollection()} size="xs">
-          Create collection
+        <Button
+          onclick={createOnboardingCollection}
+          disabled={ws.creatingCollection}
+          aria-busy={ws.creatingCollection}
+          size="xs"
+        >
+          {ws.creatingCollection ? "Creating collection..." : "Create collection"}
         </Button>
         <Button onclick={() => ws.backToSelector()} size="xs" variant="ghost">
           Choose another project
@@ -831,3 +842,15 @@
       </Tooltip.Provider>
     </svelte:boundary>
 </div>
+
+{#if deleteProjectDataConfirmOpen}
+  <ConfirmActionModal
+    title="Delete project data"
+    description="Delete this project's .red/request data and return to the project picker? This removes requests, collections and history, but leaves the rest of the folder untouched. This cannot be undone."
+    confirmLabel="Delete project data"
+    busyLabel="Deleting project data..."
+    destructive
+    onCancel={() => (deleteProjectDataConfirmOpen = false)}
+    onConfirm={confirmDeleteProjectData}
+  />
+{/if}
