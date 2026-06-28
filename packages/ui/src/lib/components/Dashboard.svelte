@@ -3,6 +3,7 @@
   import { ws } from "../store.svelte";
   import * as repo from "../repo";
   import type { HistoryEntry } from "@reddb-io/request-core";
+  import { networkIdentityRows } from "../dashboardMetrics";
   import { Button } from "./ui/button/index.js";
 
   let history = $state<HistoryEntry[]>([]);
@@ -69,6 +70,8 @@
     failed: history.reduce((s, h) => s + h.testsFailed, 0),
   }));
 
+  const networkRows = $derived(networkIdentityRows(history));
+
   function sparkline(values: number[], w = 90, h = 22): string {
     if (values.length < 2) return "";
     const max = Math.max(...values, 1);
@@ -129,6 +132,47 @@
     <span class="text-emerald-400">{totals.passed} tests passed</span>
     <span class={totals.failed ? "text-red-400" : "text-fg-subtle"}>{totals.failed} failed</span>
   </div>
+
+  {#if networkRows.length}
+    <h2 class="label mb-2">
+      Network identity performance
+    </h2>
+    <div class="mb-5 overflow-hidden rounded border border-border">
+      <table class="w-full text-sm">
+        <thead class="bg-[var(--color-bg-1)] text-left text-xs text-fg-subtle">
+          <tr class="border-b border-border">
+            <th class="py-1.5 pr-3 pl-2 font-medium">Profile</th>
+            <th class="py-1.5 pr-3 font-medium">Route</th>
+            <th class="py-1.5 pr-3 font-medium">Dispatcher</th>
+            <th class="py-1.5 pr-3 font-medium">Runs</th>
+            <th class="py-1.5 pr-3 font-medium">Errors</th>
+            <th class="py-1.5 pr-2 font-medium">Avg</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each networkRows.slice(0, 8) as row (row.key)}
+            <tr class="border-b border-[var(--color-bg-2)] last:border-b-0">
+              <td class="py-1.5 pr-3 pl-2 text-fg">{row.profile}</td>
+              <td class="py-1.5 pr-3">
+                <div class="text-fg">{row.proxy}</div>
+                {#if row.proxyUrl && row.proxyUrl !== row.proxy}
+                  <div class="mono max-w-72 truncate text-xs text-fg-faint" title={row.proxyUrl}>
+                    {row.proxyUrl}
+                  </div>
+                {/if}
+              </td>
+              <td class="mono py-1.5 pr-3 text-xs text-fg-muted">{row.dispatcher}</td>
+              <td class="py-1.5 pr-3 text-fg">{row.runs} run{row.runs === 1 ? "" : "s"}</td>
+              <td class="py-1.5 pr-3 {row.errors ? 'text-red-400' : 'text-emerald-400'}">
+                {row.errorRate}% errors
+              </td>
+              <td class="mono py-1.5 pr-2 text-fg-muted">{row.avgMs}ms</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  {/if}
 
   <!-- Per-request history + latency -->
   <h2 class="label mb-2">
