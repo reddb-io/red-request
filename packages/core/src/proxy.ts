@@ -16,7 +16,7 @@ export const proxySchema = z.object({
 });
 export type Proxy = z.infer<typeof proxySchema>;
 
-/** A user profile / identity bound to a request: a User-Agent, extra headers, and a proxy. */
+/** A user profile / identity bound to a request: a User-Agent, extra headers, a proxy, and cookie state. */
 export const profileSchema = z.object({
   id: z.string(),
   name: z.string().default(""),
@@ -24,6 +24,8 @@ export const profileSchema = z.object({
   headers: z.array(kvSchema).default([]),
   /** id of a proxy in the same collection (or empty for a direct connection). */
   proxyId: z.string().default(""),
+  /** Persist/apply Set-Cookie under this profile's identity instead of the collection jar. */
+  cookieJar: z.boolean().default(false),
 });
 export type Profile = z.infer<typeof profileSchema>;
 

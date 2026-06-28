@@ -275,6 +275,19 @@
             class="w-auto"
             onChange={save}
           />
+          <label class="flex items-center gap-1 text-xs text-fg-muted">
+            <input
+              type="checkbox"
+              checked={profile.cookieJar}
+              onchange={(e) =>
+                ws.setProfileCookieJar(
+                  profile.id,
+                  (e.currentTarget as HTMLInputElement).checked
+                )}
+              class="accent-[var(--color-brand)]"
+            />
+            Cookie jar
+          </label>
           {#if issue}
             <Tooltip text={issue} side="bottom">
               {#snippet children(p)}

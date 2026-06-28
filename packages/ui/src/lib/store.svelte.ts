@@ -245,6 +245,20 @@ class Workspace {
     return proxy?.host.trim() && proxy.port.trim() ? proxy : null;
   }
 
+  get activeCookieJarKey(): string | null {
+    const profile = this.activeProfile;
+    if (profile?.cookieJar) return `profile:${profile.id}`;
+    return this.activeCollection?.collection.cookieJar && this.activeColId
+      ? this.activeColId
+      : null;
+  }
+
+  get activeCookieJarLabel(): string {
+    const profile = this.activeProfile;
+    if (profile?.cookieJar) return profile.name || "profile";
+    return this.activeCollection?.collection.name || "collection";
+  }
+
   /** Project-level named environments (var/secret sets), shared by all collections. */
   environments = $state<StoredEnvironment[]>([]);
   /** The always-on "Globals" base environment (vars + secrets). Named environments
@@ -1253,10 +1267,7 @@ class Workspace {
       const result = await httpSend({
         request,
         variables,
-        cookieJarKey:
-          this.activeCollection?.collection.cookieJar && this.activeColId
-            ? this.activeColId
-            : undefined,
+        cookieJarKey: this.activeCookieJarKey ?? undefined,
       });
       this.response = result.response;
       this.unresolved = result.unresolved;
@@ -1641,6 +1652,7 @@ class Workspace {
       userAgent: "",
       headers: [],
       proxyId: "",
+      cookieJar: false,
     });
     await this.saveProxiesProfiles();
   }
@@ -1658,6 +1670,7 @@ class Workspace {
     await this.saveProxiesProfiles();
   }
   async removeProfile(id: string): Promise<void> {
+    const profile = this.network.profiles.find((p) => p.id === id);
     this.network.profiles = this.network.profiles.filter((p) => p.id !== id);
     // Clear references in active requests / collections that pointed at this profile.
     for (const c of this.collections) {
@@ -1667,6 +1680,16 @@ class Workspace {
     }
     await this.persistAllCollectionRefs();
     await this.saveProxiesProfiles();
+    if (profile?.cookieJar)
+      await cookiesClear({ key: `profile:${id}` }).catch(() => {});
+  }
+
+  async setProfileCookieJar(id: string, enabled: boolean): Promise<void> {
+    const profile = this.network.profiles.find((p) => p.id === id);
+    if (!profile || profile.cookieJar === enabled) return;
+    profile.cookieJar = enabled;
+    await this.saveProxiesProfiles();
+    if (!enabled) await cookiesClear({ key: `profile:${id}` }).catch(() => {});
   }
 
   /** Persist collection meta for every collection (used after stripping refs to a deleted profile). */
@@ -2164,6 +2187,13 @@ class Workspace {
   /** Clear the cookies stored for a collection's jar. */
   async clearCookies(colId: string): Promise<void> {
     await cookiesClear({ key: colId }).catch(() => {});
+  }
+
+  /** Clear whichever cookie jar is active for the selected request. */
+  async clearActiveCookies(): Promise<void> {
+    const key = this.activeCookieJarKey;
+    if (!key) return;
+    await cookiesClear({ key }).catch(() => {});
   }
 
   /** Delete a collection (and everything it owns); select another if it was active. */

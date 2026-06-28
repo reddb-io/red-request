@@ -314,6 +314,7 @@ describe("CommandPalette", () => {
           userAgent: "",
           headers: [],
           proxyId: "px-team",
+          cookieJar: false,
         },
       ],
     };
@@ -324,5 +325,57 @@ describe("CommandPalette", () => {
     expect(screen.queryByText("Proxy: direct connection")).toBeNull();
     expect(screen.queryByText("Proxy: Team proxy")).toBeNull();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("clears the active cookie jar from the command surface", async () => {
+    const req = {
+      ...newRequest("req-1"),
+      name: "Cookie request",
+      profileId: "prof-1",
+    };
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "API",
+          order: ["req-1"],
+          folders: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [req],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "col-1";
+    ws.activeReq = req;
+    ws.network = {
+      proxies: [],
+      profiles: [
+        {
+          id: "prof-1",
+          name: "Team profile",
+          userAgent: "",
+          headers: [],
+          proxyId: "",
+          cookieJar: true,
+        },
+      ],
+    };
+    const clearActiveCookies = vi
+      .spyOn(ws, "clearActiveCookies")
+      .mockResolvedValue(undefined);
+
+    render(CommandPalette, { props: { open: true } });
+
+    await fireEvent.click(
+      await screen.findByText("Clear cookie jar: Team profile")
+    );
+
+    await waitFor(() => {
+      expect(clearActiveCookies).toHaveBeenCalledTimes(1);
+    });
   });
 });
