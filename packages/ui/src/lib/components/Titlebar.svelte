@@ -54,7 +54,7 @@
 </script>
 
 <div
-  class="sticky top-0 z-[1000] flex h-8 shrink-0 select-none items-center border-b border-border bg-[var(--color-bg-0)]"
+  class="sticky top-0 z-[2000] isolate flex h-8 shrink-0 select-none items-center border-b border-border bg-[var(--color-bg-0)]"
   data-tauri-drag-region
 >
   <!-- Brand, left -->

@@ -368,6 +368,7 @@ describe("Workspace persistence coordination", () => {
     expect(ws.screen).toBe("app");
     expect(ws.loading).toBeNull();
     expect(ws.loadError).toMatch(/timed out while running migrations/i);
+    expect(ws.openingTarget).toEqual({ kind: "local", dir: "/tmp/stuck" });
   });
 
   it("ignores stale loadStore results when a newer load starts", async () => {

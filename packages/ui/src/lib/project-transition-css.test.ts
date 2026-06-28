@@ -18,6 +18,6 @@ describe("project transition CSS", () => {
     expect(irisRule).toContain("z-index: 100");
     expect(irisRule).toContain("pointer-events: none");
     expect(irisRule).not.toContain("inset: 0;");
-    expect(titlebar).toContain("sticky top-0 z-[1000]");
+    expect(titlebar).toContain("sticky top-0 z-[2000] isolate");
   });
 });

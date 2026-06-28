@@ -81,8 +81,14 @@ vi.mock("$lib/components/HomeView.svelte", () => ({
 import Page from "../routes/+page.svelte";
 import { ws } from "./store.svelte";
 
+function expectButton(name: string) {
+  expect(screen.getAllByRole("button", { name }).length).toBeGreaterThan(0);
+}
+
 describe("+page error boundary", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
     cleanup();
     document.body.innerHTML = "";
     ws.ready = false;
@@ -133,13 +139,58 @@ describe("+page error boundary", () => {
       expect(document.body.textContent).toContain("running migrations");
     });
     expect(screen.getByLabelText("Close window")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Choose another project" })
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry opening" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Export crash report" })
-    ).toBeTruthy();
+    expect(screen.getByTestId("project-recovery-dock")).toBeTruthy();
+    expectButton("Choose another project");
+    expectButton("Retry opening");
+    expectButton("Export crash report");
+  });
+
+  it("automatically exits an aged loading state into recovery instead of waiting forever", async () => {
+    const storeMod = await import("./store.svelte");
+    render(Page);
+
+    await waitFor(() => {
+      expect(storeMod.ws.ready).toBe(true);
+      expect(storeMod.ws.loading).toBeNull();
+    });
+
+    storeMod.ws.ready = true;
+    storeMod.ws.screen = "app";
+    storeMod.ws.project = {
+      db_path: "/tmp/fake/app.rdb",
+      project_dir: "/tmp/fake",
+      is_project: true,
+      arg_launched: false,
+      name: "fake",
+    };
+    storeMod.ws.loadError = null;
+    storeMod.ws.loading = {
+      startedAt: Date.now() - 31_000,
+      step: "opening database file",
+      log: [{ ts: Date.now() - 31_000, step: "opening database file" }],
+    };
+
+    await waitFor(() => {
+      expect(storeMod.ws.loading).toBeNull();
+      expect(storeMod.ws.loadError).toContain("failsafe");
+    });
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expect(screen.getByTestId("project-recovery-dock")).toBeTruthy();
+    expectButton("Retry");
+    expectButton("Choose another project");
+  });
+
+  it("renders an action surface when a project opens with no collections", async () => {
+    render(Page);
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("No collections yet");
+    });
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expectButton("New collection");
+    expectButton("Retry opening");
+    expectButton("Export crash report");
+    expectButton("Choose another project");
   });
 
   it("offers strong recovery actions when project opening stays stuck behind the transition", async () => {
@@ -182,16 +233,14 @@ describe("+page error boundary", () => {
       );
     });
     expect(screen.getByLabelText("Close window")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Choose another project" })
-    ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry opening" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Stop waiting" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "Delete local data" })
-    ).toBeTruthy();
+    expectButton("Choose another project");
+    expectButton("Retry opening");
+    expectButton("Stop waiting");
+    expectButton("Delete local data");
 
-    await fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
+    await fireEvent.click(
+      screen.getAllByRole("button", { name: "Stop waiting" })[0]!
+    );
 
     await waitFor(() => {
       expect(storeMod.ws.transitioning).toBe(false);
