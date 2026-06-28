@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/svelte";
 
 vi.mock("../../repo", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../repo")>()),
@@ -10,6 +16,11 @@ import { ws } from "../../store.svelte";
 import CommandPalette from "./CommandPalette.svelte";
 
 describe("CommandPalette", () => {
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+  });
+
   beforeEach(() => {
     document.body.innerHTML = "";
     vi.restoreAllMocks();
