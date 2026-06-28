@@ -163,6 +163,12 @@
   });
   const bodyTypes = ["none", "json", "raw", "form", "xml", "graphql"] as const;
   const CUSTOM_PROXY = "__custom_proxy__";
+  const identityCapable = $derived(
+    ws.activeReq?.kind === "http" ||
+      ws.activeReq?.kind === "ws" ||
+      ws.activeReq?.kind === "sse" ||
+      ws.activeReq?.kind === "grpc"
+  );
 
   const activeProfileProxy = $derived(ws.activeProfileProxy);
   const activeRequestProxySelection = $derived.by(() => {
@@ -184,6 +190,7 @@
   function setRequestProxySelection(value: string) {
     const req = ws.activeReq;
     if (!req) return;
+    if (activeProfileProxy) return;
     if (!value) {
       req.proxy = undefined;
       return;
@@ -287,19 +294,38 @@
           class="w-auto text-xs text-fg-muted"
         />
       {/if}
-      {#if ws.profiles.length && (ws.activeReq.kind === "http" || ws.activeReq.kind === "grpc")}
+      {#if identityCapable && (ws.profiles.length || ws.proxies.length || ws.activeReq.proxy)}
         {@const pid = ws.activeReq.profileId || ws.activeCollection?.collection.defaultProfileId || ""}
         {@const fromDefault = !ws.activeReq.profileId && !!pid}
         {@const active = pid ? ws.profiles.find((p) => p.id === pid) : null}
-        <Select
-          bind:value={ws.activeReq.profileId}
-          items={[
-            { value: "", label: "no profile" },
-            ...ws.profiles.map((p) => ({ value: p.id, label: `👤 ${p.name || "profile"}` })),
-          ]}
-          ariaLabel="User profile"
-          class="w-auto text-xs text-fg-muted"
-        />
+        {#if ws.profiles.length}
+          <Select
+            bind:value={ws.activeReq.profileId}
+            items={[
+              { value: "", label: "no profile" },
+              ...ws.profiles.map((p) => ({ value: p.id, label: `👤 ${p.name || "profile"}` })),
+            ]}
+            ariaLabel="User profile"
+            class="w-auto text-xs text-fg-muted"
+          />
+        {/if}
+        {#if activeProfileProxy}
+          <span
+            class="inline-flex max-w-44 shrink-0 items-center gap-1 rounded bg-[var(--color-bg-2)] px-1.5 py-0.5 text-[10px] text-fg-muted"
+            title={`Proxy locked by profile ${active?.name || "profile"}`}
+          >
+            <span>Profile proxy</span>
+            <span class="mono truncate text-fg">{activeProfileProxy.name || `${activeProfileProxy.type}://${activeProfileProxy.host}:${activeProfileProxy.port}`}</span>
+          </span>
+        {:else}
+          <Select
+            value={activeRequestProxySelection}
+            items={proxyOptions}
+            onChange={setRequestProxySelection}
+            ariaLabel="Request proxy route"
+            class="w-auto max-w-56 text-xs text-fg-muted"
+          />
+        {/if}
         {#if active?.userAgent}
           {@const overridden = ws.activeReq.headers.some(
             (h) => h.enabled && h.name.toLowerCase() === "user-agent"

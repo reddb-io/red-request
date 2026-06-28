@@ -1585,9 +1585,10 @@ class Workspace {
     }
     // 3) Drop fromProfile rows whose underlying profile header disappeared
     //    entirely (only safe when the user hadn't edited them).
-    req.headers = req.headers.filter(
+    const keptHeaders = req.headers.filter(
       (h) => !h.fromProfile || profileByName.has(h.name.toLowerCase())
     );
+    if (keptHeaders.length !== req.headers.length) req.headers = keptHeaders;
   }
 
   private rid(prefix: string): string {
