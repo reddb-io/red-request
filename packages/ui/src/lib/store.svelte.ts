@@ -1293,6 +1293,7 @@ class Workspace {
   ): Promise<void> {
     if (!this.activeColId) return;
     const ts = Date.now();
+    const identity = await this.historyIdentity(reqId);
     const entry: HistoryEntry = {
       id: `${reqId}__${ts}`,
       reqId,
@@ -1309,12 +1310,62 @@ class Workspace {
       testsPassed: tests.filter((t) => t.passed).length,
       testsFailed: tests.filter((t) => !t.passed).length,
       env: this.activeEnvName ?? undefined,
+      ...identity,
     };
     try {
       await repo.saveHistory(entry);
     } catch {
       /* history is best-effort */
     }
+  }
+
+  private async historyIdentity(
+    reqId: string
+  ): Promise<
+    Pick<
+      HistoryEntry,
+      | "profileId"
+      | "profileName"
+      | "proxyId"
+      | "proxyName"
+      | "proxyUrl"
+      | "dispatcherClientId"
+    >
+  > {
+    const col = this.activeCollection;
+    const req = col?.requests.find((r) => r.id === reqId) ?? this.activeReq;
+    const profileId = req?.profileId || col?.collection.defaultProfileId || "";
+    const profile = profileId
+      ? this.network.profiles.find((p) => p.id === profileId)
+      : undefined;
+    const profileProxy = profile?.proxyId
+      ? this.network.proxies.find((p) => p.id === profile.proxyId)
+      : undefined;
+    const profileProxyUrl =
+      profileProxy?.host.trim() && profileProxy.port.trim()
+        ? proxyToUrl(profileProxy)
+        : undefined;
+    const requestProxyUrl = req?.proxy?.trim() || undefined;
+    const proxyUrl = profileProxyUrl ?? requestProxyUrl;
+    const savedProxy =
+      profileProxy ??
+      (proxyUrl
+        ? this.network.proxies.find((p) => {
+            if (!p.host.trim() || !p.port.trim()) return false;
+            return proxyToUrl(p) === proxyUrl;
+          })
+        : undefined);
+    const dispatcherClientId = await repo
+      .currentSyncClientId()
+      .catch(() => undefined);
+    return {
+      profileId: profile?.id,
+      profileName: profile?.name || undefined,
+      proxyId: savedProxy?.id,
+      proxyName: savedProxy?.name || undefined,
+      proxyUrl,
+      dispatcherClientId,
+    };
   }
 
   /**
