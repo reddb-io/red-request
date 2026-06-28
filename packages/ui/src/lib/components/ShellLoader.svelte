@@ -4,6 +4,10 @@
   let AppShellComponent = $state<Component | null>(null);
   let bootError = $state<unknown>(null);
   let loading = $state(true);
+  let loadingStartedAt = $state(Date.now());
+  let now = $state(Date.now());
+  let loadGeneration = 0;
+  const SHELL_LOAD_TIMEOUT_MS = 15_000;
 
   function errorText(error: unknown): string {
     if (error instanceof Error) return error.stack ?? error.message;
@@ -11,15 +15,20 @@
   }
 
   async function loadShell() {
+    const generation = ++loadGeneration;
     loading = true;
+    loadingStartedAt = Date.now();
     bootError = null;
     AppShellComponent = null;
     try {
-      AppShellComponent = (await import("$lib/components/AppShell.svelte")).default;
+      const component = (await import("$lib/components/AppShell.svelte")).default;
+      if (generation !== loadGeneration) return;
+      AppShellComponent = component;
     } catch (error) {
+      if (generation !== loadGeneration) return;
       bootError = error;
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
@@ -63,7 +72,25 @@
   }
 
   onMount(() => {
+    const tick = setInterval(() => {
+      now = Date.now();
+    }, 1000);
     void loadShell();
+
+    return () => clearInterval(tick);
+  });
+
+  $effect(() => {
+    if (!loading || bootError) return;
+    if (now - loadingStartedAt < SHELL_LOAD_TIMEOUT_MS) return;
+    loadGeneration++;
+    loading = false;
+    AppShellComponent = null;
+    bootError = new Error(
+      `Shell loading timed out after ${Math.round(
+        SHELL_LOAD_TIMEOUT_MS / 1000
+      )}s.`
+    );
   });
 </script>
 

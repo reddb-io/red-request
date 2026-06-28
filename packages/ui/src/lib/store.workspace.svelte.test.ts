@@ -140,6 +140,26 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
+  it("init exits a stuck project_info call into recovery", async () => {
+    vi.useFakeTimers();
+    const { projectInfo } = await import("./project");
+    vi.mocked(projectInfo).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+    ws.ready = false;
+
+    const pending = ws.init();
+    await vi.advanceTimersByTimeAsync(16_000);
+    await pending;
+
+    expect(ws.ready).toBe(true);
+    expect(ws.screen).toBe("app");
+    expect(ws.loading).toBeNull();
+    expect(ws.transitioning).toBe(false);
+    expect(ws.loadError).toContain("Startup failed before project info");
+    expect(ws.loadError).toContain("timed out");
+  });
+
   it("chooseProject does not wait invisibly forever when the previous project's autosave hangs", async () => {
     vi.useFakeTimers();
     vi.mocked(repo.saveRequest).mockImplementationOnce(
