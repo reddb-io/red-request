@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount, type Component } from "svelte";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { ws } from "$lib/store.svelte";
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
@@ -25,6 +24,26 @@
   );
   let now = $state(Date.now());
   const FAILSAFE_OPEN_RECOVERY_MS = 30_000;
+
+  async function currentWindow() {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return getCurrentWindow();
+  }
+
+  function errorMessage(error: unknown): string {
+    if (error instanceof Error) return error.stack ?? error.message;
+    return String(error);
+  }
+
+  function recoverFromBootError(source: string, error: unknown) {
+    const detail = errorMessage(error);
+    appLog("error", `${source}: ${detail}`);
+    if (ws.screen !== "app" || (!ws.loading && !ws.transitioning)) return;
+    queueMicrotask(() => {
+      if (ws.screen !== "app" || (!ws.loading && !ws.transitioning)) return;
+      ws.forceOpenRecovery(`${source}: ${detail}`);
+    });
+  }
 
   function waitForPaint(): Promise<void> {
     return new Promise((resolve) => {
@@ -54,6 +73,14 @@
     };
     window.addEventListener("blur", flush);
     document.addEventListener("visibilitychange", onVisibility);
+    const onGlobalError = (event: ErrorEvent) => {
+      recoverFromBootError("Project boot crashed", event.error ?? event.message);
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      recoverFromBootError("Project boot promise rejected", event.reason);
+    };
+    window.addEventListener("error", onGlobalError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
 
     // Intercept the window close so the flush lands while reddb is still alive (the Rust
     // side reaps the sidecar on Destroyed, not CloseRequested). This is best-effort:
@@ -61,9 +88,9 @@
     // trap the OS close button behind preventDefault().
     let unlistenClose: (() => void) | undefined;
     let closeStarted = false;
-    try {
-      const win = getCurrentWindow();
-      void win
+    void currentWindow()
+      .then((win) =>
+        win
         .onCloseRequested(async (event) => {
           event.preventDefault();
           ws.beginClosing();
@@ -80,14 +107,17 @@
           }
           await win.destroy();
         })
-        .then((u) => (unlistenClose = u));
-    } catch {
-      /* not running inside the Tauri shell (browser dev) — no window to guard */
-    }
+      )
+      .then((u) => (unlistenClose = u))
+      .catch(() => {
+        /* not running inside the Tauri shell (browser dev) — no window to guard */
+      });
 
     return () => {
       window.removeEventListener("blur", flush);
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("error", onGlobalError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
       clearInterval(tick);
       unlistenClose?.();
     };

@@ -363,6 +363,34 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loading).toBeNull();
   });
 
+  it("retry prioritizes the project that was opening over the previously-open project", async () => {
+    const { openProject } = await import("./project");
+    ws.screen = "app";
+    ws.loadError = "Opening project timed out after 15s: /tmp/new-project";
+    ws.openingTarget = { kind: "local", dir: "/tmp/new-project" };
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    vi.mocked(openProject).mockResolvedValueOnce({
+      db_path: "/tmp/new-project/.red/request/app.rdb",
+      project_dir: "/tmp/new-project",
+      is_project: true,
+      arg_launched: false,
+      name: "new-project",
+    });
+
+    await ws.retry();
+
+    expect(openProject).toHaveBeenCalledWith("/tmp/new-project");
+    expect(openProject).not.toHaveBeenCalledWith("/tmp/old-project");
+    expect(ws.project?.project_dir).toBe("/tmp/new-project");
+    expect(ws.loadError).toBeNull();
+  });
+
   it("retry reconnects the failed connection-string project source", async () => {
     const { openConnectionString } = await import("./project");
     ws.screen = "app";
@@ -395,6 +423,42 @@ describe("Workspace persistence coordination", () => {
     expect(repo.runMigrations).toHaveBeenCalled();
     expect(ws.loadError).toBeNull();
     expect(ws.loading).toBeNull();
+  });
+
+  it("retry prioritizes a failed connection-string open over the stale local project", async () => {
+    const { openConnectionString, openProject } = await import("./project");
+    ws.screen = "app";
+    ws.loadError =
+      "Connecting to RedDB timed out after 15s: wss://team.reddb.io/redwire";
+    ws.openingTarget = {
+      kind: "connection",
+      connection: "wss://team.reddb.io/redwire",
+    };
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    vi.mocked(openConnectionString).mockResolvedValueOnce({
+      db_path: "wss://team.reddb.io/redwire",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "wss://team.reddb.io/redwire",
+      name: "Remote RedDB",
+    });
+
+    await ws.retry();
+
+    expect(openConnectionString).toHaveBeenCalledWith(
+      "wss://team.reddb.io/redwire"
+    );
+    expect(openProject).not.toHaveBeenCalled();
+    expect(ws.project?.connection_string).toBe("wss://team.reddb.io/redwire");
+    expect(ws.loadError).toBeNull();
   });
 
   it("init does not leave an arg-launched project stuck on the startup loading screen", async () => {
@@ -667,6 +731,7 @@ describe("Workspace persistence coordination", () => {
       arg_launched: false,
       name: "fake",
     };
+    ws.openingTarget = { kind: "local", dir: "/tmp/fake" };
     ws.loadError = "opening project timed out";
     ws.loading = {
       startedAt: 1,
@@ -683,6 +748,10 @@ describe("Workspace persistence coordination", () => {
       project: {
         db_path: "/tmp/fake/.red/request/app.rdb",
         project_dir: "/tmp/fake",
+      },
+      openingTarget: {
+        kind: "local",
+        dir: "/tmp/fake",
       },
       loadError: "opening project timed out",
       loading: {
