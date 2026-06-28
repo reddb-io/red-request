@@ -530,9 +530,16 @@
       Permanently deletes this project's <span class="mono">.red/request</span> data (requests,
       collections, history). The rest of the folder is left untouched.
     </p>
-    <Button onclick={confirmDeleteProjectData} variant="outline" size="xs"
-      class="border-red-900/60 text-red-300 hover:bg-red-950/40">Delete project data…</Button
+    <Button
+      onclick={confirmDeleteProjectData}
+      disabled={ws.deletingProjectData}
+      aria-busy={ws.deletingProjectData}
+      variant="outline"
+      size="xs"
+      class="border-red-900/60 text-red-300 hover:bg-red-950/40"
     >
+      {ws.deletingProjectData ? "Deleting project data..." : "Delete project data..."}
+    </Button>
   </div>
   {/if}
   </div>

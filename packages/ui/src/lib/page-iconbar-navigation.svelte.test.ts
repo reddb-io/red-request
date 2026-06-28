@@ -86,6 +86,9 @@ describe("+page icon-bar navigation", () => {
     ws.redUiEnabled = false;
     ws.project = null;
     ws.collections = [];
+    ws.creatingCollection = false;
+    ws.deletingCollectionIds = {};
+    ws.deletingProjectData = false;
     ws.activeColId = null;
     ws.activeReq = null;
   });

@@ -3,11 +3,13 @@
   import Tooltip from "./ui/Tooltip.svelte";
   import Menu from "./ui/Menu.svelte";
   import ImportModal from "./ui/ImportModal.svelte";
+  import ConfirmActionModal from "./ui/ConfirmActionModal.svelte";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import { Badge } from "./ui/badge/index.js";
 
   let showImport = $state(false);
+  let collectionPendingDelete = $state<LoadedCollection | null>(null);
   import { projectLabel } from "../project";
   import type { LoadedCollection } from "@reddb-io/request-core";
 
@@ -216,9 +218,17 @@
 
   // Create an empty collection and drop straight into its inline name field.
   async function newCollection() {
+    if (ws.creatingCollection) return;
     const id = await ws.addCollection();
+    if (!id) return;
     renamingColId = id;
     colRenameValue = "New Collection";
+  }
+
+  async function confirmDeleteCollection() {
+    if (!collectionPendingDelete) return;
+    await ws.deleteCollection(collectionPendingDelete.id);
+    collectionPendingDelete = null;
   }
 </script>
 
@@ -236,7 +246,16 @@
     </div>
     <Tooltip text="New collection" side="bottom">
       {#snippet children(p)}
-        <Button {...p} onclick={newCollection} variant="outline" size="xs">+ Collection</Button>
+        <Button
+          {...p}
+          onclick={newCollection}
+          disabled={ws.creatingCollection}
+          aria-busy={ws.creatingCollection}
+          variant="outline"
+          size="xs"
+        >
+          {ws.creatingCollection ? "Creating..." : "+ Collection"}
+        </Button>
       {/snippet}
     </Tooltip>
   </div>
@@ -343,8 +362,10 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="group/col flex items-center justify-between rounded px-2 py-1"
+          class:opacity-60={ws.deletingCollectionIds[col.id]}
           class:ring-1={dropRootHeader === col.id}
           class:ring-[var(--color-brand)]={dropRootHeader === col.id}
+          aria-busy={!!ws.deletingCollectionIds[col.id]}
           ondragover={(e) => {
             if (!draggingId) return;
             e.preventDefault();
@@ -425,8 +446,13 @@
                   ? [{ label: "Clear cookies", onSelect: () => ws.clearCookies(col.id) }]
                   : []),
                 {
-                  label: "Delete collection",
-                  onSelect: () => ws.deleteCollection(col.id),
+                  label: ws.deletingCollectionIds[col.id]
+                    ? "Deleting collection..."
+                    : "Delete collection",
+                  onSelect: () => {
+                    if (!ws.deletingCollectionIds[col.id])
+                      collectionPendingDelete = col;
+                  },
                   destructive: true,
                 },
               ]}
@@ -558,6 +584,18 @@
 
 {#if showImport}
   <ImportModal onClose={() => (showImport = false)} />
+{/if}
+
+{#if collectionPendingDelete}
+  <ConfirmActionModal
+    title="Delete collection"
+    description={`Delete "${collectionPendingDelete.collection.name}" and every request, folder and history entry inside it? This cannot be undone.`}
+    confirmLabel="Delete collection"
+    busyLabel="Deleting collection..."
+    destructive
+    onCancel={() => (collectionPendingDelete = null)}
+    onConfirm={confirmDeleteCollection}
+  />
 {/if}
 
 <!-- .drop-line styles live in app.css (global) — see note there about Tailwind v4 + Svelte. -->

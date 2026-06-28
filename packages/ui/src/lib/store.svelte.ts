@@ -128,6 +128,9 @@ class Workspace {
   openingTarget = $state<OpeningTarget | null>(null);
   project = $state<ProjectInfo | null>(null);
   collections = $state<LoadedCollection[]>([]);
+  creatingCollection = $state(false);
+  deletingCollectionIds = $state<Record<string, true>>({});
+  deletingProjectData = $state(false);
 
   activeColId = $state<string | null>(null);
   activeReq = $state<RequestDefinition | null>(null);
@@ -557,14 +560,20 @@ class Workspace {
 
   /** Permanently delete the current project's data (.red/request) and return to the selector. */
   async deleteProjectData(): Promise<void> {
+    if (this.deletingProjectData) return;
     const dir = this.recoveryProjectDir;
     if (!dir) return;
-    // Switch reddb off this dir first so the sidecar releases app.rdb before we delete it.
-    await openProject(null).catch(() => {});
-    await deleteProjectData(dir).catch((e) => {
-      this.loadError = e instanceof Error ? e.message : String(e);
-    });
-    this.backToSelector();
+    this.deletingProjectData = true;
+    try {
+      // Switch reddb off this dir first so the sidecar releases app.rdb before we delete it.
+      await openProject(null).catch(() => {});
+      await deleteProjectData(dir).catch((e) => {
+        this.loadError = e instanceof Error ? e.message : String(e);
+      });
+      this.backToSelector();
+    } finally {
+      this.deletingProjectData = false;
+    }
   }
 
   async exportCrashReport(): Promise<string | null> {
@@ -2021,16 +2030,22 @@ class Workspace {
 
   /** Create a new, empty collection and make it active. Returns its id (so the UI
    *  can drop straight into an inline rename). */
-  async addCollection(name = "New Collection"): Promise<string> {
+  async addCollection(name = "New Collection"): Promise<string | null> {
+    if (this.creatingCollection) return null;
+    this.creatingCollection = true;
     const colId = this.rid("col");
-    await repo.saveCollectionMeta(
-      colId,
-      collectionFileSchema.parse({ name: name.trim() || "New Collection" })
-    );
-    await this.reload();
-    this.activeColId = colId;
-    this.activeReq = null;
-    return colId;
+    try {
+      await repo.saveCollectionMeta(
+        colId,
+        collectionFileSchema.parse({ name: name.trim() || "New Collection" })
+      );
+      await this.reload();
+      this.activeColId = colId;
+      this.activeReq = null;
+      return colId;
+    } finally {
+      this.creatingCollection = false;
+    }
   }
 
   private async persistCollection(): Promise<void> {
@@ -2073,14 +2088,24 @@ class Workspace {
 
   /** Delete a collection (and everything it owns); select another if it was active. */
   async deleteCollection(colId: string): Promise<void> {
-    await repo.deleteCollection(colId);
-    this.collections = this.collections.filter((c) => c.id !== colId);
-    if (this.activeColId === colId) {
-      this.activeReq = null;
-      this.activeColId = this.collections[0]?.id ?? null;
-      const first = this.collections[0];
-      if (first?.requests[0])
-        this.selectRequest(first.id, first.requests[0].id);
+    if (this.deletingCollectionIds[colId]) return;
+    this.deletingCollectionIds = {
+      ...this.deletingCollectionIds,
+      [colId]: true,
+    };
+    try {
+      await repo.deleteCollection(colId);
+      this.collections = this.collections.filter((c) => c.id !== colId);
+      if (this.activeColId === colId) {
+        this.activeReq = null;
+        this.activeColId = this.collections[0]?.id ?? null;
+        const first = this.collections[0];
+        if (first?.requests[0])
+          this.selectRequest(first.id, first.requests[0].id);
+      }
+    } finally {
+      const { [colId]: _removed, ...rest } = this.deletingCollectionIds;
+      this.deletingCollectionIds = rest;
     }
   }
 
