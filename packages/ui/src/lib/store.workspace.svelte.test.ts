@@ -18,6 +18,7 @@ vi.mock("./repo", () => ({
   removeEnvironmentSecret: vi.fn(async () => {}),
   deleteRequest: vi.fn(async () => {}),
   deleteCollection: vi.fn(async () => {}),
+  saveHistory: vi.fn(async () => {}),
   ensureStore: vi.fn(async () => {}),
   runMigrations: vi.fn(async () => {}),
   ensureSample: vi.fn(async () => {}),
@@ -85,6 +86,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 import * as repo from "./repo";
+import * as rpc from "./rpc";
 import { ws } from "./store.svelte";
 
 function request(id: string, patch: Partial<RequestDefinition> = {}) {
@@ -1186,6 +1188,68 @@ describe("Workspace persistence coordination", () => {
         fromProfile: true,
       })
     );
+  });
+
+  it("sends through the profile proxy when the active profile has one", async () => {
+    ws.network = {
+      proxies: [
+        {
+          id: "px-profile",
+          name: "Team proxy",
+          type: "socks5h",
+          host: "proxy.internal",
+          port: "1080",
+          username: "",
+          password: "",
+        },
+      ],
+      profiles: [
+        {
+          id: "pf-1",
+          name: "Team identity",
+          userAgent: "",
+          headers: [],
+          proxyId: "px-profile",
+        },
+      ],
+    };
+    ws.collections = [
+      collection("c1", [
+        request("r1", {
+          method: "GET",
+          url: "https://api.example.test/users",
+          profileId: "pf-1",
+          proxy: "http://manual.local:8080",
+        }),
+      ]),
+    ];
+    ws.selectRequest("c1", "r1");
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: {
+        status: 200,
+        statusText: "OK",
+        ok: true,
+        url: "https://api.example.test/users",
+        headers: {},
+        bodyText: "",
+        size: 0,
+        durationMs: 12,
+      },
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/users",
+    });
+
+    await ws.send();
+
+    expect(ws.activeProfileProxy?.id).toBe("px-profile");
+    expect(rpc.httpSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          proxy: "socks5h://proxy.internal:1080",
+        }),
+      })
+    );
+    expect(ws.renderedRequest?.proxy).toBe("socks5h://proxy.internal:1080");
   });
 
   it("coalesces overlapping collection creation into one persisted collection", async () => {
