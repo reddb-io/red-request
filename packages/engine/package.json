@@ -1,5 +1,5 @@
 {
-  "name": "@red-request/engine",
+  "name": "@reddb-io/request-engine",
   "version": "0.45.13",
   "type": "module",
   "private": true,
@@ -18,7 +18,7 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.12.0",
     "@grpc/proto-loader": "^0.8.1",
-    "@red-request/core": "workspace:*",
+    "@reddb-io/request-core": "workspace:*",
     "https-proxy-agent": "^9.1.0",
     "recker": "1.0.103",
     "socks": "^2.8.3"

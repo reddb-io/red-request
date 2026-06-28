@@ -6,6 +6,11 @@ describe("project transition CSS", () => {
   it("does not mount the black iris transition during project open", () => {
     const pagePath = join(process.cwd(), "src/routes/+page.svelte");
     const page = readFileSync(pagePath, "utf8");
+    const appShellPath = join(
+      process.cwd(),
+      "src/lib/components/AppShell.svelte"
+    );
+    const appShell = readFileSync(appShellPath, "utf8");
     const titlebarPath = join(
       process.cwd(),
       "src/lib/components/Titlebar.svelte"
@@ -21,14 +26,19 @@ describe("project transition CSS", () => {
     expect(existsSync(transitionPath)).toBe(false);
     expect(page).not.toContain("ProjectTransition");
     expect(page).not.toContain("<ProjectTransition");
+    expect(appShell).not.toContain("ProjectTransition");
+    expect(appShell).not.toContain("<ProjectTransition");
     expect(css).not.toContain(".iris");
     expect(css).not.toContain("box-shadow: 0 0 0 115vmax #000");
     expect(titlebar).toContain("sticky top-0 z-[2000] isolate");
   });
 
   it("keeps the primary rail above recovery overlays and outside their hit area", () => {
-    const pagePath = join(process.cwd(), "src/routes/+page.svelte");
-    const page = readFileSync(pagePath, "utf8");
+    const appShellPath = join(
+      process.cwd(),
+      "src/lib/components/AppShell.svelte"
+    );
+    const appShell = readFileSync(appShellPath, "utf8");
     const iconBarPath = join(
       process.cwd(),
       "src/lib/components/IconBar.svelte"
@@ -39,8 +49,10 @@ describe("project transition CSS", () => {
     expect(iconBar).toContain("onpointerdowncapture={handleRailActivation}");
     expect(iconBar).toContain("onmousedowncapture={handleRailActivation}");
     expect(iconBar).toContain("onclickcapture={handleRailActivation}");
-    expect(page).toContain("pointer-events-none fixed right-3 top-11 z-[950]");
-    expect(page).toContain(
+    expect(appShell).toContain(
+      "pointer-events-none fixed right-3 top-11 z-[950]"
+    );
+    expect(appShell).toContain(
       "pointer-events-auto flex flex-wrap items-center gap-2"
     );
   });
@@ -48,6 +60,11 @@ describe("project transition CSS", () => {
   it("keeps root chrome resilient to Tauri window import and boot crashes", () => {
     const pagePath = join(process.cwd(), "src/routes/+page.svelte");
     const page = readFileSync(pagePath, "utf8");
+    const appShellPath = join(
+      process.cwd(),
+      "src/lib/components/AppShell.svelte"
+    );
+    const appShell = readFileSync(appShellPath, "utf8");
     const titlebarPath = join(
       process.cwd(),
       "src/lib/components/Titlebar.svelte"
@@ -60,28 +77,66 @@ describe("project transition CSS", () => {
     expect(titlebar).not.toContain(
       'import { getCurrentWindow } from "@tauri-apps/api/window"'
     );
-    expect(page).toContain('window.addEventListener("error", onGlobalError)');
-    expect(page).toContain(
+    expect(appShell).toContain(
+      'window.addEventListener("error", onGlobalError)'
+    );
+    expect(appShell).toContain(
       'window.addEventListener("unhandledrejection", onUnhandledRejection)'
     );
-    expect(page).toContain("ws.forceOpenRecovery(`${source}: ${detail}`)");
+    expect(appShell).toContain("ws.forceOpenRecovery(`${source}: ${detail}`)");
   });
 
   it("keeps the titlebar outside fragile providers and gives shell crashes recovery actions", () => {
     const pagePath = join(process.cwd(), "src/routes/+page.svelte");
     const page = readFileSync(pagePath, "utf8");
+    const appShellPath = join(
+      process.cwd(),
+      "src/lib/components/AppShell.svelte"
+    );
+    const appShell = readFileSync(appShellPath, "utf8");
+    const shellLoaderPath = join(
+      process.cwd(),
+      "src/lib/components/ShellLoader.svelte"
+    );
+    const shellLoader = readFileSync(shellLoaderPath, "utf8");
     const titlebarIndex = page.indexOf("<Titlebar />");
-    const shellBoundaryIndex = page.indexOf("failed={shellFailed}");
-    const tooltipProviderIndex = page.indexOf("<Tooltip.Provider");
 
     expect(titlebarIndex).toBeGreaterThan(-1);
-    expect(shellBoundaryIndex).toBeGreaterThan(titlebarIndex);
-    expect(tooltipProviderIndex).toBeGreaterThan(shellBoundaryIndex);
-    expect(page).toContain("{#snippet shellFailed");
-    expect(page).toContain("Project shell failed");
-    expect(page).toContain("Retry shell");
-    expect(page).toContain("Export crash report");
-    expect(page).toContain("Choose another project");
-    expect(page).toContain("Reload window");
+    expect(page).toContain("<ShellLoader />");
+    expect(appShell).toContain("{#snippet shellFailed");
+    expect(appShell).toContain("Project shell failed");
+    expect(appShell).toContain("<Tooltip.Provider");
+    expect(shellLoader).toContain("{#snippet bootFailed");
+    expect(shellLoader).toContain("Project shell failed to start");
+    expect(shellLoader).toContain("Retry shell");
+    expect(shellLoader).toContain("Export crash report");
+    expect(shellLoader).toContain("Choose another project");
+    expect(shellLoader).toContain("Reload window");
+  });
+
+  it("keeps the route module free of fragile workspace imports", () => {
+    const pagePath = join(process.cwd(), "src/routes/+page.svelte");
+    const page = readFileSync(pagePath, "utf8");
+
+    for (const component of [
+      "DeveloperConsole",
+      "IconBar",
+      "Sidebar",
+      "RequestPanel",
+      "ResponsePanel",
+      "HomeView",
+      "ProjectSelector",
+    ]) {
+      expect(page).not.toContain(
+        `import ${component} from "$lib/components/${component}.svelte"`
+      );
+    }
+    expect(page).not.toContain('import { ws } from "$lib/store.svelte"');
+    expect(page).toContain(
+      'import Titlebar from "$lib/components/Titlebar.svelte"'
+    );
+    expect(page).toContain(
+      'import ShellLoader from "$lib/components/ShellLoader.svelte"'
+    );
   });
 });

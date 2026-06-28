@@ -34,7 +34,7 @@ if (!existsSync(srcAbs)) {
 console.log(`brand:icons → regenerating app icons from ${src} …`);
 execFileSync(
   "pnpm",
-  ["--filter", "@red-request/desktop", "exec", "tauri", "icon", srcAbs],
+  ["--filter", "@reddb-io/request-desktop", "exec", "tauri", "icon", srcAbs],
   { cwd: root, stdio: "inherit" }
 );
 

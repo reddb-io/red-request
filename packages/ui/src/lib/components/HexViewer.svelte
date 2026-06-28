@@ -3,7 +3,7 @@
   // bytes→rows formatting is the pure `hexRows` helper from core (unit-tested in isolation);
   // this component is only the rendering. Reusable: pass either raw `bytes` or a base64
   // string (e.g. ResponseResult.bodyBase64). Later slices feed it WebSocket binary frames.
-  import { hexRows, bytesFromBase64, type HexRow } from "@red-request/core";
+  import { hexRows, bytesFromBase64, type HexRow } from "@reddb-io/request-core";
 
   interface Props {
     bytes?: Uint8Array;

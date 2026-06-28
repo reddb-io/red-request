@@ -9,7 +9,7 @@
 
   let showImport = $state(false);
   import { projectLabel } from "../project";
-  import type { LoadedCollection } from "@red-request/core";
+  import type { LoadedCollection } from "@reddb-io/request-core";
 
   const methodColor: Record<string, string> = {
     GET: "text-emerald-400",

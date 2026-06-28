@@ -59,9 +59,9 @@ curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall
 
 Prefer a click, or apt? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
 
-| Linux                  | macOS                  | Windows                    |
-| ---------------------- | ---------------------- | -------------------------- |
-| `.AppImage` · `.deb`   | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
+| Linux                | macOS                  | Windows                    |
+| -------------------- | ---------------------- | -------------------------- |
+| `.AppImage` · `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
 
 <sub>Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.</sub>
 
@@ -182,12 +182,12 @@ recker is TypeScript over raw sockets, so it can't live in the webview — it ru
 the local store. Decisions live in [`.red/adr/`](.red/adr); the glossary in
 [`.red/CONTEXT.md`](.red/CONTEXT.md).
 
-| Package                | Role                                                          |
-| ---------------------- | ------------------------------------------------------------- |
-| `@red-request/core`    | Shared Zod schemas + variable resolver (UI ⇄ engine contract) |
-| `@red-request/engine`  | Bun/Node sidecar wrapping recker; NDJSON-RPC over stdio       |
-| `@red-request/ui`      | SvelteKit (static) app — the client UI                        |
-| `@red-request/desktop` | Tauri 2 shell (Rust)                                          |
+| Package                     | Role                                                          |
+| --------------------------- | ------------------------------------------------------------- |
+| `@reddb-io/request-core`    | Shared Zod schemas + variable resolver (UI ⇄ engine contract) |
+| `@reddb-io/request-engine`  | Bun/Node sidecar wrapping recker; NDJSON-RPC over stdio       |
+| `@reddb-io/request-ui`      | SvelteKit (static) app — the client UI                        |
+| `@reddb-io/request-desktop` | Tauri 2 shell (Rust)                                          |
 
 ---
 

@@ -1,5 +1,5 @@
 {
-  "name": "@red-request/desktop",
+  "name": "@reddb-io/request-desktop",
   "version": "0.45.13",
   "private": true,
   "type": "module",

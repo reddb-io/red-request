@@ -5,7 +5,7 @@ import {
   storedEnvironmentSchema,
   type LoadedCollection,
   type RequestDefinition,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 
 vi.mock("./repo", () => ({
   saveRequest: vi.fn(async () => {}),

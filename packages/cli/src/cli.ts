@@ -12,8 +12,8 @@ import {
   environmentFileSchema,
   mergeScopes,
   type RequestDefinition,
-} from "@red-request/core";
-import { runPipeline } from "@red-request/engine";
+} from "@reddb-io/request-core";
+import { runPipeline } from "@reddb-io/request-engine";
 
 function help(): void {
   console.log(`rr-run — headless Red Request collection runner

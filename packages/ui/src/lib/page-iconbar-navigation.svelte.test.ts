@@ -42,16 +42,25 @@ vi.mock("./repo", () => ({
   currentSyncClientId: vi.fn(async () => "client-1"),
   readSyncEvents: vi.fn(() => new Promise<never>(() => {})),
   ackSyncEvent: vi.fn(async () => {}),
+  recordCounts: vi.fn(async () => ({
+    total: 0,
+    byKind: [],
+  })),
+  migrationSummary: vi.fn(async () => ({
+    applied: 0,
+    pending: 0,
+    failed: 0,
+  })),
   appVersion: vi.fn(async () => "0.0.0"),
   reddbVersion: vi.fn(async () => "0.0.0"),
 }));
 vi.mock("./secrets", () => ({}));
 vi.mock("./backup", () => ({
-  createBackup: vi.fn(),
-  listBackups: vi.fn(),
-  restoreBackup: vi.fn(),
-  deleteBackup: vi.fn(),
-  autoBackup: vi.fn(),
+  createBackup: vi.fn(async () => null),
+  listBackups: vi.fn(async () => []),
+  restoreBackup: vi.fn(async () => {}),
+  deleteBackup: vi.fn(async () => {}),
+  autoBackup: vi.fn(async () => {}),
 }));
 vi.mock("./fs", () => ({
   readTextExternal: vi.fn(),
@@ -60,7 +69,7 @@ vi.mock("./fs", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 import { ws } from "./store.svelte";
-import Page from "../routes/+page.svelte";
+import AppShellHarness from "./test/AppShellHarness.svelte";
 
 describe("+page icon-bar navigation", () => {
   beforeEach(() => {
@@ -82,7 +91,7 @@ describe("+page icon-bar navigation", () => {
   });
 
   it("keeps the left rail icons clickable inside the full app shell", async () => {
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => expect(ws.screen).toBe("app"));
     await waitFor(() => expect(ws.redUiEnabled).toBe(true));
@@ -101,6 +110,9 @@ describe("+page icon-bar navigation", () => {
       })
     );
     await waitFor(() => expect(ws.view).toBe("settings"));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("Settings")
+    );
 
     await fireEvent.click(
       screen.getByRole("button", {
@@ -108,6 +120,9 @@ describe("+page icon-bar navigation", () => {
       })
     );
     await waitFor(() => expect(ws.view).toBe("database"));
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("Database")
+    );
 
     await fireEvent.click(
       screen.getByRole("button", {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { newRequest, type ResponseResult } from "@red-request/core";
+import { newRequest, type ResponseResult } from "@reddb-io/request-core";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
 
 describe("runPreRequest", () => {

@@ -6,7 +6,7 @@ import {
   resolveRequest,
   type RequestDefinition,
   type VariableScope,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Matches rpcNotificationSchema: { stream: <conn id>, event, data }.

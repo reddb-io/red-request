@@ -334,13 +334,22 @@ function uiPrimitiveSummary(manifest, serverFiles, clientFiles) {
 async function measureUi(records) {
   pushRecord(
     records,
-    await run("core build", "pnpm", ["--filter", "@red-request/core", "build"])
+    await run("core build", "pnpm", [
+      "--filter",
+      "@reddb-io/request-core",
+      "build",
+    ])
   );
   const uiBuild = pushRecord(
     records,
-    await run("ui build", "pnpm", ["--filter", "@red-request/ui", "build"], {
-      captureOutput: true,
-    })
+    await run(
+      "ui build",
+      "pnpm",
+      ["--filter", "@reddb-io/request-ui", "build"],
+      {
+        captureOutput: true,
+      }
+    )
   );
   return bundleSummary(uiBuild.output);
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockIPC } from "@tauri-apps/api/mocks";
-import { newRequest, type RequestDefinition } from "@red-request/core";
+import { newRequest, type RequestDefinition } from "@reddb-io/request-core";
 import * as repo from "./repo";
 
 const REQ = "rr_requests";

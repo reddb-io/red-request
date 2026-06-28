@@ -3,7 +3,7 @@
   import * as Command from "./command/index.js";
   import { ws } from "../../store.svelte";
   import * as repo from "../../repo";
-  import type { RequestDefinition } from "@red-request/core";
+  import type { RequestDefinition } from "@reddb-io/request-core";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 

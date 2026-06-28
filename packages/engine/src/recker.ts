@@ -16,7 +16,7 @@ import type {
   ResponseResult,
   AuthConfig,
   Kv,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import { cookieHeader, storeSetCookies } from "./cookies.js";
 import { proxiedDispatch } from "./proxy-dispatch.js";
 

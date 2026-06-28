@@ -1,9 +1,9 @@
 // Repro for the v0.40.x "black screen" pattern: when a child component
 // throws during mount (a stale profileId, a bad lazy import, anything),
-// the user used to get nothing. The +page boundary must now catch it
-// and surface the error with a Retry / Reload button.
+// the user used to get nothing. The app shell boundaries must now catch it
+// while the titlebar remains mounted by the route-level shell.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { collectionFileSchema, newRequest } from "@red-request/core";
+import { collectionFileSchema, newRequest } from "@reddb-io/request-core";
 import {
   cleanup,
   fireEvent,
@@ -51,17 +51,26 @@ vi.mock("./repo", () => ({
   currentSyncClientId: vi.fn(async () => "client-1"),
   readSyncEvents: vi.fn(() => new Promise<never>(() => {})),
   ackSyncEvent: vi.fn(async () => {}),
+  recordCounts: vi.fn(async () => ({
+    total: 0,
+    byKind: [],
+  })),
+  migrationSummary: vi.fn(async () => ({
+    applied: 0,
+    pending: 0,
+    failed: 0,
+  })),
   recentList: vi.fn(async () => []),
   appVersion: vi.fn(async () => "0.0.0"),
   reddbVersion: vi.fn(async () => "0.0.0"),
 }));
 vi.mock("./secrets", () => ({}));
 vi.mock("./backup", () => ({
-  createBackup: vi.fn(),
-  listBackups: vi.fn(),
-  restoreBackup: vi.fn(),
-  deleteBackup: vi.fn(),
-  autoBackup: vi.fn(),
+  createBackup: vi.fn(async () => null),
+  listBackups: vi.fn(async () => []),
+  restoreBackup: vi.fn(async () => {}),
+  deleteBackup: vi.fn(async () => {}),
+  autoBackup: vi.fn(async () => {}),
 }));
 vi.mock("./fs", () => ({
   readTextExternal: vi.fn(),
@@ -78,7 +87,7 @@ vi.mock("$lib/components/HomeView.svelte", () => ({
   },
 }));
 
-import Page from "../routes/+page.svelte";
+import AppShellHarness from "./test/AppShellHarness.svelte";
 import { ws } from "./store.svelte";
 
 function expectButton(name: string) {
@@ -112,7 +121,7 @@ describe("+page error boundary", () => {
     const storeMod = await import("./store.svelte");
     (storeMod.ws as unknown as { view: string }).view = "home";
     try {
-      render(Page);
+      render(AppShellHarness);
       // v0.43: each panel has its own nested boundary that names the
       // failing panel — so the user sees "Home failed to render" plus
       // the actual error, not a generic "Something went wrong" full-screen.
@@ -133,7 +142,7 @@ describe("+page error boundary", () => {
       () => new Promise<never>(() => {})
     );
 
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => {
       expect(document.body.textContent).toContain("running migrations");
@@ -147,7 +156,7 @@ describe("+page error boundary", () => {
 
   it("automatically exits an aged loading state into recovery instead of waiting forever", async () => {
     const storeMod = await import("./store.svelte");
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => {
       expect(storeMod.ws.ready).toBe(true);
@@ -181,7 +190,7 @@ describe("+page error boundary", () => {
   });
 
   it("renders an action surface when a project opens with no collections", async () => {
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => {
       expect(document.body.textContent).toContain("No collections yet");
@@ -203,7 +212,7 @@ describe("+page error boundary", () => {
       arg_launched: false,
       name: null,
     });
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => {
       expect(storeMod.ws.ready).toBe(true);
@@ -263,7 +272,7 @@ describe("+page error boundary", () => {
       arg_launched: false,
       name: null,
     });
-    render(Page);
+    render(AppShellHarness);
 
     await waitFor(() => {
       expect(storeMod.ws.ready).toBe(true);

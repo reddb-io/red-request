@@ -4,7 +4,7 @@ import {
   newRequest,
   storedEnvironmentSchema,
   type RequestDefinition,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import * as repo from "./repo";
 
 const reply = (status: number, body: unknown) => ({

@@ -10,9 +10,9 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --filter @red-request/ui dev",
-    "desktop:dev": "pnpm brand:sync && pnpm --filter @red-request/core build && pnpm --filter @red-request/engine build && pnpm --filter @red-request/desktop tauri dev",
-    "desktop:build": "pnpm brand:sync && pnpm brand:icons && pnpm --filter @red-request/core build && pnpm engine:build && pnpm --filter @red-request/desktop tauri build",
+    "dev": "pnpm --filter @reddb-io/request-ui dev",
+    "desktop:dev": "pnpm brand:sync && pnpm --filter @reddb-io/request-core build && pnpm --filter @reddb-io/request-engine build && pnpm --filter @reddb-io/request-desktop tauri dev",
+    "desktop:build": "pnpm brand:sync && pnpm brand:icons && pnpm --filter @reddb-io/request-core build && pnpm engine:build && pnpm --filter @reddb-io/request-desktop tauri build",
     "engine:build": "node scripts/build-engine.mjs",
     "reddb:preflight": "node scripts/check-reddb-release-assets.mjs x86_64-unknown-linux-gnu x86_64-pc-windows-msvc",
     "reddb:sync": "node scripts/sync-reddb.mjs",

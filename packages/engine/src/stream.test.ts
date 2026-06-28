@@ -10,7 +10,7 @@ import {
   phxJoin,
   phxLeave,
 } from "./stream.js";
-import { newRequest } from "@red-request/core";
+import { newRequest } from "@reddb-io/request-core";
 
 let wss: WebSocketServer;
 let wsPort = 0;

@@ -33,7 +33,7 @@ import {
   type ProjectSyncEntity,
   type ProjectSyncEvent,
   type ProjectSyncEventKind,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import * as db from "./reddb";
 import * as secrets from "./secrets";
 import { MIGRATIONS } from "./migrations";

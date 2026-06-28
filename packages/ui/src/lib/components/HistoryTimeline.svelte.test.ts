@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
-import type { RequestDefinition } from "@red-request/core/request";
+import type { RequestDefinition } from "@reddb-io/request-core/request";
 
 // Mock store + repo so the timeline renders in isolation (no Tauri/sidecar).
 const { ws, restoreRequestVersion, requestHistory } = vi.hoisted(() => {

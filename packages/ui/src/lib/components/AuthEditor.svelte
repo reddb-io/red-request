@@ -3,7 +3,7 @@
     SELECTABLE_AUTH_TYPES,
     type AuthConfig,
     type AuthType,
-  } from "@red-request/core";
+  } from "@reddb-io/request-core";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
