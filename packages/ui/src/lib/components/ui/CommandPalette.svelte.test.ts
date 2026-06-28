@@ -31,6 +31,7 @@ describe("CommandPalette", () => {
     ws.screen = "app";
     ws.view = "requests";
     ws.settingsSection = "general";
+    ws.settingsIntent = null;
     ws.collections = [];
     ws.activeColId = null;
     ws.activeReq = null;
@@ -46,6 +47,18 @@ describe("CommandPalette", () => {
     await waitFor(() => {
       expect(ws.view).toBe("settings");
       expect(ws.settingsSection).toBe("proxies");
+    });
+  });
+
+  it("opens the global variable editor action from the command surface", async () => {
+    render(CommandPalette, { props: { open: true } });
+
+    await fireEvent.click(await screen.findByText("Settings: global variable"));
+
+    await waitFor(() => {
+      expect(ws.view).toBe("settings");
+      expect(ws.settingsSection).toBe("environments");
+      expect(ws.settingsIntent).toBe("global-variable");
     });
   });
 

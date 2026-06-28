@@ -87,6 +87,7 @@ export type SettingsSection =
   | "profiles"
   | "data"
   | "danger";
+export type SettingsIntent = "global-variable" | "global-secret" | null;
 type OpeningTarget =
   | { kind: "local"; dir: string | null }
   | { kind: "connection"; connection: string };
@@ -152,6 +153,7 @@ class Workspace {
   /** Settings > Data opt-in for the embedded red-ui database inspector. */
   redUiEnabled = $state(false);
   settingsSection = $state<SettingsSection>("general");
+  settingsIntent = $state<SettingsIntent>(null);
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);
