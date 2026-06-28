@@ -140,7 +140,7 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
-  it("chooseProject times out a stuck project open instead of leaving the black transition mounted forever", async () => {
+  it("chooseProject shows recovery immediately and times out a stuck project open", async () => {
     vi.useFakeTimers();
     const { openProject } = await import("./project");
     vi.mocked(openProject).mockImplementationOnce(
@@ -150,7 +150,9 @@ describe("Workspace persistence coordination", () => {
     const pending = ws.chooseProject("/tmp/stuck-project");
 
     await Promise.resolve();
-    expect(ws.transitioning).toBe(true);
+    expect(ws.transitioning).toBe(false);
+    expect(ws.transitionPhase).toBe("idle");
+    expect(ws.screen).toBe("app");
     expect(ws.loading?.step).toMatch(/switching/i);
 
     await vi.advanceTimersByTimeAsync(16_000);
@@ -164,7 +166,7 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toContain("/tmp/stuck-project");
   });
 
-  it("reveals the loading recovery screen while project open is still stuck", async () => {
+  it("reveals the loading recovery screen immediately while project open is still stuck", async () => {
     vi.useFakeTimers();
     const { openProject } = await import("./project");
     vi.mocked(openProject).mockImplementationOnce(
@@ -173,7 +175,7 @@ describe("Workspace persistence coordination", () => {
 
     const pending = ws.chooseProject("/tmp/stuck-project");
 
-    await vi.advanceTimersByTimeAsync(1_100);
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(ws.screen).toBe("app");
     expect(ws.loading?.step).toMatch(/switching/i);
@@ -199,7 +201,7 @@ describe("Workspace persistence coordination", () => {
       });
 
     const stuckOpen = ws.chooseProject("/tmp/stuck-project");
-    await vi.advanceTimersByTimeAsync(1_100);
+    await vi.advanceTimersByTimeAsync(0);
 
     ws.forceOpenRecovery("Project opening was stopped after 11s.");
 
@@ -224,6 +226,62 @@ describe("Workspace persistence coordination", () => {
     await vi.advanceTimersByTimeAsync(16_000);
     await stuckOpen;
     expect(ws.project?.project_dir).toBe("/tmp/stuck-project");
+  });
+
+  it("does not let a stale project-open failure overwrite manual recovery", async () => {
+    const { openProject } = await import("./project");
+    let rejectOpen!: (error: Error) => void;
+    vi.mocked(openProject).mockImplementationOnce(
+      () =>
+        new Promise<never>((_, reject) => {
+          rejectOpen = reject;
+        })
+    );
+
+    const stuckOpen = ws.chooseProject("/tmp/stuck-project");
+    await vi.waitUntil(() => ws.loading?.step.includes("/tmp/stuck-project"));
+
+    ws.forceOpenRecovery("Project opening was stopped by the user.");
+    expect(ws.loadError).toContain("stopped by the user");
+
+    rejectOpen(new Error("late open failure"));
+    await stuckOpen;
+
+    expect(ws.loadError).toContain("stopped by the user");
+    expect(ws.loadError).not.toContain("late open failure");
+    expect(ws.openingTarget).toEqual({
+      kind: "local",
+      dir: "/tmp/stuck-project",
+    });
+  });
+
+  it("does not let a stale connection-string failure overwrite manual recovery", async () => {
+    const { openConnectionString } = await import("./project");
+    let rejectOpen!: (error: Error) => void;
+    vi.mocked(openConnectionString).mockImplementationOnce(
+      () =>
+        new Promise<never>((_, reject) => {
+          rejectOpen = reject;
+        })
+    );
+
+    const stuckOpen = ws.chooseConnectionString("wss://team.reddb.io/redwire");
+    await vi.waitUntil(() =>
+      ws.loading?.step.includes("wss://team.reddb.io/redwire")
+    );
+
+    ws.forceOpenRecovery("Remote project opening was stopped by the user.");
+    expect(ws.loadError).toContain("stopped by the user");
+
+    rejectOpen(new Error("late remote open failure"));
+    await stuckOpen;
+
+    expect(ws.loadError).toContain("stopped by the user");
+    expect(ws.loadError).not.toContain("late remote open failure");
+    expect(ws.openingTarget).toEqual({
+      kind: "connection",
+      connection: "wss://team.reddb.io/redwire",
+    });
   });
 
   it("backToSelector invalidates a stuck load so stale results cannot repopulate the app", async () => {
