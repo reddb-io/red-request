@@ -109,10 +109,8 @@ class Workspace {
   loadError = $state<string | null>(null);
   closing = $state(false);
   screen = $state<"selector" | "app">("selector");
-  /** Cartoon "iris wipe" while a project opens: a black circle closes on the
-   *  selector, the screen swaps to the app while fully black, then the iris opens
-   *  on the workspace. `transitioning` mounts the overlay; `transitionPhase` drives
-   *  the circle. Durations live in chooseProject(); the overlay CSS mirrors them. */
+  /** Legacy transition flags. They no longer mount a black overlay; project boot
+   *  must stay in the visible loading/recovery shell with chrome available. */
   transitioning = $state(false);
   transitionPhase = $state<"idle" | "closing" | "hold" | "opening">("idle");
   /** Live progress while a project opens. The "Opening project…" overlay reads
