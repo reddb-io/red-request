@@ -35,36 +35,57 @@
     ws.view = view;
   }
 
-  function selectViewFromPointer(event: PointerEvent, view: AppView) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    selectView(view);
-  }
-
   function switchProject() {
     ws.backToSelector();
   }
 
-  function switchProjectFromPointer(event: PointerEvent) {
+  let lastRailAction = "";
+  let lastRailActionAt = 0;
+
+  function railButtonFromEvent(event: Event): HTMLElement | null {
+    if (!(event.target instanceof Element)) return null;
+    return event.target.closest<HTMLElement>("[data-app-rail-action]");
+  }
+
+  function activateRailButton(button: HTMLElement) {
+    const view = button.dataset.appRailView as AppView | undefined;
+    const action = view ? `view:${view}` : button.dataset.appRailAction;
+    const now = Date.now();
+    if (action === lastRailAction && now - lastRailActionAt < 250) return;
+    lastRailAction = action ?? "";
+    lastRailActionAt = now;
+
+    if (view) {
+      selectView(view);
+      return;
+    }
+    if (button.dataset.appRailAction === "switch-project") switchProject();
+  }
+
+  function handleRailActivation(event: MouseEvent | PointerEvent) {
     if (event.button !== 0) return;
+    const button = railButtonFromEvent(event);
+    if (!button) return;
     event.preventDefault();
     event.stopPropagation();
-    switchProject();
+    activateRailButton(button);
   }
 </script>
 
 <nav
-  class="relative z-[1500] isolate flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
+  class="pointer-events-auto relative z-[3000] isolate flex w-12 shrink-0 select-none flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
   aria-label="Primary"
+  onpointerdowncapture={handleRailActivation}
+  onmousedowncapture={handleRailActivation}
+  onclickcapture={handleRailActivation}
 >
   {#each items as it (it.view)}
     {@const active = ws.view === it.view}
     <button
       type="button"
       title={it.label}
-      onpointerdown={(event) => selectViewFromPointer(event, it.view)}
-      onclick={() => selectView(it.view)}
+      data-app-rail-action="view"
+      data-app-rail-view={it.view}
       class="grid h-9 w-9 place-items-center rounded-lg transition-colors
         {active
         ? 'bg-[var(--color-bg-2)] text-[var(--color-brand)]'
@@ -79,8 +100,7 @@
   <button
     type="button"
     title="Switch project — {projectLabel(ws.project)}"
-    onpointerdown={switchProjectFromPointer}
-    onclick={switchProject}
+    data-app-rail-action="switch-project"
     class="mt-auto grid h-9 w-9 place-items-center rounded-lg text-red-900 transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]"
     aria-label="switch project"
   >
