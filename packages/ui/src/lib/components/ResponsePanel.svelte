@@ -11,7 +11,9 @@
   import { save } from "@tauri-apps/plugin-dialog";
   import * as fs from "../fs";
 
-  let tab = $state<"body" | "request" | "timings" | "tls" | "tests">("body");
+  let tab = $state<
+    "body" | "request" | "insights" | "timings" | "tls" | "tests"
+  >("body");
   let bodyQuery = $state("");
   // Response headers now live in a collapsible accordion at the top of the body tab, so the
   // body gets the full panel when collapsed. Persists across responses.
@@ -265,6 +267,184 @@
   );
   const maxTotal = $derived(Math.max(1, ...ws.reqHistory.map(totalMs)));
 
+  interface TlsMeta {
+    alpn?: string | null;
+    remote?: { ip?: string; port?: number } | null;
+    cert?: { validTo?: string | null } | null;
+  }
+
+  type InsightTone = "info" | "good" | "warn" | "bad";
+  type ResponseInsight = {
+    title: string;
+    detail: string;
+    value?: string;
+    tone: InsightTone;
+  };
+
+  function header(res: ResponseResult, name: string): string | undefined {
+    const wanted = name.toLowerCase();
+    for (const [k, v] of Object.entries(res.headers)) {
+      if (k.toLowerCase() === wanted) return v;
+    }
+    return undefined;
+  }
+
+  function hostFor(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return url || "unknown";
+    }
+  }
+
+  function tlsFor(res: ResponseResult): TlsMeta | undefined {
+    return res.meta?.tls as TlsMeta | undefined;
+  }
+
+  function remoteFor(tls: TlsMeta | undefined): string | undefined {
+    const ip = tls?.remote?.ip;
+    if (!ip) return undefined;
+    return tls.remote?.port ? `${ip}:${tls.remote.port}` : ip;
+  }
+
+  function fmtMs(ms: number): string {
+    if (ms < 1) return "<1 ms";
+    if (ms < 1000) return `${Math.round(ms)} ms`;
+    return `${(ms / 1000).toFixed(2)} s`;
+  }
+
+  function buildInsights(res: ResponseResult): ResponseInsight[] {
+    const out: ResponseInsight[] = [];
+    const tls = tlsFor(res);
+    const remote = remoteFor(tls);
+    out.push({
+      title: "Destination",
+      detail: hostFor(res.url),
+      value: remote ?? tls?.alpn ?? undefined,
+      tone: "info",
+    });
+
+    if (res.error) {
+      out.push({
+        title: "Transport failure",
+        detail: res.error.message,
+        value: res.error.classification,
+        tone: "bad",
+      });
+      if (res.error.retriable) {
+        out.push({
+          title: "Retry may help",
+          detail: "The engine classified this failure as retriable.",
+          tone: "warn",
+        });
+      }
+    } else if (res.status >= 500) {
+      out.push({
+        title: "Server error",
+        detail: "The origin returned a 5xx response.",
+        value: `${res.status}`,
+        tone: "bad",
+      });
+    } else if (res.status >= 400) {
+      out.push({
+        title: "Client error",
+        detail: "The origin rejected the request.",
+        value: `${res.status}`,
+        tone: "warn",
+      });
+    }
+
+    const location = header(res, "location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      out.push({
+        title: "Redirect target",
+        detail: location,
+        value: `${res.status}`,
+        tone: "warn",
+      });
+    }
+
+    const cacheControl = header(res, "cache-control");
+    if (cacheControl) {
+      const lc = cacheControl.toLowerCase();
+      if (lc.includes("no-store") || lc.includes("no-cache")) {
+        out.push({
+          title: "Response is not cacheable",
+          detail: cacheControl,
+          tone: "info",
+        });
+      } else if (lc.includes("max-age") || lc.includes("public")) {
+        out.push({
+          title: "Cacheable response",
+          detail: cacheControl,
+          tone: "good",
+        });
+      }
+    }
+
+    if (res.size >= 5 * 1024 * 1024) {
+      out.push({
+        title: "Large payload",
+        detail: "Body transfer can dominate perceived latency.",
+        value: fmtSize(res.size),
+        tone: "warn",
+      });
+    }
+
+    if (
+      typeof res.timings?.proxyConnect === "number" ||
+      typeof res.timings?.proxyTls === "number" ||
+      typeof res.timings?.originConnect === "number"
+    ) {
+      const proxyMs = Math.max(
+        0,
+        res.timings?.proxyConnect ?? 0,
+        res.timings?.proxyTls ?? 0,
+        res.timings?.originConnect ?? 0
+      );
+      out.push({
+        title: "Proxy route observed",
+        detail: "This request reported proxy or tunneled-origin timing.",
+        value: proxyMs ? fmtMs(proxyMs) : undefined,
+        tone: "info",
+      });
+    }
+
+    const dominant = segments(res.timings).reduce<
+      { label: string; ms: number; color: string } | undefined
+    >((best, cur) => (!best || cur.ms > best.ms ? cur : best), undefined);
+    if (dominant) {
+      out.push({
+        title: "Dominant phase",
+        detail: `${dominant.label} was the largest measured phase.`,
+        value: fmtMs(dominant.ms),
+        tone: dominant.ms > Math.max(750, res.durationMs * 0.5) ? "warn" : "info",
+      });
+    }
+
+    const validTo = tls?.cert?.validTo ? Date.parse(tls.cert.validTo) : NaN;
+    if (!Number.isNaN(validTo)) {
+      const days = Math.ceil((validTo - Date.now()) / 86_400_000);
+      if (days < 0) {
+        out.push({
+          title: "Certificate expired",
+          detail: tls!.cert!.validTo!,
+          tone: "bad",
+        });
+      } else if (days <= 30) {
+        out.push({
+          title: "Certificate expires soon",
+          detail: `${days} day${days === 1 ? "" : "s"} left`,
+          tone: "warn",
+        });
+      }
+    }
+
+    return out;
+  }
+
+  const insights = $derived(r ? buildInsights(r) : []);
+
   function ago(ts: number): string {
     const s = Math.floor((Date.now() - ts) / 1000);
     if (s < 60) return `${s}s`;
@@ -395,7 +575,7 @@
           >request</button
         >
         <span class="mt-2 px-1.5 pb-0.5 text-[10px] font-medium tracking-wide text-fg-faint uppercase">Response</span>
-        {#each ["body", "timings"] as const as t (t)}
+        {#each ["body", "insights", "timings"] as const as t (t)}
           <button
             onclick={() => (tab = t)}
             class="tab w-full rounded text-left"
@@ -653,6 +833,33 @@
         {:else}
           <div class="text-fg-faint">Send the request to see what was sent.</div>
         {/if}
+      {:else if tab === "insights"}
+        <div class="grid gap-2 text-xs">
+          {#each insights as insight (insight.title)}
+            <div
+              class="rounded border border-border bg-[var(--color-bg-1)] p-3"
+              class:border-amber-500={insight.tone === "warn"}
+              class:border-red-500={insight.tone === "bad"}
+              class:border-emerald-500={insight.tone === "good"}
+            >
+              <div class="flex items-start gap-3">
+                <div>
+                  <div class="label mb-1">{insight.title}</div>
+                  <div class="break-all text-fg">{insight.detail}</div>
+                </div>
+                {#if insight.value}
+                  <div class="mono ml-auto shrink-0 rounded bg-[var(--color-bg-2)] px-2 py-0.5 text-fg-muted">
+                    {insight.value}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/each}
+          <div class="rounded border border-border bg-[var(--color-bg-1)] p-3 text-fg-muted">
+            Request-phase diagnostics use the data this run already exposed. Hop-by-hop
+            traceroute/MTR is not inferred here.
+          </div>
+        </div>
       {:else if tab === "timings"}
         <div class="flex flex-col gap-4">
           <div>
