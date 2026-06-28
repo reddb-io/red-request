@@ -762,6 +762,11 @@ enum ParsedProjectConnection {
         base_url: String,
         raw: String,
     },
+    Docker {
+        container: String,
+        port: Option<u16>,
+        raw: String,
+    },
     Deferred {
         scheme: String,
         raw: String,
@@ -801,6 +806,68 @@ fn normalize_ws_http_base(raw: &str, http_scheme: &str) -> Result<String, String
         return Err("connection string host cannot contain whitespace".to_string());
     }
     Ok(format!("{http_scheme}://{authority}"))
+}
+
+fn parse_docker_project_connection(raw: &str) -> Result<ParsedProjectConnection, String> {
+    let value = raw.trim();
+    let rest = value
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .ok_or_else(|| "not a Docker RedDB URL".to_string())?;
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = rest[..authority_end].trim();
+    if authority.is_empty() {
+        return Err("docker connection string is missing a container name".to_string());
+    }
+    if authority.chars().any(char::is_whitespace) {
+        return Err("docker container name cannot contain whitespace".to_string());
+    }
+
+    let query = rest[authority_end..]
+        .strip_prefix('?')
+        .map(|q| q.split('#').next().unwrap_or(q))
+        .unwrap_or("");
+    let query_port = query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find_map(|(key, val)| (key == "port").then_some(val))
+        .map(|port| parse_docker_port(port, "docker port query"))
+        .transpose()?;
+
+    let (container, authority_port) = if let Some((name, port)) = authority.rsplit_once(':') {
+        if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
+            (
+                name.to_string(),
+                Some(parse_docker_port(port, "docker container port")?),
+            )
+        } else {
+            (authority.to_string(), None)
+        }
+    } else {
+        (authority.to_string(), None)
+    };
+    if container.is_empty() {
+        return Err("docker connection string is missing a container name".to_string());
+    }
+
+    Ok(ParsedProjectConnection::Docker {
+        container,
+        port: query_port.or(authority_port),
+        raw: value.to_string(),
+    })
+}
+
+fn parse_docker_port(value: &str, label: &str) -> Result<u16, String> {
+    value
+        .parse::<u16>()
+        .map_err(|_| format!("{label} must be a valid TCP port"))
+        .and_then(|port| {
+            if port == 0 {
+                Err(format!("{label} must be greater than zero"))
+            } else {
+                Ok(port)
+            }
+        })
 }
 
 fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String> {
@@ -861,7 +928,10 @@ fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String
             });
         }
     }
-    for scheme in ["reds://", "grpc://", "grpcs://", "docker://"] {
+    if lower.starts_with("docker://") {
+        return parse_docker_project_connection(value);
+    }
+    for scheme in ["reds://", "grpc://", "grpcs://"] {
         if lower.starts_with(scheme) {
             return Ok(ParsedProjectConnection::Deferred {
                 scheme: scheme.trim_end_matches("://").to_string(),
@@ -871,8 +941,104 @@ fn parse_project_connection(raw: &str) -> Result<ParsedProjectConnection, String
         }
     }
     Err(format!(
-        "unsupported RedDB project connection string: {value}. Try http://host:port or https://host:port."
+        "unsupported RedDB project connection string: {value}. Try http://host:port, https://host:port, wss://host/redwire, or docker://container[:port]."
     ))
+}
+
+fn docker_host_http_base(ports_json: &str, requested_port: Option<u16>) -> Result<String, String> {
+    let ports: serde_json::Value = serde_json::from_str(ports_json)
+        .map_err(|e| format!("could not parse Docker port mapping: {e}"))?;
+    let map = ports
+        .as_object()
+        .ok_or_else(|| "Docker inspect did not return a port mapping object".to_string())?;
+
+    let mut candidates: Vec<(u16, String, u16)> = Vec::new();
+    for (container_port_proto, bindings) in map {
+        let Some((container_port, proto)) = container_port_proto.split_once('/') else {
+            continue;
+        };
+        if proto != "tcp" {
+            continue;
+        }
+        let Ok(container_port) = container_port.parse::<u16>() else {
+            continue;
+        };
+        if requested_port.is_some_and(|wanted| wanted != container_port) {
+            continue;
+        }
+        let Some(bindings) = bindings.as_array() else {
+            continue;
+        };
+        for binding in bindings {
+            let host_port = binding
+                .get("HostPort")
+                .and_then(|v| v.as_str())
+                .and_then(|v| v.parse::<u16>().ok());
+            let Some(host_port) = host_port else {
+                continue;
+            };
+            let host_ip = binding
+                .get("HostIp")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .unwrap_or("127.0.0.1");
+            candidates.push((container_port, docker_host_for_url(host_ip), host_port));
+        }
+    }
+
+    candidates.sort_by_key(|(container_port, _host, host_port)| {
+        (
+            requested_port.map_or(*container_port != 55555, |_| false),
+            *container_port,
+            *host_port,
+        )
+    });
+    let Some((_container_port, host, host_port)) = candidates.into_iter().next() else {
+        let expected = requested_port
+            .map(|p| format!("{p}/tcp"))
+            .unwrap_or_else(|| "a published TCP port".to_string());
+        return Err(format!(
+            "Docker container does not publish {expected}; publish the RedDB HTTP port and retry"
+        ));
+    };
+
+    Ok(format!("http://{host}:{host_port}"))
+}
+
+fn docker_host_for_url(host_ip: &str) -> String {
+    match host_ip {
+        "0.0.0.0" | "::" => "127.0.0.1".to_string(),
+        ip if ip.contains(':') && !(ip.starts_with('[') && ip.ends_with(']')) => {
+            format!("[{ip}]")
+        }
+        ip => ip.to_string(),
+    }
+}
+
+async fn resolve_docker_project_base(container: &str, port: Option<u16>) -> Result<String, String> {
+    let output = tokio::process::Command::new("docker")
+        .args([
+            "inspect",
+            "--format",
+            "{{json .NetworkSettings.Ports}}",
+            container,
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("could not run Docker to inspect `{container}`: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!(
+            "Docker could not inspect `{container}`{}",
+            if stderr.is_empty() {
+                "".to_string()
+            } else {
+                format!(": {stderr}")
+            }
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    docker_host_http_base(stdout.trim(), port)
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1097,6 +1263,11 @@ async fn open_connection_string(
     let parsed = parse_project_connection(&connection)?;
     let (base_url, raw) = match parsed {
         ParsedProjectConnection::Http { base_url, raw } => (base_url, raw),
+        ParsedProjectConnection::Docker {
+            container,
+            port,
+            raw,
+        } => (resolve_docker_project_base(&container, port).await?, raw),
         ParsedProjectConnection::Deferred {
             scheme,
             raw,
@@ -2062,10 +2233,10 @@ fn normalize_http_query_response(status: u16, text: &str) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_reddb_vault_certificate, is_vault_certificate, normalize_http_query_response,
-        open_with_key, parse_project_connection, reddb_server_argv_matches_db,
-        reddb_vault_cert_path, seal_with_key, sidecar_env, ParsedProjectConnection,
-        EMBEDDED_REDDB_STORAGE_PRESET,
+        docker_host_http_base, ensure_reddb_vault_certificate, is_vault_certificate,
+        normalize_http_query_response, open_with_key, parse_project_connection,
+        reddb_server_argv_matches_db, reddb_vault_cert_path, seal_with_key, sidecar_env,
+        ParsedProjectConnection, EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -2205,6 +2376,62 @@ mod tests {
                 raw: "red+wss://team.reddb.io/redwire".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn parses_docker_project_connection_as_docker_source() {
+        assert_eq!(
+            parse_project_connection("docker://reddb").unwrap(),
+            ParsedProjectConnection::Docker {
+                container: "reddb".to_string(),
+                port: None,
+                raw: "docker://reddb".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_docker_project_connection_with_container_port() {
+        assert_eq!(
+            parse_project_connection("docker://reddb:55555").unwrap(),
+            ParsedProjectConnection::Docker {
+                container: "reddb".to_string(),
+                port: Some(55555),
+                raw: "docker://reddb:55555".to_string(),
+            }
+        );
+        assert_eq!(
+            parse_project_connection("docker://reddb?port=55555").unwrap(),
+            ParsedProjectConnection::Docker {
+                container: "reddb".to_string(),
+                port: Some(55555),
+                raw: "docker://reddb?port=55555".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn resolves_docker_inspect_ports_to_host_http_base() {
+        let ports = r#"{
+            "55555/tcp": [{"HostIp": "0.0.0.0", "HostPort": "49170"}],
+            "8080/tcp": [{"HostIp": "127.0.0.1", "HostPort": "18080"}]
+        }"#;
+
+        assert_eq!(
+            docker_host_http_base(ports, Some(55555)).unwrap(),
+            "http://127.0.0.1:49170"
+        );
+        assert_eq!(
+            docker_host_http_base(ports, None).unwrap(),
+            "http://127.0.0.1:49170"
+        );
+    }
+
+    #[test]
+    fn rejects_docker_inspect_ports_without_published_red_db_port() {
+        let err = docker_host_http_base(r#"{"8080/tcp": null}"#, Some(55555)).unwrap_err();
+
+        assert!(err.contains("does not publish 55555/tcp"));
     }
 
     #[test]

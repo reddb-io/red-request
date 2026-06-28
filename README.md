@@ -214,6 +214,14 @@ rr ~/work/my-api      # …or another folder
 rr                    # global store
 ```
 
+The project selector also accepts RedDB connection strings:
+
+```bash
+https://team.reddb.io
+wss://team.reddb.io/redwire
+docker://reddb:55555 # resolves the container's published TCP port, then checks /ready/query
+```
+
 </details>
 
 <details>
