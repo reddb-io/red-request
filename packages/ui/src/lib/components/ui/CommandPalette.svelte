@@ -3,7 +3,12 @@
   import * as Command from "./command/index.js";
   import { ws } from "../../store.svelte";
   import * as repo from "../../repo";
-  import type { HistoryEntry, RequestDefinition } from "@reddb-io/request-core";
+  import {
+    proxyToUrl,
+    type HistoryEntry,
+    type Proxy,
+    type RequestDefinition,
+  } from "@reddb-io/request-core";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -60,6 +65,14 @@
   );
   const runnableRequests = $derived(
     orderRunnableRequests(localRequests, recentHistory, normalizedQuery)
+  );
+  const requestProxyActions = $derived(
+    buildRequestProxyActions(
+      ws.activeReq,
+      ws.activeProfileProxy,
+      ws.proxies,
+      normalizedQuery
+    )
   );
 
   $effect(() => {
@@ -243,6 +256,45 @@
     return `${r.colId}.${r.reqId}`;
   }
 
+  type ProxyAction = {
+    label: string;
+    hint: string;
+    proxyUrl?: string;
+  };
+
+  function buildRequestProxyActions(
+    req: RequestDefinition | null,
+    profileProxy: Proxy | null,
+    proxies: Proxy[],
+    q: string
+  ): ProxyAction[] {
+    if (!req || profileProxy) return [];
+    const current = req.proxy?.trim() ?? "";
+    const actions: ProxyAction[] = [];
+    if (current) {
+      actions.push({
+        label: "Proxy: direct connection",
+        hint: "off",
+        proxyUrl: undefined,
+      });
+    }
+    for (const proxy of proxies) {
+      if (!proxy.host.trim() || !proxy.port.trim()) continue;
+      const proxyUrl = proxyToUrl(proxy);
+      if (proxyUrl === current) continue;
+      const name = proxy.name || `${proxy.type}://${proxy.host}:${proxy.port}`;
+      actions.push({
+        label: `Proxy: ${name}`,
+        hint: "on",
+        proxyUrl,
+      });
+    }
+    if (!q) return actions.slice(0, 8);
+    return actions
+      .filter((action) => action.label.toLowerCase().includes(q))
+      .slice(0, 8);
+  }
+
   function badge(r: PaletteRequest): string {
     return r.kind === "http" ? r.method : r.kind.toUpperCase();
   }
@@ -291,6 +343,12 @@
   async function runRequest(r: PaletteRequest): Promise<void> {
     if (!(await selectPaletteRequest(r))) return;
     await ws.send();
+  }
+
+  async function setActiveRequestProxy(proxyUrl?: string): Promise<void> {
+    if (!ws.activeReq || ws.activeProfileProxy) return;
+    ws.activeReq.proxy = proxyUrl || undefined;
+    await ws.save();
   }
 </script>
 
@@ -365,6 +423,11 @@
     <Command.Group heading="Actions">
       {@render action("Create collection", "new", createCollection)}
       {@render action("New request", "create", createRequest)}
+      {#each requestProxyActions as proxyAction (proxyAction.label)}
+        {@render action(proxyAction.label, proxyAction.hint, () =>
+          setActiveRequestProxy(proxyAction.proxyUrl)
+        )}
+      {/each}
       {#if ws.activeReq}
         {@render action("Send request", "⏎", () => ws.send())}
         {@render action("Save request", "save", () => ws.save())}
