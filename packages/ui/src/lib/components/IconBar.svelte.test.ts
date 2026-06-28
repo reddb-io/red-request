@@ -91,4 +91,12 @@ describe("IconBar", () => {
 
     expect(ws.backToSelector).toHaveBeenCalledTimes(1);
   });
+
+  it("deduplicates full pointer/mouse/click sequences for the project switcher", async () => {
+    render(IconBar);
+
+    await realClick(screen.getByRole("button", { name: "switch project" }));
+
+    expect(ws.backToSelector).toHaveBeenCalledTimes(1);
+  });
 });

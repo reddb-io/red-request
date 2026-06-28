@@ -35,7 +35,10 @@ describe("project transition CSS", () => {
     );
     const iconBar = readFileSync(iconBarPath, "utf8");
 
-    expect(iconBar).toContain("relative z-[1500] isolate");
+    expect(iconBar).toContain("pointer-events-auto relative z-[3000] isolate");
+    expect(iconBar).toContain("onpointerdowncapture={handleRailActivation}");
+    expect(iconBar).toContain("onmousedowncapture={handleRailActivation}");
+    expect(iconBar).toContain("onclickcapture={handleRailActivation}");
     expect(page).toContain("pointer-events-none fixed right-3 top-11 z-[950]");
     expect(page).toContain(
       "pointer-events-auto flex flex-wrap items-center gap-2"
