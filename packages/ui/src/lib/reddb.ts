@@ -364,6 +364,14 @@ export async function ensureQueue(
   if (!r.ok) throw new Error(`CREATE QUEUE ${name}: ${r.error}`);
 }
 
+export async function ensureQueueGroup(
+  name: string,
+  group: string
+): Promise<void> {
+  const r = await rql(`QUEUE GROUP CREATE ${ident(name)} ${ident(group)}`);
+  if (!r.ok) throw new Error(`QUEUE GROUP CREATE ${name}/${group}: ${r.error}`);
+}
+
 export async function queuePush(name: string, payload: unknown): Promise<void> {
   const r = await rql(`QUEUE PUSH ${ident(name)} ${JSON.stringify(payload)}`);
   if (!r.ok) throw new Error(`QUEUE PUSH ${name}: ${r.error}`);
@@ -372,13 +380,15 @@ export async function queuePush(name: string, payload: unknown): Promise<void> {
 export interface QueueMessage<T = unknown> {
   messageId: string;
   deliveryId?: string;
+  group?: string;
   payload: T;
   consumer?: string;
   deliveryCount?: number;
 }
 
 function queueMessageFrom<T>(
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
+  group?: string
 ): QueueMessage<T> | null {
   const messageId = row.message_id;
   if (typeof messageId !== "string" || messageId.length === 0) return null;
@@ -388,6 +398,7 @@ function queueMessageFrom<T>(
   return {
     messageId,
     deliveryId: typeof deliveryId === "string" ? deliveryId : undefined,
+    group,
     payload: parseMaybeJson(row.payload) as T,
     consumer: typeof consumer === "string" ? consumer : undefined,
     deliveryCount:
@@ -399,30 +410,35 @@ export async function queueReadWait<T>(
   name: string,
   consumer: string,
   count = 10,
-  waitMs = 15_000
+  waitMs = 15_000,
+  group?: string
 ): Promise<QueueMessage<T>[]> {
   const safeCount = Math.max(1, Math.min(100, Math.floor(count) || 10));
   const safeWaitMs = Math.max(0, Math.min(30_000, Math.floor(waitMs) || 0));
+  const groupClause = group ? ` GROUP ${ident(group)}` : "";
   const r = await rql(
-    `QUEUE READ ${ident(name)} CONSUMER ${ident(
+    `QUEUE READ ${ident(name)}${groupClause} CONSUMER ${ident(
       consumer
     )} COUNT ${safeCount} WAIT ${safeWaitMs}ms`
   );
   if (!r.ok) throw new Error(`QUEUE READ ${name}: ${r.error}`);
   return r.records
-    .map((row) => queueMessageFrom<T>(row))
+    .map((row) => queueMessageFrom<T>(row, group))
     .filter((row): row is QueueMessage<T> => row !== null);
 }
 
 export async function queueAck(
   name: string,
   messageId: string,
-  deliveryId?: string
+  deliveryId?: string,
+  group?: string
 ): Promise<void> {
   const r = await rql(
     deliveryId
       ? `QUEUE ACK ${ident(name)} WITH delivery_id = '${esc(deliveryId)}'`
-      : `QUEUE ACK ${ident(name)} '${esc(messageId)}'`
+      : group
+        ? `QUEUE ACK ${ident(name)} GROUP ${ident(group)} '${esc(messageId)}'`
+        : `QUEUE ACK ${ident(name)} '${esc(messageId)}'`
   );
   if (!r.ok) throw new Error(`QUEUE ACK ${name}/${messageId}: ${r.error}`);
 }

@@ -1408,6 +1408,85 @@ fn find_red_binary() -> Option<String> {
     None
 }
 
+fn embedded_red_resource_name() -> Option<&'static str> {
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        Some("red-x86_64-unknown-linux-gnu.gz")
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        Some("red-aarch64-unknown-linux-gnu.gz")
+    } else {
+        None
+    }
+}
+
+fn materialize_embedded_red_resource(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let Some(resource_name) = embedded_red_resource_name() else {
+        return Ok(None);
+    };
+    let resource_dir = match app.path().resource_dir() {
+        Ok(dir) => dir,
+        Err(_) => return Ok(None),
+    };
+    let nested_resource = resource_dir.join("resources").join(resource_name);
+    let direct_resource = resource_dir.join(resource_name);
+    let resource = if nested_resource.exists() {
+        nested_resource
+    } else {
+        direct_resource
+    };
+    if !resource.exists() {
+        return Ok(None);
+    }
+
+    let compressed = std::fs::read(&resource)
+        .map_err(|e| format!("read embedded RedDB resource {}: {e}", resource.display()))?;
+    let digest = Sha256::digest(&compressed);
+    let stamp = hex_lower(&digest[..8]);
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| format!("resolve RedDB sidecar cache dir: {e}"))?
+        .join("sidecars")
+        .join(app.package_info().version.to_string());
+    std::fs::create_dir_all(&cache_dir).map_err(|e| {
+        format!(
+            "create RedDB sidecar cache dir {}: {e}",
+            cache_dir.display()
+        )
+    })?;
+    let dest = cache_dir.join(format!("red-{stamp}"));
+    if dest.exists() {
+        return Ok(Some(dest.to_string_lossy().to_string()));
+    }
+
+    let tmp = cache_dir.join(format!("red-{stamp}.tmp"));
+    let mut decoder = flate2::read::GzDecoder::new(&compressed[..]);
+    let mut out = std::fs::File::create(&tmp)
+        .map_err(|e| format!("create RedDB sidecar cache file {}: {e}", tmp.display()))?;
+    std::io::copy(&mut decoder, &mut out)
+        .map_err(|e| format!("extract RedDB sidecar resource {}: {e}", resource.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        std::fs::set_permissions(&tmp, perms)
+            .map_err(|e| format!("chmod RedDB sidecar cache file {}: {e}", tmp.display()))?;
+    }
+
+    std::fs::rename(&tmp, &dest).map_err(|e| {
+        format!(
+            "install RedDB sidecar cache file {} -> {}: {e}",
+            tmp.display(),
+            dest.display()
+        )
+    })?;
+    Ok(Some(dest.to_string_lossy().to_string()))
+}
+
+fn preferred_red_binary(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    materialize_embedded_red_resource(app).map(|resource| resource.or_else(find_red_binary))
+}
+
 /// The app's own version (from Cargo/tauri.conf), e.g. "0.1.1".
 #[tauri::command]
 fn app_version(app: tauri::AppHandle) -> String {
@@ -1420,12 +1499,21 @@ fn app_version(app: tauri::AppHandle) -> String {
 #[tauri::command]
 async fn reddb_version(app: tauri::AppHandle) -> Result<String, String> {
     let shell = app.shell();
-    let output = match shell.sidecar("red") {
-        Ok(cmd) => cmd.args(["--version"]).output().await,
-        Err(_) => {
-            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
-            shell.command(bin).args(["--version"]).output().await
-        }
+    let output = if let Some(bin) = preferred_red_binary(&app)? {
+        shell
+            .command(bin)
+            .env_clear()
+            .envs(sidecar_env())
+            .args(["--version"])
+            .output()
+            .await
+    } else {
+        shell
+            .sidecar("red")
+            .map_err(|e| e.to_string())?
+            .args(["--version"])
+            .output()
+            .await
     }
     .map_err(|e| format!("failed to run red --version: {e}"))?;
     let text = String::from_utf8_lossy(&output.stdout);
@@ -1668,30 +1756,29 @@ async fn spawn_reddb_once(
         "--vault".to_string(),
     ];
     let shell = app.shell();
-    let sidecar = shell.sidecar("red").ok().map(|c| {
-        c.env_clear()
+    let (mut rx, child) = if let Some(bin) = preferred_red_binary(app)? {
+        shell
+            .command(bin)
+            .args(args)
+            .env_clear()
             .envs(sidecar_env())
-            .args(args.clone())
-            .env("REDDB_CERTIFICATE_FILE", vault_cert_env.clone())
+            .env("REDDB_CERTIFICATE_FILE", vault_cert_env)
             .env("REDDB_STORAGE_PRESET", EMBEDDED_REDDB_STORAGE_PRESET)
             .env("RED_HTTP_TLS_DEV", "1")
             .spawn()
-    });
-    let (mut rx, child) = match sidecar {
-        Some(Ok(pair)) => pair,
-        _ => {
-            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
-            shell
-                .command(bin)
-                .args(args)
-                .env_clear()
-                .envs(sidecar_env())
-                .env("REDDB_CERTIFICATE_FILE", vault_cert_env)
-                .env("REDDB_STORAGE_PRESET", EMBEDDED_REDDB_STORAGE_PRESET)
-                .env("RED_HTTP_TLS_DEV", "1")
-                .spawn()
-                .map_err(|e| format!("failed to start reddb: {e}"))?
-        }
+            .map_err(|e| format!("failed to start reddb: {e}"))?
+    } else {
+        shell
+            .sidecar("red")
+            .map_err(|e| e.to_string())?
+            .env_clear()
+            .envs(sidecar_env())
+            .args(args)
+            .env("REDDB_CERTIFICATE_FILE", vault_cert_env)
+            .env("REDDB_STORAGE_PRESET", EMBEDDED_REDDB_STORAGE_PRESET)
+            .env("RED_HTTP_TLS_DEV", "1")
+            .spawn()
+            .map_err(|e| format!("failed to start reddb: {e}"))?
     };
     // Claim this spawn's generation. The watcher below uses it to tell "my child
     // died" from "a child I replaced during a project switch died".
@@ -2004,19 +2091,21 @@ async fn ensure_grpc(app: &tauri::AppHandle) -> Result<String, String> {
 fn spawn_rql_session(app: &tauri::AppHandle, grpc: &str) -> Result<RqlSession, String> {
     let args = [grpc.to_string(), "--json".to_string()];
     let shell = app.shell();
-    let (rx, child) = match shell.sidecar("red") {
-        Ok(cmd) => cmd
+    let (rx, child) = if let Some(bin) = preferred_red_binary(app)? {
+        shell
+            .command(bin)
             .env_clear()
             .envs(sidecar_env())
             .args(std::iter::once("connect".to_string()).chain(args.clone()))
-            .spawn(),
-        Err(_) => {
-            let bin = find_red_binary().ok_or_else(|| "red binary not found".to_string())?;
-            shell
-                .command(bin)
-                .args(std::iter::once("connect".to_string()).chain(args))
-                .spawn()
-        }
+            .spawn()
+    } else {
+        shell
+            .sidecar("red")
+            .map_err(|e| e.to_string())?
+            .env_clear()
+            .envs(sidecar_env())
+            .args(std::iter::once("connect".to_string()).chain(args.clone()))
+            .spawn()
     }
     .map_err(|e| format!("failed to start `red connect`: {e}"))?;
     Ok(RqlSession {
@@ -2233,10 +2322,10 @@ fn normalize_http_query_response(status: u16, text: &str) -> Result<String, Stri
 #[cfg(test)]
 mod tests {
     use super::{
-        docker_host_http_base, ensure_reddb_vault_certificate, is_vault_certificate,
-        normalize_http_query_response, open_with_key, parse_project_connection,
-        reddb_server_argv_matches_db, reddb_vault_cert_path, seal_with_key, sidecar_env,
-        ParsedProjectConnection, EMBEDDED_REDDB_STORAGE_PRESET,
+        docker_host_http_base, embedded_red_resource_name, ensure_reddb_vault_certificate,
+        is_vault_certificate, normalize_http_query_response, open_with_key,
+        parse_project_connection, reddb_server_argv_matches_db, reddb_vault_cert_path,
+        seal_with_key, sidecar_env, ParsedProjectConnection, EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -2314,6 +2403,24 @@ mod tests {
         std::env::remove_var("REDDB_STORAGE_PRESET");
         std::env::remove_var("REDDB_STORAGE_PROFILE");
         std::env::remove_var("REDDB_STORAGE_PACKAGING");
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn resolves_linux_x86_64_immutable_red_resource_name() {
+        assert_eq!(
+            embedded_red_resource_name(),
+            Some("red-x86_64-unknown-linux-gnu.gz")
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    fn resolves_linux_aarch64_immutable_red_resource_name() {
+        assert_eq!(
+            embedded_red_resource_name(),
+            Some("red-aarch64-unknown-linux-gnu.gz")
+        );
     }
 
     #[test]

@@ -658,6 +658,7 @@ describe("Workspace persistence coordination", () => {
           {
             messageId: "m-remote",
             deliveryId: "did-remote",
+            group: "rr_client",
             event: {
               v: 1,
               id: "evt-remote",
@@ -691,7 +692,11 @@ describe("Workspace persistence coordination", () => {
     await vi.advanceTimersByTimeAsync(300);
     await vi.waitUntil(() => vi.mocked(repo.loadAll).mock.calls.length >= 2);
 
-    expect(repo.ackSyncEvent).toHaveBeenCalledWith("m-remote", "did-remote");
+    expect(repo.ackSyncEvent).toHaveBeenCalledWith(
+      "m-remote",
+      "did-remote",
+      "rr_client"
+    );
     expect(ws.collections[0]?.requests.map((req) => req.id)).toEqual(["r2"]);
     expect(ws.loading).toBeNull();
   });
@@ -706,6 +711,7 @@ describe("Workspace persistence coordination", () => {
           {
             messageId: "m-local",
             deliveryId: "did-local",
+            group: "rr_client",
             event: {
               v: 1,
               id: "evt-local",
@@ -731,7 +737,11 @@ describe("Workspace persistence coordination", () => {
     );
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(repo.ackSyncEvent).toHaveBeenCalledWith("m-local", "did-local");
+    expect(repo.ackSyncEvent).toHaveBeenCalledWith(
+      "m-local",
+      "did-local",
+      "rr_client"
+    );
     expect(repo.loadAll).toHaveBeenCalledTimes(1);
   });
 

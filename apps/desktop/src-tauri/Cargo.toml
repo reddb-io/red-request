@@ -52,6 +52,7 @@ aes-gcm = "0.10"
 rand = "0.9"
 base64 = "0.22"
 sha2 = "0.10"
+flate2 = "1"
 
 # SIGTERM the reddb sidecar (not SIGKILL) so it checkpoints the collection
 # contracts (declared_model) to disk before exiting — otherwise the KV model is

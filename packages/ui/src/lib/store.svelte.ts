@@ -809,7 +809,11 @@ class Workspace {
               `sync event ${message.messageId} ignored: invalid payload`
             );
             await repo
-              .ackSyncEvent(message.messageId, message.deliveryId)
+              .ackSyncEvent(
+                message.messageId,
+                message.deliveryId,
+                message.group
+              )
               .catch((error) => {
                 const detail =
                   error instanceof Error ? error.message : String(error);
@@ -825,7 +829,7 @@ class Workspace {
             );
           }
           await repo
-            .ackSyncEvent(message.messageId, message.deliveryId)
+            .ackSyncEvent(message.messageId, message.deliveryId, message.group)
             .catch((error) => {
               const detail =
                 error instanceof Error ? error.message : String(error);

@@ -247,6 +247,7 @@ async function emitSyncEvent(
 export interface ProjectSyncQueueMessage {
   messageId: string;
   deliveryId?: string;
+  group?: string;
   event: ProjectSyncEvent | null;
 }
 
@@ -255,24 +256,30 @@ export async function readSyncEvents(
   waitMs = 15_000,
   count = 20
 ): Promise<ProjectSyncQueueMessage[]> {
+  await db.ensureQueueGroup(SYNC_EVENTS, consumer);
   const messages = await db.queueReadWait<unknown>(
     SYNC_EVENTS,
     consumer,
     count,
-    waitMs
+    waitMs,
+    consumer
   );
   return messages.map((message) => {
     const parsed = projectSyncEventSchema.safeParse(message.payload);
     return {
       messageId: message.messageId,
       deliveryId: message.deliveryId,
+      group: message.group,
       event: parsed.success ? parsed.data : null,
     };
   });
 }
 
-export const ackSyncEvent = (messageId: string, deliveryId?: string) =>
-  db.queueAck(SYNC_EVENTS, messageId, deliveryId);
+export const ackSyncEvent = (
+  messageId: string,
+  deliveryId?: string,
+  group?: string
+) => db.queueAck(SYNC_EVENTS, messageId, deliveryId, group);
 
 function colIdFromReqKey(key: string): string | null {
   const sep = key.indexOf(".");
