@@ -1240,7 +1240,7 @@ async fn open_project(app: tauri::AppHandle, dir: Option<String>) -> Result<Proj
     if let Ok(mut d) = st.project_dir.lock() {
         *d = project_dir.clone();
     }
-    start_reddb(app.clone()).await?;
+    start_reddb_locked(&app).await?;
     if let Some(d) = &project_dir {
         recent_add_dir(d);
     }
@@ -1392,7 +1392,7 @@ async fn reset_incompatible_db(app: tauri::AppHandle) -> Result<(), String> {
         parent.display()
     );
     // Recreate a fresh store on the same path.
-    start_reddb(app.clone()).await
+    start_reddb_locked(&app).await
 }
 
 /// Locate the bundled `red` binary in `binaries/` (dev fallback when the Tauri
@@ -1908,6 +1908,12 @@ fn recover_incompatible_backup(db_path: &std::path::Path) {
 }
 
 async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<EmbeddedDb>();
+    let _guard = state.spawn_lock.lock().await;
+    start_reddb_locked(&app).await
+}
+
+async fn start_reddb_locked(app: &tauri::AppHandle) -> Result<(), String> {
     let started = Instant::now();
     let db_path = std::path::PathBuf::from(
         app.state::<EmbeddedDb>()
@@ -1920,6 +1926,23 @@ async fn start_reddb(app: tauri::AppHandle) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     log::info!(target: "reddb", "start_reddb: opening {}", db_path.display());
+
+    {
+        let state = app.state::<EmbeddedDb>();
+        let source = state.source.lock().map_err(|e| e.to_string())?.clone();
+        if matches!(source, ProjectSource::Local) {
+            let url_ready = state.url.lock().map_err(|e| e.to_string())?.is_some();
+            let grpc_ready = state.grpc.lock().map_err(|e| e.to_string())?.is_some();
+            if url_ready && grpc_ready {
+                log::debug!(
+                    target: "reddb",
+                    "start_reddb: existing local sidecar already published for {}",
+                    db_path.display()
+                );
+                return Ok(());
+            }
+        }
+    }
 
     // Embedded recovery: undo a prior boot's destructive "incompatible" backup (data wrongly
     // filed away when a stale `red` held the lock during an upgrade) before we try to open.
@@ -2030,12 +2053,9 @@ async fn reddb_request(
     };
     let mut base = current()?;
     if base.is_none() {
-        // Self-heal: serialize the respawn, re-check after acquiring the lock.
-        let db = app.state::<EmbeddedDb>();
-        let _guard = db.spawn_lock.lock().await;
-        if current()?.is_none() {
-            let _ = start_reddb(app.clone()).await;
-        }
+        // Self-heal: start_reddb serializes startup and becomes a no-op if another
+        // caller already published the local sidecar while we were waiting.
+        let _ = start_reddb(app.clone()).await;
         base = current()?;
     }
     let base = base.ok_or_else(|| "reddb not ready".to_string())?;
@@ -2078,11 +2098,7 @@ async fn ensure_grpc(app: &tauri::AppHandle) -> Result<String, String> {
             .clone())
     };
     if read(app)?.is_none() {
-        let db = app.state::<EmbeddedDb>();
-        let _guard = db.spawn_lock.lock().await;
-        if read(app)?.is_none() {
-            let _ = start_reddb(app.clone()).await;
-        }
+        let _ = start_reddb(app.clone()).await;
     }
     read(app)?.ok_or_else(|| "reddb gRPC not ready".to_string())
 }
