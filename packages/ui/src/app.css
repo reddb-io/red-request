@@ -276,39 +276,6 @@ body {
   pointer-events: none;
 }
 
-/* ProjectTransition — cartoon iris wipe (black circle that closes then opens). */
-.iris {
-  position: fixed;
-  inset: 2rem 0 0 0;
-  z-index: 100;
-  overflow: hidden;
-  pointer-events: none;
-}
-.iris .hole {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 0;
-  height: 0;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: transparent;
-  box-shadow: 0 0 0 115vmax #000;
-  transition:
-    width 340ms cubic-bezier(0.6, 0, 0.9, 0.3),
-    height 340ms cubic-bezier(0.6, 0, 0.9, 0.3);
-  will-change: width, height;
-}
-.iris .hole.open {
-  width: 230vmax;
-  height: 230vmax;
-}
-.iris .hole.opening {
-  transition:
-    width 420ms cubic-bezier(0.16, 0.84, 0.44, 1),
-    height 420ms cubic-bezier(0.16, 0.84, 0.44, 1);
-}
-
 /* ClosingOverlay - shown as soon as the native window close request reaches JS. */
 .closing-overlay {
   position: fixed;
@@ -356,9 +323,6 @@ body {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .iris .hole {
-    transition: none;
-  }
   .closing-overlay,
   .closing-spinner {
     animation: none;

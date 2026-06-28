@@ -365,6 +365,46 @@
   </div>
 {/snippet}
 
+{#snippet shellFailed(err: unknown, reset: () => void)}
+  <!-- Root-shell fallback: this catches failures above the app panels
+       (providers, tooltip/runtime wiring, shell-level effects). Titlebar lives
+       outside this boundary, so window controls remain reachable even here. -->
+  <div class="grid h-full place-items-center px-8 text-center">
+    <div class="max-w-lg">
+      <h1 class="mb-2 text-lg font-semibold text-red-400">Project shell failed</h1>
+      <p class="mb-4 text-sm text-fg-muted">
+        The project shell crashed before the workspace could render. Use the actions
+        below instead of waiting on a blank window.
+      </p>
+      <pre
+        class="mono mb-4 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-[var(--color-bg-1)] p-3 text-left text-[11px] text-fg-muted"
+      >{err instanceof Error ? (err.stack ?? err.message) : String(err)}</pre>
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <Button onclick={reset} size="xs" variant="outline">Retry shell</Button>
+        <Button onclick={() => ws.exportCrashReport()} size="xs" variant="outline">
+          Export crash report
+        </Button>
+        <Button onclick={() => ws.backToSelector()} size="xs" variant="ghost">
+          Choose another project
+        </Button>
+        <Button
+          onclick={() => {
+            try {
+              location.reload();
+            } catch {
+              /* webview shell will handle it */
+            }
+          }}
+          size="xs"
+          variant="ghost"
+        >
+          Reload window
+        </Button>
+      </div>
+    </div>
+  </div>
+{/snippet}
+
 {#snippet homeFailed(err: unknown)}
   <div class="grid h-full place-items-center px-8 text-center text-sm">
     <div>
@@ -553,10 +593,15 @@
   </div>
 {/snippet}
 
-<Tooltip.Provider delayDuration={250} disableHoverableContent>
-  <div class="flex h-screen w-screen flex-col overflow-hidden">
-    <Titlebar />
-    <div class="min-h-0 flex-1 overflow-hidden">
+<div class="flex h-screen w-screen flex-col overflow-hidden">
+  <Titlebar />
+  <div class="min-h-0 flex-1 overflow-hidden">
+    <svelte:boundary
+      failed={shellFailed}
+      onerror={(err) => appLog("error", `shell boundary caught: ${err instanceof Error ? err.stack : err}`)}
+    >
+      <Tooltip.Provider delayDuration={250} disableHoverableContent>
+        <div class="h-full overflow-hidden">
       <svelte:boundary
         failed={pageFailed}
         onerror={(err) => appLog("error", `boundary caught: ${err instanceof Error ? err.stack : err}`)}
@@ -564,8 +609,8 @@
         {#if !ws.ready}
         <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
       {:else if ws.loading && !ws.loadError}
-        <!-- Visible "Opening project…" overlay. Replaces the dreaded black
-             iris with a real, labelled progress screen: shows the current
+        <!-- Visible "Opening project…" shell. Replaces the old black
+             transition with a real, labelled progress screen: shows the current
              step, a step-by-step log so the user can see where it stalled,
              and the elapsed time. Without this the user gets a silent black
              window and has no way to know whether the app is hung or
@@ -762,32 +807,34 @@
         {/if}
       {/if}
       </svelte:boundary>
-    </div>
-  </div>
-  {#if showRecoveryDock}
-    <div
-      data-testid="project-recovery-dock"
-      class="pointer-events-none fixed right-3 top-11 z-[950] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-[var(--color-bg-0)]/95 px-3 py-2 shadow-xl backdrop-blur"
-    >
-      <div class="pointer-events-auto flex flex-wrap items-center gap-2">
-        <span class="label mr-1">
-          {#if ws.loadError}
-            Recovery
-          {:else if ws.loading}
-            {ws.loading.step}
-          {:else}
-            Opening project…
-          {/if}
-        </span>
-        {#if ws.loadError}
-          {@render loadErrorRecoveryActions()}
-        {:else}
-          {@render loadingRecoveryActions()}
+        </div>
+        {#if showRecoveryDock}
+          <div
+            data-testid="project-recovery-dock"
+            class="pointer-events-none fixed right-3 top-11 z-[950] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-[var(--color-bg-0)]/95 px-3 py-2 shadow-xl backdrop-blur"
+          >
+            <div class="pointer-events-auto flex flex-wrap items-center gap-2">
+              <span class="label mr-1">
+                {#if ws.loadError}
+                  Recovery
+                {:else if ws.loading}
+                  {ws.loading.step}
+                {:else}
+                  Opening project…
+                {/if}
+              </span>
+              {#if ws.loadError}
+                {@render loadErrorRecoveryActions()}
+              {:else}
+                {@render loadingRecoveryActions()}
+              {/if}
+            </div>
+          </div>
         {/if}
-      </div>
-    </div>
-  {/if}
-  {#if ws.closing}
-    <ClosingOverlay />
-  {/if}
-</Tooltip.Provider>
+        {#if ws.closing}
+          <ClosingOverlay />
+        {/if}
+      </Tooltip.Provider>
+    </svelte:boundary>
+  </div>
+</div>

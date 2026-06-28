@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("project transition CSS", () => {
@@ -11,9 +11,18 @@ describe("project transition CSS", () => {
       "src/lib/components/Titlebar.svelte"
     );
     const titlebar = readFileSync(titlebarPath, "utf8");
+    const cssPath = join(process.cwd(), "src/app.css");
+    const css = readFileSync(cssPath, "utf8");
+    const transitionPath = join(
+      process.cwd(),
+      "src/lib/components/ProjectTransition.svelte"
+    );
 
+    expect(existsSync(transitionPath)).toBe(false);
     expect(page).not.toContain("ProjectTransition");
     expect(page).not.toContain("<ProjectTransition");
+    expect(css).not.toContain(".iris");
+    expect(css).not.toContain("box-shadow: 0 0 0 115vmax #000");
     expect(titlebar).toContain("sticky top-0 z-[2000] isolate");
   });
 
@@ -53,5 +62,23 @@ describe("project transition CSS", () => {
       'window.addEventListener("unhandledrejection", onUnhandledRejection)'
     );
     expect(page).toContain("ws.forceOpenRecovery(`${source}: ${detail}`)");
+  });
+
+  it("keeps the titlebar outside fragile providers and gives shell crashes recovery actions", () => {
+    const pagePath = join(process.cwd(), "src/routes/+page.svelte");
+    const page = readFileSync(pagePath, "utf8");
+    const titlebarIndex = page.indexOf("<Titlebar />");
+    const shellBoundaryIndex = page.indexOf("failed={shellFailed}");
+    const tooltipProviderIndex = page.indexOf("<Tooltip.Provider");
+
+    expect(titlebarIndex).toBeGreaterThan(-1);
+    expect(shellBoundaryIndex).toBeGreaterThan(titlebarIndex);
+    expect(tooltipProviderIndex).toBeGreaterThan(shellBoundaryIndex);
+    expect(page).toContain("{#snippet shellFailed");
+    expect(page).toContain("Project shell failed");
+    expect(page).toContain("Retry shell");
+    expect(page).toContain("Export crash report");
+    expect(page).toContain("Choose another project");
+    expect(page).toContain("Reload window");
   });
 });
