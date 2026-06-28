@@ -1,6 +1,6 @@
 {
   "name": "@reddb-io/request-engine",
-  "version": "0.48.0",
+  "version": "0.49.0",
   "type": "module",
   "private": true,
   "description": "recker sidecar — NDJSON-RPC over stdio, dispatches requests for red-request.",
