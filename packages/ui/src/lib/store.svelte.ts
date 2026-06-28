@@ -218,6 +218,23 @@ class Workspace {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
   }
 
+  get activeProfile(): Profile | null {
+    const pid =
+      this.activeReq?.profileId ||
+      this.activeCollection?.collection.defaultProfileId ||
+      "";
+    return pid
+      ? (this.network.profiles.find((p) => p.id === pid) ?? null)
+      : null;
+  }
+
+  get activeProfileProxy(): Proxy | null {
+    const proxyId = this.activeProfile?.proxyId ?? "";
+    if (!proxyId) return null;
+    const proxy = this.network.proxies.find((p) => p.id === proxyId) ?? null;
+    return proxy?.host.trim() && proxy.port.trim() ? proxy : null;
+  }
+
   /** Project-level named environments (var/secret sets), shared by all collections. */
   environments = $state<StoredEnvironment[]>([]);
   /** The always-on "Globals" base environment (vars + secrets). Named environments
@@ -1399,7 +1416,9 @@ class Workspace {
   }
 
   /** Merge the bound profile (request's, else the collection default) into a snapshot:
-   *  User-Agent + headers + proxy. Explicit request headers/proxy win. */
+   *  User-Agent + headers + proxy. Explicit request headers win. A profile-bound proxy
+   *  is authoritative, so users cannot accidentally send that identity through a
+   *  different request-level proxy. */
   private applyProfile(snap: RequestDefinition): RequestDefinition {
     const pid =
       snap.profileId ||
@@ -1425,8 +1444,7 @@ class Workspace {
     const proxy = profile.proxyId
       ? this.network.proxies.find((p) => p.id === profile.proxyId)
       : undefined;
-    if (proxy?.host.trim() && !snap.proxy?.trim())
-      snap.proxy = proxyToUrl(proxy);
+    if (proxy?.host.trim() && proxy.port.trim()) snap.proxy = proxyToUrl(proxy);
     return snap;
   }
 

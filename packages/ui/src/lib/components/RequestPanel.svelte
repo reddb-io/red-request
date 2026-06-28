@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import { ws } from "../store.svelte";
+  import { proxyToUrl } from "@reddb-io/request-core";
   import { HTTP_METHODS, REQUEST_KINDS } from "@reddb-io/request-core/constants";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
@@ -161,6 +162,39 @@
     if (!tabs.includes(tab)) tab = tabs[0]!;
   });
   const bodyTypes = ["none", "json", "raw", "form", "xml", "graphql"] as const;
+  const CUSTOM_PROXY = "__custom_proxy__";
+
+  const activeProfileProxy = $derived(ws.activeProfileProxy);
+  const activeRequestProxySelection = $derived.by(() => {
+    const proxyUrl = ws.activeReq?.proxy?.trim() ?? "";
+    if (!proxyUrl) return "";
+    const match = ws.proxies.find((p) => proxyToUrl(p) === proxyUrl);
+    return match?.id ?? CUSTOM_PROXY;
+  });
+
+  const proxyOptions = $derived([
+    { value: "", label: "Direct connection" },
+    ...ws.proxies.map((p) => ({
+      value: p.id,
+      label: p.name || `${p.type}://${p.host}:${p.port}` || "Proxy",
+    })),
+    { value: CUSTOM_PROXY, label: "Custom URL" },
+  ]);
+
+  function setRequestProxySelection(value: string) {
+    const req = ws.activeReq;
+    if (!req) return;
+    if (!value) {
+      req.proxy = undefined;
+      return;
+    }
+    if (value === CUSTOM_PROXY) {
+      req.proxy = req.proxy?.trim() ? req.proxy : "http://127.0.0.1:8080";
+      return;
+    }
+    const proxy = ws.proxies.find((p) => p.id === value);
+    if (proxy) req.proxy = proxyToUrl(proxy);
+  }
 
   // Pretty-print the body (JSON / GraphQL payloads); leaves content as-is if it doesn't parse.
   const canPrettify = $derived(ws.activeReq?.body.type === "json");
@@ -538,22 +572,49 @@
 
           <section class="flex flex-col gap-3">
             <h4 class="label">Proxy</h4>
-            <p class="hint -mt-2">Send the request through a proxy server.</p>
-            <label class="flex items-center justify-between gap-3">
-              <span class="text-fg-muted"
-                >URL <span class="hint">http/https/socks</span></span
+            {#if activeProfileProxy}
+              <p class="hint -mt-2">
+                Locked by profile “{ws.activeProfile?.name || "profile"}”. Change the profile
+                to use another proxy.
+              </p>
+              <div
+                class="flex items-center justify-between gap-3 rounded-md border border-border bg-[var(--color-bg-2)] px-2 py-1.5"
               >
-              <input
-                type="text"
-                value={ws.activeReq.proxy ?? ""}
-                placeholder="http://127.0.0.1:8080"
-                class="mono h-7 w-72 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
-                oninput={(e) => {
-                  const v = e.currentTarget.value.trim();
-                  ws.activeReq!.proxy = v || undefined;
-                }}
-              />
-            </label>
+                <span class="text-fg-muted">Profile proxy</span>
+                <span class="mono truncate text-xs text-fg">
+                  {activeProfileProxy.name || `${activeProfileProxy.type}://${activeProfileProxy.host}:${activeProfileProxy.port}`}
+                </span>
+              </div>
+            {:else}
+              <p class="hint -mt-2">Route this request directly, through a saved proxy, or through a custom proxy URL.</p>
+              <label class="flex items-center justify-between gap-3">
+                <span class="text-fg-muted">Route</span>
+                <Select
+                  value={activeRequestProxySelection}
+                  items={proxyOptions}
+                  onChange={setRequestProxySelection}
+                  ariaLabel="Request proxy route"
+                  class="w-72"
+                />
+              </label>
+              {#if activeRequestProxySelection === CUSTOM_PROXY}
+                <label class="flex items-center justify-between gap-3">
+                  <span class="text-fg-muted"
+                    >Custom URL <span class="hint">http/https/socks</span></span
+                  >
+                  <input
+                    type="text"
+                    value={ws.activeReq.proxy ?? ""}
+                    placeholder="http://127.0.0.1:8080"
+                    class="mono h-7 w-72 rounded-md border border-border bg-[var(--color-bg-2)] px-2 text-xs text-fg outline-none focus:border-[var(--color-brand)]"
+                    oninput={(e) => {
+                      const v = e.currentTarget.value.trim();
+                      ws.activeReq!.proxy = v || undefined;
+                    }}
+                  />
+                </label>
+              {/if}
+            {/if}
           </section>
         </div>
       {:else if tab === "config"}
