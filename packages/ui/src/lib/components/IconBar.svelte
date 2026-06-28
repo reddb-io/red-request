@@ -33,7 +33,7 @@
 </script>
 
 <nav
-  class="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
+  class="relative z-[1000] flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
   aria-label="Primary"
 >
   {#each items as it (it.view)}

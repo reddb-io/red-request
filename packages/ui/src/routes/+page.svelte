@@ -738,9 +738,9 @@
   {#if showRecoveryDock}
     <div
       data-testid="project-recovery-dock"
-      class="fixed right-3 top-11 z-[950] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-[var(--color-bg-0)]/95 px-3 py-2 shadow-xl backdrop-blur"
+      class="pointer-events-none fixed right-3 top-11 z-[950] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-[var(--color-bg-0)]/95 px-3 py-2 shadow-xl backdrop-blur"
     >
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="pointer-events-auto flex flex-wrap items-center gap-2">
         <span class="label mr-1">
           {#if ws.loadError}
             Recovery
