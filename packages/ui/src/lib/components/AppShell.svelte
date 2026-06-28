@@ -564,42 +564,23 @@
   {/if}
 {/snippet}
 
-{#snippet emptyWorkspaceRecovery()}
+{#snippet emptyWorkspaceOnboarding()}
   <div class="grid h-full place-items-center px-8 text-center">
     <div class="max-w-lg">
-      <h1 class="mb-2 text-lg font-semibold text-fg-strong">No collections yet</h1>
-      <p class="mx-auto mb-4 max-w-md text-sm text-fg-muted">
-        The project opened, but there is no request workspace to show.
+      <p class="label mb-3 text-[var(--color-brand)]">Project ready</p>
+      <h1 class="mb-2 text-lg font-semibold text-fg-strong">Start this project</h1>
+      <p class="mx-auto mb-5 max-w-md text-sm leading-6 text-fg-muted">
+        This is a fresh Red Request workspace. Create a collection to start
+        organizing requests, or choose another folder if this is not the project
+        you meant to open.
       </p>
       <div class="flex flex-wrap items-center justify-center gap-2">
-        <Button onclick={() => ws.addCollection()} size="xs" variant="outline">
-          New collection
-        </Button>
-        <Button onclick={() => ws.retry()} size="xs" variant="ghost">
-          Retry opening
-        </Button>
-        <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
-          Export crash report
+        <Button onclick={() => ws.addCollection()} size="xs">
+          Create collection
         </Button>
         <Button onclick={() => ws.backToSelector()} size="xs" variant="ghost">
           Choose another project
         </Button>
-        {#if ws.recoveryProjectDir}
-          <Button
-            onclick={() => {
-              if (
-                confirm(
-                  "Delete this project's .red/request data and return to the project picker? This cannot be undone."
-                )
-              )
-                void ws.deleteProjectData();
-            }}
-            size="xs"
-            variant="ghost"
-          >
-            Delete local data
-          </Button>
-        {/if}
       </div>
       {#if ws.project}
         <p class="mono mt-4 break-all text-xs text-fg-faint">{ws.project.db_path}</p>
@@ -754,7 +735,7 @@
                   {/if}
                 </div>
               {:else if ws.view === "requests" && ws.collections.length === 0}
-                {@render emptyWorkspaceRecovery()}
+                {@render emptyWorkspaceOnboarding()}
               {:else}
                 <div class="flex h-full overflow-hidden">
                   <div
