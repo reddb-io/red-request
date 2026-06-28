@@ -154,6 +154,30 @@ describe("+page error boundary", () => {
     expectButton("Export crash report");
   });
 
+  it("exits a stuck startup before project info into recovery", async () => {
+    vi.useFakeTimers();
+    const project = await import("./project");
+    const storeMod = await import("./store.svelte");
+    vi.mocked(project.projectInfo).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+
+    render(AppShellHarness);
+
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    await waitFor(() => {
+      expect(storeMod.ws.ready).toBe(true);
+      expect(storeMod.ws.loadError).toContain("Startup");
+    });
+    expect(document.body.textContent).not.toBe("loading…");
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expect(screen.getByTestId("project-recovery-dock")).toBeTruthy();
+    expectButton("Retry");
+    expectButton("Export crash report");
+    expectButton("Choose another project");
+  });
+
   it("automatically exits an aged loading state into recovery instead of waiting forever", async () => {
     const storeMod = await import("./store.svelte");
     render(AppShellHarness);

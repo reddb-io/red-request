@@ -73,6 +73,7 @@ import {
 /** Reserved name for the always-on base environment (vars + secrets) that every
  *  named environment layers on top of. Stored alongside the others. */
 const GLOBALS_ENV = "Globals";
+const STARTUP_INFO_TIMEOUT_MS = 15_000;
 const PROJECT_OPEN_TIMEOUT_MS = 15_000;
 const LOAD_STEP_TIMEOUT_MS = 15_000;
 const PENDING_SAVE_TIMEOUT_MS = 5_000;
@@ -161,6 +162,7 @@ class Workspace {
   private projectOpenGeneration = 0;
   private loadStoreGeneration = 0;
   private loadingGeneration = 0;
+  private initGeneration = 0;
   private syncLoopGeneration = 0;
   private syncLoopRunning = false;
   private syncReloadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -354,15 +356,34 @@ class Workspace {
   }
 
   async init(): Promise<void> {
+    const generation = ++this.initGeneration;
     if (!isTauri) {
       this.bridgeMissing = true;
       this.ready = true;
       return;
     }
-    this.project = await projectInfo().catch((e) => {
-      appLog("error", `init: project_info failed: ${e}`);
-      return null;
-    });
+    try {
+      this.project = await withTimeout(
+        projectInfo(),
+        STARTUP_INFO_TIMEOUT_MS,
+        `Startup timed out while reading project info after ${Math.round(
+          STARTUP_INFO_TIMEOUT_MS / 1000
+        )}s`
+      );
+    } catch (e) {
+      if (generation !== this.initGeneration) return;
+      const msg = e instanceof Error ? e.message : String(e);
+      appLog("error", `init: project_info failed: ${msg}`);
+      this.ready = true;
+      this.screen = "app";
+      this.project = null;
+      this.loading = null;
+      this.transitioning = false;
+      this.transitionPhase = "idle";
+      this.loadError = `Startup failed before project info was available: ${msg}`;
+      return;
+    }
+    if (generation !== this.initGeneration) return;
     appLog(
       "info",
       `init: project_info → is_project=${this.project?.is_project} arg_launched=${this.project?.arg_launched} db=${this.project?.db_path} dir=${this.project?.project_dir}`
@@ -859,6 +880,7 @@ class Workspace {
   }
 
   forceOpenRecovery(reason = "Project opening was stopped by the user."): void {
+    this.initGeneration++;
     this.projectOpenGeneration++;
     this.loadStoreGeneration++;
     this.stopSyncLoop();
@@ -870,6 +892,7 @@ class Workspace {
     this.loading = null;
     this.loadError = reason;
     this.screen = "app";
+    this.ready = true;
     if (!this.project && target?.kind === "local") {
       this.project = {
         db_path: target.dir ?? "global",

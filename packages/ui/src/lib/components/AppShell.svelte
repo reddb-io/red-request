@@ -16,12 +16,14 @@
 
   let cmdOpen = $state(false);
   let lazyLoadError = $state("");
+  let mountedAt = $state(Date.now());
   let SettingsViewComponent = $state<Component | null>(null);
   let RedUiDatabaseViewComponent = $state<Component | null>(null);
   let CommandPaletteComponent = $state<Component<{ open?: boolean }> | null>(
     null
   );
   let now = $state(Date.now());
+  const STARTUP_RECOVERY_MS = 15_000;
   const FAILSAFE_OPEN_RECOVERY_MS = 30_000;
 
   async function currentWindow() {
@@ -58,6 +60,7 @@
   }
 
   onMount(() => {
+    mountedAt = Date.now();
     void ws.init();
     const tick = setInterval(() => {
       now = Date.now();
@@ -125,6 +128,8 @@
   const loadElapsedMs = $derived(
     ws.loading ? Math.max(0, now - ws.loading.startedAt) : 0
   );
+  const startupElapsedMs = $derived(Math.max(0, now - mountedAt));
+  const startupElapsedSeconds = $derived(Math.floor(startupElapsedMs / 1000));
   const loadElapsedSeconds = $derived(Math.floor(loadElapsedMs / 1000));
   const loadIsSlow = $derived(loadElapsedMs >= 10_000);
   const showRecoveryDock = $derived(
@@ -132,6 +137,17 @@
       !ws.closing &&
       (Boolean(ws.loading) || Boolean(ws.loadError) || ws.transitioning)
   );
+
+  $effect(() => {
+    if (ws.ready || ws.loadError) return;
+    if (startupElapsedMs < STARTUP_RECOVERY_MS) return;
+    queueMicrotask(() => {
+      if (ws.ready || ws.loadError) return;
+      ws.forceOpenRecovery(
+        `Startup timed out before project info became ready after ${startupElapsedSeconds}s.`
+      );
+    });
+  });
 
   $effect(() => {
     const loading = ws.loading;
