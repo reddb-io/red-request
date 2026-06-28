@@ -1,4 +1,4 @@
-# @red-request/core
+# @reddb-io/request-core
 
 ## 0.1.1
 

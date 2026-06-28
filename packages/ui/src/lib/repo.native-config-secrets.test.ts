@@ -3,7 +3,7 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import {
   storedEnvironmentSchema,
   type StoredEnvironment,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import * as repo from "./repo";
 
 const reply = (status: number, body: unknown) => ({

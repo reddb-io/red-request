@@ -22,7 +22,7 @@ sudo apt-get install -y webkit2gtk-driver xvfb
 
 ```bash
 # fetches the reddb sidecar (latest, ≥1.15 for VCS) into externalBin, then builds
-pnpm --filter @red-request/desktop build:tauri
+pnpm --filter @reddb-io/request-desktop build:tauri
 ```
 
 The binary lands at `/opt/cargo-target/release/red-request` on this machine
@@ -32,10 +32,10 @@ The binary lands at `/opt/cargo-target/release/red-request` on this machine
 
 ```bash
 # headed (you watch it)
-pnpm --filter @red-request/desktop test:e2e
+pnpm --filter @reddb-io/request-desktop test:e2e
 
 # headless (CI / no display)
-xvfb-run -a pnpm --filter @red-request/desktop test:e2e
+xvfb-run -a pnpm --filter @reddb-io/request-desktop test:e2e
 ```
 
 ## Files

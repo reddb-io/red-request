@@ -181,7 +181,7 @@ jobs:
         run: pnpm brand:icons
 
       - name: Build core (UI/engine contract)
-        run: pnpm --filter @red-request/core build
+        run: pnpm --filter @reddb-io/request-core build
 
       - name: Build engine sidecar (Bun → externalBin)
         run: pnpm engine:build

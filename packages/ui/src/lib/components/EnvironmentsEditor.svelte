@@ -4,7 +4,7 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
-  import type { Kv, StoredEnvironment } from "@red-request/core";
+  import type { Kv, StoredEnvironment } from "@reddb-io/request-core";
   import { ws } from "../store.svelte";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import Modal from "./ui/Modal.svelte";

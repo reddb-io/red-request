@@ -6,7 +6,7 @@ import dgram from "node:dgram";
 import tls from "node:tls";
 import { createClient } from "recker/client";
 import { createDNS } from "recker/dns";
-import type { ResponseResult } from "@red-request/core";
+import type { ResponseResult } from "@reddb-io/request-core";
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 

@@ -11,7 +11,7 @@
   import { ws } from "../store.svelte";
   import * as repo from "../repo";
   import type { RequestHistoryNode } from "../repo";
-  import type { RequestDefinition } from "@red-request/core/request";
+  import type { RequestDefinition } from "@reddb-io/request-core/request";
 
   let {
     onClose,

@@ -25,7 +25,7 @@ import {
   type Oauth2TokenResult,
   type OidcDiscoverParams,
   type OidcDiscoverResult,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 
 /** Call an engine RPC method through the Rust bridge (stdio NDJSON under the hood). */
 export function engineCall<T>(method: string, params: unknown): Promise<T> {

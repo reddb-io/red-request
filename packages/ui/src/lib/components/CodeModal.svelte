@@ -11,9 +11,9 @@
     generateSnippet,
     SNIPPET_LANGS,
     type SnippetLang,
-  } from "@red-request/core/codegen";
-  import type { RequestDefinition } from "@red-request/core/request";
-  import { resolveRequest } from "@red-request/core/resolver";
+  } from "@reddb-io/request-core/codegen";
+  import type { RequestDefinition } from "@reddb-io/request-core/request";
+  import { resolveRequest } from "@reddb-io/request-core/resolver";
 
   // Two render modes:
 //   • `embedded: true` — used as a tab in the Request panel. No modal

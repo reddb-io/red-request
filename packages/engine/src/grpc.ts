@@ -6,7 +6,7 @@ import grpc from "@grpc/grpc-js";
 import { writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ResponseResult } from "@red-request/core";
+import type { ResponseResult } from "@reddb-io/request-core";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const LOAD_OPTS = {

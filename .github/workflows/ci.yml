@@ -36,7 +36,7 @@ jobs:
       - name: Brand sync
         run: pnpm brand:sync
 
-      # Build first: engine/ui typecheck against @red-request/core's built .d.ts.
+      # Build first: engine/ui typecheck against @reddb-io/request-core's built .d.ts.
       - name: Build (core + engine + ui)
         run: pnpm build
 

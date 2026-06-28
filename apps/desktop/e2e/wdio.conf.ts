@@ -9,7 +9,7 @@ import { existsSync } from "node:fs";
 //
 // Prereqs (see e2e/README.md): `cargo install tauri-driver`,
 // `apt install webkit2gtk-driver xvfb`, and a built binary
-// (`pnpm --filter @red-request/desktop build:tauri`).
+// (`pnpm --filter @reddb-io/request-desktop build:tauri`).
 
 // Built binary. target-dir is /opt/cargo-target on this machine (~/.cargo/config);
 // override with TAURI_APP_PATH if yours differs.
@@ -45,7 +45,7 @@ export const config: WebdriverIO.Config = {
     if (!existsSync(application)) {
       throw new Error(
         `App binary not found at ${application}. Build it first ` +
-          `(pnpm --filter @red-request/desktop build:tauri) or set TAURI_APP_PATH.`
+          `(pnpm --filter @reddb-io/request-desktop build:tauri) or set TAURI_APP_PATH.`
       );
     }
     if (spawnSync("which", ["tauri-driver"]).status !== 0) {

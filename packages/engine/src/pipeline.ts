@@ -5,7 +5,7 @@ import {
   type RequestDefinition,
   type ResponseResult,
   type ScriptResult,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import { dispatch } from "./recker.js";
 import { runPreRequest, runPostResponse } from "./sandbox.js";
 import {

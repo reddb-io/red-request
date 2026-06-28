@@ -25,7 +25,7 @@ import type {
   AuthConfig,
   Timings,
   ProxyProbeResult,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import { cookieHeader, storeSetCookies } from "./cookies.js";
 
 const TEXTY =

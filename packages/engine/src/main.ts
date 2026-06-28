@@ -5,7 +5,7 @@
 // stdout. The Rust shell owns this process and correlates replies by `id`. Nothing is
 // ever printed to stdout except RPC replies/notifications — all diagnostics go to stderr.
 import { createInterface } from "node:readline";
-import { rpcRequestSchema } from "@red-request/core";
+import { rpcRequestSchema } from "@reddb-io/request-core";
 import { handlers } from "./handlers.js";
 
 function send(obj: unknown): void {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ResponseResult, Timings } from "@red-request/core";
+  import type { ResponseResult, Timings } from "@reddb-io/request-core";
 
   let { response }: { response: ResponseResult | null } = $props();
 

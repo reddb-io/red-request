@@ -9,7 +9,7 @@
     type GqlSchema,
     type GqlSuggestion,
     type TemplateFunctionCatalogEntry,
-  } from "@red-request/core";
+  } from "@reddb-io/request-core";
 
   type Props = {
     // optional so callers can bind an optional field (e.g. graphql variables); "" when unset.

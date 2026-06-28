@@ -4,7 +4,7 @@ import type {
   RunnerParams,
   RunnerResult,
   RunIteration,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import { runPipeline } from "./pipeline.js";
 
 function iteration(

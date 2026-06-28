@@ -93,7 +93,7 @@ jobs:
         run: pnpm brand:icons
 
       - name: Build core contract
-        run: pnpm --filter @red-request/core build
+        run: pnpm --filter @reddb-io/request-core build
 
       - name: Build engine sidecar
         run: pnpm engine:build
@@ -113,7 +113,7 @@ jobs:
           REDDB_TARGET: x86_64-unknown-linux-gnu
 
       - name: Build Linux deb only
-        run: pnpm --filter @red-request/desktop tauri build --bundles deb
+        run: pnpm --filter @reddb-io/request-desktop tauri build --bundles deb
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v5

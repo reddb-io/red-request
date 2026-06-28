@@ -10,7 +10,7 @@
   import { Button } from "./ui/button/index.js";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import { ws } from "../store.svelte";
-  import { USER_AGENTS } from "@red-request/core/constants";
+  import { USER_AGENTS } from "@reddb-io/request-core/constants";
   import { onDestroy } from "svelte";
 
   // Which panels to render. Defaults to both (legacy); Settings renders one at a time.

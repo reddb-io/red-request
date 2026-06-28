@@ -11,7 +11,7 @@
   import * as repo from "../repo";
   import { fileMeta, type FileMeta } from "../rpc";
   import { onMount } from "svelte";
-  import type { LoadedCollection } from "@red-request/core";
+  import type { LoadedCollection } from "@reddb-io/request-core";
   import type { Component } from "svelte";
   import ProxiesPanel from "./ProxiesPanel.svelte";
   import EnvironmentsEditor from "./EnvironmentsEditor.svelte";

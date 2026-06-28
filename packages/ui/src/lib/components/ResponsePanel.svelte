@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ws } from "../store.svelte";
-  import type { ResponseResult } from "@red-request/core";
-  import { detectBodyMode } from "@red-request/core";
+  import type { ResponseResult } from "@reddb-io/request-core";
+  import { detectBodyMode } from "@reddb-io/request-core";
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import JsonTree from "./JsonTree.svelte";

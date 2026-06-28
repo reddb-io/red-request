@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { ws } from "../store.svelte";
   import * as repo from "../repo";
-  import type { HistoryEntry } from "@red-request/core";
+  import type { HistoryEntry } from "@reddb-io/request-core";
   import { Button } from "./ui/button/index.js";
 
   let history = $state<HistoryEntry[]>([]);

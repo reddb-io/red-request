@@ -4,7 +4,7 @@
   import { Input } from "./ui/input/index.js";
   import { Button } from "./ui/button/index.js";
   import { ws } from "../store.svelte";
-  import type { GqlSchema } from "@red-request/core";
+  import type { GqlSchema } from "@reddb-io/request-core";
 
   let { onClose }: { onClose: () => void } = $props();
 

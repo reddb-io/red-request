@@ -47,10 +47,10 @@ importers:
 
   packages/cli:
     dependencies:
-      '@red-request/core':
+      '@reddb-io/request-core':
         specifier: workspace:*
         version: link:../core
-      '@red-request/engine':
+      '@reddb-io/request-engine':
         specifier: workspace:*
         version: link:../engine
       yaml:
@@ -85,7 +85,7 @@ importers:
       '@grpc/proto-loader':
         specifier: ^0.8.1
         version: 0.8.1
-      '@red-request/core':
+      '@reddb-io/request-core':
         specifier: workspace:*
         version: link:../core
       https-proxy-agent:
@@ -147,7 +147,7 @@ importers:
       '@lucide/svelte':
         specifier: ^1.21.0
         version: 1.21.0(svelte@5.56.3)
-      '@red-request/core':
+      '@reddb-io/request-core':
         specifier: workspace:*
         version: link:../core
       '@sveltejs/adapter-static':

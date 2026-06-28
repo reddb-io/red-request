@@ -27,7 +27,7 @@ import {
   type HistoryEntry,
   type RunnerParams,
   type RunnerResult,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 import * as repo from "./repo";
 import * as secrets from "./secrets";
 import * as backup from "./backup";
@@ -48,7 +48,7 @@ import {
   oidcDiscover,
   oauthAuthorize,
 } from "./rpc";
-import type { ProxyProbeResult } from "@red-request/core";
+import type { ProxyProbeResult } from "@reddb-io/request-core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { isTauri } from "./tauri";
 import {
@@ -2027,7 +2027,7 @@ class Workspace {
     const id = `req-${Date.now().toString(36)}-${Math.floor(
       Math.random() * 1296
     ).toString(36)}`;
-    const { curlToRequest } = await import("@red-request/core/importers");
+    const { curlToRequest } = await import("@reddb-io/request-core/importers");
     const req = curlToRequest(text, id);
     await repo.saveRequest(this.activeColId, req);
     col.requests.push(req);
@@ -2072,18 +2072,19 @@ class Workspace {
     if (s && typeof s === "object") {
       if (s.paths) {
         const { openapiToCollection } =
-          await import("@red-request/core/importers");
+          await import("@reddb-io/request-core/importers");
         await this.importCollection(openapiToCollection(s));
         return "collection";
       }
       if (s.log?.entries) {
-        const { harToCollection } = await import("@red-request/core/importers");
+        const { harToCollection } =
+          await import("@reddb-io/request-core/importers");
         await this.importCollection(harToCollection(s));
         return "collection";
       }
       if (s.info && Array.isArray(s.item)) {
         const { postmanToCollection } =
-          await import("@red-request/core/importers");
+          await import("@reddb-io/request-core/importers");
         await this.importCollection(postmanToCollection(s));
         return "collection";
       }
@@ -2092,7 +2093,7 @@ class Workspace {
         (s.__export_format || s._type === "export")
       ) {
         const { insomniaToCollection } =
-          await import("@red-request/core/importers");
+          await import("@reddb-io/request-core/importers");
         await this.importCollection(insomniaToCollection(s));
         return "collection";
       }
@@ -2113,7 +2114,8 @@ class Workspace {
 
   /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
   async importOpenAPI(spec: unknown): Promise<void> {
-    const { openapiToCollection } = await import("@red-request/core/importers");
+    const { openapiToCollection } =
+      await import("@reddb-io/request-core/importers");
     await this.importCollection(openapiToCollection(spec));
   }
 
@@ -2164,7 +2166,7 @@ class Workspace {
     });
     if (!path) return null;
     const { collectionsToPostman } =
-      await import("@red-request/core/importers");
+      await import("@reddb-io/request-core/importers");
     const data = collectionsToPostman(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request export"
@@ -2181,7 +2183,7 @@ class Workspace {
     });
     if (!path) return null;
     const { collectionsToInsomnia } =
-      await import("@red-request/core/importers");
+      await import("@reddb-io/request-core/importers");
     const data = collectionsToInsomnia(
       $state.snapshot(this.collections) as LoadedCollection[],
       projectLabel(this.project) || "red-request"

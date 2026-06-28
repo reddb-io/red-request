@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { DNS_RECORD_TYPES } from "@red-request/core/constants";
-  import type { NetConfig, RequestKind } from "@red-request/core/request";
+  import { DNS_RECORD_TYPES } from "@reddb-io/request-core/constants";
+  import type { NetConfig, RequestKind } from "@reddb-io/request-core/request";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";

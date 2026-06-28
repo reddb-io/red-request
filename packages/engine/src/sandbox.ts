@@ -5,7 +5,7 @@ import type {
   RequestDefinition,
   ResponseResult,
   ScriptTest,
-} from "@red-request/core";
+} from "@reddb-io/request-core";
 
 function fmt(v: unknown): string {
   if (typeof v === "string") return v;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Kv } from "@red-request/core";
+  import type { Kv } from "@reddb-io/request-core";
   import { ws } from "../store.svelte";
   import VarField from "./VarField.svelte";
   import { Button } from "./ui/button/index.js";
