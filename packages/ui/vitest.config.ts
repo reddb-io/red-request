@@ -12,13 +12,13 @@ export default defineConfig({
         replacement: fileURLToPath(new URL("./src/lib", import.meta.url)),
       },
       {
-        find: /^@red-request\/core$/,
+        find: /^@reddb-io\/request-core$/,
         replacement: fileURLToPath(
           new URL("../core/src/index.ts", import.meta.url)
         ),
       },
       {
-        find: /^@red-request\/core\/(.+)$/,
+        find: /^@reddb-io\/request-core\/(.+)$/,
         replacement: fileURLToPath(
           new URL("../core/src/$1.ts", import.meta.url)
         ),
