@@ -202,6 +202,55 @@ describe("+page error boundary", () => {
     expectButton("Choose another project");
   });
 
+  it("keeps titlebar and recovery visible when pending autosave blocks project switch", async () => {
+    const repo = await import("./repo");
+    const storeMod = await import("./store.svelte");
+    render(AppShellHarness);
+
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("No collections yet");
+    });
+
+    vi.useFakeTimers();
+    vi.mocked(repo.saveRequest).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+    const req = newRequest("r1");
+    storeMod.ws.collections = [
+      {
+        id: "c1",
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          order: ["r1"],
+        }),
+        requests: [req],
+        environments: [],
+      },
+    ];
+    storeMod.ws.activeColId = "c1";
+    storeMod.ws.activeReq = { ...req, url: "https://example.test" };
+    storeMod.ws.scheduleSave();
+
+    void storeMod.ws.chooseProject("/tmp/new-project");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(document.body.textContent).toContain(
+      "saving current project before switching"
+    );
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(document.body.textContent).toContain(
+      "Could not finish saving current project before switching"
+    );
+    expect(screen.getByLabelText("Close window")).toBeTruthy();
+    expect(screen.getByTestId("project-recovery-dock")).toBeTruthy();
+    expectButton("Retry");
+    expectButton("Export crash report");
+    expectButton("Choose another project");
+  });
+
   it("offers strong recovery actions when project opening stays stuck behind the transition", async () => {
     const project = await import("./project");
     const storeMod = await import("./store.svelte");

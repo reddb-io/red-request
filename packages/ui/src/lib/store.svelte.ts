@@ -75,6 +75,7 @@ import {
 const GLOBALS_ENV = "Globals";
 const PROJECT_OPEN_TIMEOUT_MS = 15_000;
 const LOAD_STEP_TIMEOUT_MS = 15_000;
+const PENDING_SAVE_TIMEOUT_MS = 5_000;
 const SYNC_QUEUE_WAIT_MS = 15_000;
 const SYNC_RELOAD_DELAY_MS = 250;
 export type AppView = "home" | "requests" | "settings" | "database";
@@ -265,6 +266,93 @@ class Workspace {
     return this.openingTarget?.kind === "local" ? this.openingTarget.dir : null;
   }
 
+  private projectPlaceholderForTarget(target: OpeningTarget): ProjectInfo {
+    if (target.kind === "connection") {
+      return {
+        db_path: target.connection,
+        project_dir: null,
+        is_project: false,
+        arg_launched: false,
+        source: "remote-http",
+        connection_string: target.connection,
+        name: "Remote RedDB",
+      };
+    }
+    return {
+      db_path: target.dir ?? "global",
+      project_dir: target.dir,
+      is_project: target.dir !== null,
+      arg_launched: false,
+      name: null,
+    };
+  }
+
+  private enterOpeningShell(target: OpeningTarget, step: string): void {
+    this.transitioning = false;
+    this.transitionPhase = "idle";
+    this.openingTarget = target;
+    this.project = null;
+    this.loadError = null;
+    this.screen = "app";
+    this.activeColId = null;
+    this.activeReq = null;
+    this.activeEnvName = null;
+    this.collections = [];
+    this.response = null;
+    this.runResult = null;
+    this.view = "requests";
+    this.loading = {
+      startedAt: Date.now(),
+      step,
+      log: [{ ts: Date.now(), step }],
+    };
+  }
+
+  private updateOpeningStep(step: string, detail?: string): void {
+    if (!this.loading) {
+      this.loading = {
+        startedAt: Date.now(),
+        step,
+        detail,
+        log: [{ ts: Date.now(), step, detail }],
+      };
+      return;
+    }
+    this.loading = {
+      ...this.loading,
+      step,
+      detail,
+      log: [...this.loading.log, { ts: Date.now(), step, detail }],
+    };
+  }
+
+  private async flushBeforeProjectSwitch(
+    generation: number,
+    target: OpeningTarget
+  ): Promise<boolean> {
+    try {
+      await withTimeout(
+        this.flushSave(),
+        PENDING_SAVE_TIMEOUT_MS,
+        `Saving current project timed out after ${Math.round(
+          PENDING_SAVE_TIMEOUT_MS / 1000
+        )}s before opening the next project`
+      );
+      return generation === this.projectOpenGeneration;
+    } catch (e) {
+      if (generation !== this.projectOpenGeneration) return false;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.loadError = `Could not finish saving current project before switching: ${msg}`;
+      this.loading = null;
+      this.project = this.projectPlaceholderForTarget(target);
+      this.screen = "app";
+      this.transitioning = false;
+      this.transitionPhase = "idle";
+      appLog("error", `project switch blocked by pending save: ${msg}`);
+      return false;
+    }
+  }
+
   async init(): Promise<void> {
     if (!isTauri) {
       this.bridgeMissing = true;
@@ -306,29 +394,15 @@ class Workspace {
   async chooseProject(dir: string | null): Promise<void> {
     const generation = ++this.projectOpenGeneration;
     this.stopSyncLoop();
-    // Persist any pending edit on the CURRENT project before we swap reddb.
-    await this.flushSave();
-
-    this.transitioning = false;
-    this.transitionPhase = "idle";
-    this.openingTarget = { kind: "local", dir };
-    this.project = null;
-    this.loadError = null;
-    this.screen = "app";
-    this.activeColId = null;
-    this.activeReq = null;
-    this.activeEnvName = null;
-    this.collections = [];
-    this.response = null;
-    this.runResult = null;
-    this.view = "requests";
+    const target: OpeningTarget = { kind: "local", dir };
+    this.enterOpeningShell(
+      target,
+      `saving current project before switching to ${dir ?? "global"}…`
+    );
+    if (!(await this.flushBeforeProjectSwitch(generation, target))) return;
 
     appLog("info", `chooseProject: switching to ${dir ?? "global"}`);
-    this.loading = {
-      startedAt: Date.now(),
-      step: `switching to ${dir ?? "global"}…`,
-      log: [{ ts: Date.now(), step: `switching to ${dir ?? "global"}…` }],
-    };
+    this.updateOpeningStep(`switching to ${dir ?? "global"}…`);
 
     try {
       const nextProject = await withTimeout(
@@ -384,25 +458,13 @@ class Workspace {
     if (!value) return;
     const generation = ++this.projectOpenGeneration;
     this.stopSyncLoop();
-    await this.flushSave();
-    this.transitioning = false;
-    this.transitionPhase = "idle";
-    this.openingTarget = { kind: "connection", connection: value };
-    this.project = null;
-    this.loadError = null;
-    this.loading = {
-      startedAt: Date.now(),
-      step: `connecting to ${value}...`,
-      log: [{ ts: Date.now(), step: `connecting to ${value}...` }],
-    };
-    this.screen = "app";
-    this.view = "requests";
-    this.activeColId = null;
-    this.activeReq = null;
-    this.activeEnvName = null;
-    this.collections = [];
-    this.response = null;
-    this.runResult = null;
+    const target: OpeningTarget = { kind: "connection", connection: value };
+    this.enterOpeningShell(
+      target,
+      `saving current project before connecting to ${value}...`
+    );
+    if (!(await this.flushBeforeProjectSwitch(generation, target))) return;
+    this.updateOpeningStep(`connecting to ${value}...`);
 
     try {
       const nextProject = await withTimeout(

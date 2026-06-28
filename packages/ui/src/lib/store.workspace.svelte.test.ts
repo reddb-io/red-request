@@ -140,6 +140,68 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
+  it("chooseProject does not wait invisibly forever when the previous project's autosave hangs", async () => {
+    vi.useFakeTimers();
+    vi.mocked(repo.saveRequest).mockImplementationOnce(
+      () => new Promise<never>(() => {})
+    );
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    ws.collections = [collection("c1", [request("r1")])];
+    ws.activeColId = "c1";
+    ws.activeReq = request("r1", { url: "https://example.test" });
+    ws.scheduleSave();
+
+    void ws.chooseProject("/tmp/new-project");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(ws.screen).toBe("app");
+    expect(ws.loading?.step).toMatch(/saving current project/i);
+    expect(ws.openingTarget).toEqual({
+      kind: "local",
+      dir: "/tmp/new-project",
+    });
+
+    await vi.advanceTimersByTimeAsync(6_000);
+
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toMatch(/saving current project/i);
+    expect(ws.recoveryProjectDir).toBe("/tmp/new-project");
+  });
+
+  it("chooseConnectionString exposes recovery when the previous project's autosave fails", async () => {
+    vi.mocked(repo.saveRequest).mockRejectedValueOnce(new Error("disk gone"));
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    ws.collections = [collection("c1", [request("r1")])];
+    ws.activeColId = "c1";
+    ws.activeReq = request("r1", { url: "https://example.test" });
+    ws.scheduleSave();
+
+    await ws.chooseConnectionString("wss://team.reddb.io/redwire");
+
+    expect(ws.screen).toBe("app");
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toContain("disk gone");
+    expect(ws.openingTarget).toEqual({
+      kind: "connection",
+      connection: "wss://team.reddb.io/redwire",
+    });
+    expect(ws.project?.connection_string).toBe("wss://team.reddb.io/redwire");
+  });
+
   it("chooseProject shows recovery immediately and times out a stuck project open", async () => {
     vi.useFakeTimers();
     const { openProject } = await import("./project");
@@ -239,7 +301,7 @@ describe("Workspace persistence coordination", () => {
     );
 
     const stuckOpen = ws.chooseProject("/tmp/stuck-project");
-    await vi.waitUntil(() => ws.loading?.step.includes("/tmp/stuck-project"));
+    await vi.waitUntil(() => vi.mocked(openProject).mock.calls.length === 1);
 
     ws.forceOpenRecovery("Project opening was stopped by the user.");
     expect(ws.loadError).toContain("stopped by the user");
@@ -266,8 +328,8 @@ describe("Workspace persistence coordination", () => {
     );
 
     const stuckOpen = ws.chooseConnectionString("wss://team.reddb.io/redwire");
-    await vi.waitUntil(() =>
-      ws.loading?.step.includes("wss://team.reddb.io/redwire")
+    await vi.waitUntil(
+      () => vi.mocked(openConnectionString).mock.calls.length === 1
     );
 
     ws.forceOpenRecovery("Remote project opening was stopped by the user.");
