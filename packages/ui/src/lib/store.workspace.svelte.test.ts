@@ -763,6 +763,29 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toBeNull();
   });
 
+  it("chooseConnectionString keeps recovery visible when a Docker project source fails", async () => {
+    const { openConnectionString, openProject } = await import("./project");
+    vi.mocked(openConnectionString).mockRejectedValueOnce(
+      new Error(
+        "Docker container does not publish 55555/tcp; publish the RedDB HTTP port and retry"
+      )
+    );
+
+    await ws.chooseConnectionString("docker://reddb:55555");
+
+    expect(openProject).not.toHaveBeenCalled();
+    expect(openConnectionString).toHaveBeenCalledWith("docker://reddb:55555");
+    expect(ws.screen).toBe("app");
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toContain("does not publish 55555/tcp");
+    expect(ws.openingTarget).toEqual({
+      kind: "connection",
+      connection: "docker://reddb:55555",
+    });
+    expect(ws.project?.source).toBe("remote-http");
+    expect(ws.project?.connection_string).toBe("docker://reddb:55555");
+  });
+
   it("chooseConnectionString clears its timeout after a successful connection", async () => {
     vi.useFakeTimers();
     const { openConnectionString } = await import("./project");
