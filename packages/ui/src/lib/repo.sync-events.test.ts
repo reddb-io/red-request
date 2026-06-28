@@ -152,8 +152,6 @@ describe("project sync events", () => {
           "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r1' LIMIT 1"
         )
           return rqlOk([]);
-        if (query === "GET CONFIG red_request settings_sync_client_id")
-          return rqlOk([{ value: "client-1" }]);
         return rqlOk([]);
       },
       request: () => reply(200, { ok: true, rid: 7 }),
@@ -168,7 +166,7 @@ describe("project sync events", () => {
     expect(syncPayload(pushed[0]!)).toMatchObject({
       v: 1,
       source: "red-request",
-      clientId: "client-1",
+      clientId: expect.any(String),
       kind: "request.saved",
       entity: {
         type: "request",
@@ -187,6 +185,61 @@ describe("project sync events", () => {
     });
     expect(pushed[0]).not.toContain("password");
     expect(pushed[0]).not.toContain("token=secret");
+    expect(queries.join("\n")).not.toContain("settings_sync_client_id");
+  });
+
+  it("uses a runtime client id instead of a project-shared config id", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        return rqlOk([]);
+      },
+    });
+
+    const id = await repo.currentSyncClientId();
+    const consumer = await repo.syncConsumerName();
+
+    expect(id).toEqual(expect.any(String));
+    expect(id.length).toBeGreaterThan(0);
+    expect(consumer).toMatch(/^rr_[0-9a-f]+$/);
+    expect(queries).toEqual([]);
+  });
+
+  it("keeps one runtime id for all local events without writing it into the project", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r1' LIMIT 1"
+        )
+          return rqlOk([]);
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r2' LIMIT 1"
+        )
+          return rqlOk([]);
+        return rqlOk([]);
+      },
+      request: () => reply(200, { ok: true, rid: 7 }),
+    });
+
+    await repo.saveRequest("c1", request("r1"));
+    await repo.saveRequest("c1", request("r2"));
+
+    const pushed = queries.filter((query) =>
+      query.startsWith("QUEUE PUSH rr_sync_events ")
+    );
+    expect(pushed).toHaveLength(2);
+    const first = syncPayload(pushed[0]!);
+    const second = syncPayload(pushed[1]!);
+    expect(first.clientId).toEqual(expect.any(String));
+    expect(second.clientId).toBe(first.clientId);
+    expect(queries.join("\n")).not.toContain("settings_sync_client_id");
   });
 
   it("does not leak secret values into queue events", async () => {
@@ -200,8 +253,6 @@ describe("project sync events", () => {
     ipc({
       rql: (query) => {
         queries.push(query);
-        if (query === "GET CONFIG red_request settings_sync_client_id")
-          return rqlOk([{ value: "client-1" }]);
         return rqlOk([{ message: "ok" }]);
       },
     });
@@ -254,8 +305,6 @@ describe("project sync events", () => {
               value: JSON.stringify({ collectionId: "c1" }),
             },
           ]);
-        if (query === "GET CONFIG red_request settings_sync_client_id")
-          return rqlOk([{ value: "client-1" }]);
         return rqlOk([]);
       },
       request: () => reply(200, { ok: true }),

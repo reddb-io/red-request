@@ -64,7 +64,7 @@ const SETTINGS_NETWORK_KEY = "settings_network";
 const SETTINGS_UI_KEY = "settings_ui";
 const SETTINGS_GLOBALS_KEY = "settings_globals";
 const SETTINGS_ENV_ORDER_KEY = "settings_env_order";
-const SETTINGS_SYNC_CLIENT_ID_KEY = "settings_sync_client_id";
+let runtimeSyncClientId: string | null = null;
 
 type RequestDocumentBody = {
   record_type: "request";
@@ -208,20 +208,15 @@ function newSyncId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function syncClientId(): Promise<string> {
-  const existing = await db
-    .configGet<string>(APP_CONFIG, SETTINGS_SYNC_CLIENT_ID_KEY)
-    .catch(() => null);
-  if (typeof existing === "string" && existing.length > 0) return existing;
-  const id = newSyncId();
-  await db.configPut(APP_CONFIG, SETTINGS_SYNC_CLIENT_ID_KEY, id);
-  return id;
+function syncClientId(): string {
+  runtimeSyncClientId ??= newSyncId();
+  return runtimeSyncClientId;
 }
 
-export const currentSyncClientId = () => syncClientId();
+export const currentSyncClientId = async () => syncClientId();
 
 export async function syncConsumerName(): Promise<string> {
-  return `rr_${hexUtf8(await syncClientId()).slice(0, 56) || "client"}`;
+  return `rr_${hexUtf8(syncClientId()).slice(0, 56) || "client"}`;
 }
 
 async function emitSyncEvent(
@@ -234,7 +229,7 @@ async function emitSyncEvent(
     id: newSyncId(),
     ts: Date.now(),
     source: "red-request",
-    clientId: await syncClientId(),
+    clientId: syncClientId(),
     kind,
     entity,
     payload,
