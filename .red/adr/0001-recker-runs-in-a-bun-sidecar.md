@@ -14,7 +14,7 @@ in Rust (violates "recker is the dispatcher"), or a separate JS runtime process.
 
 ## Decision
 
-Run recker in a **sidecar process** (`@red-request/engine`). Production ships it as a
+Run recker in a **sidecar process** (`@reddb-io/request-engine`). Production ships it as a
 single binary built with `bun build --compile`; in dev it runs as
 `node packages/engine/dist/main.js`. The Rust shell spawns and owns it.
 
@@ -24,6 +24,6 @@ single binary built with `bun build --compile`; in dev it runs as
 - We carry a JS runtime (~90 MB compiled) — still far lighter than bundling Chromium
   (Electron), and the native shell stays small.
 - Two languages in the request path (Rust bridge ↔ JS engine); the contract lives in
-  `@red-request/core` to prevent drift.
+  `@reddb-io/request-core` to prevent drift.
 - The asdf-global Bun is too old (0.6.14) for `--compile`; the repo pins `bun 1.3.14` in
   `.tool-versions`, and dev falls back to Node (recker runs fine on Node).
