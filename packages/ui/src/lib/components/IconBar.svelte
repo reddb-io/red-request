@@ -30,10 +30,32 @@
     out.push({ view: "settings", icon: Settings, label: "Settings: project configuration" });
     return out;
   });
+
+  function selectView(view: AppView) {
+    ws.view = view;
+  }
+
+  function selectViewFromPointer(event: PointerEvent, view: AppView) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectView(view);
+  }
+
+  function switchProject() {
+    ws.backToSelector();
+  }
+
+  function switchProjectFromPointer(event: PointerEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    switchProject();
+  }
 </script>
 
 <nav
-  class="relative z-[1000] flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
+  class="relative z-[1500] isolate flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-[var(--color-bg-0)] py-2"
   aria-label="Primary"
 >
   {#each items as it (it.view)}
@@ -41,7 +63,8 @@
     <button
       type="button"
       title={it.label}
-      onclick={() => (ws.view = it.view)}
+      onpointerdown={(event) => selectViewFromPointer(event, it.view)}
+      onclick={() => selectView(it.view)}
       class="grid h-9 w-9 place-items-center rounded-lg transition-colors
         {active
         ? 'bg-[var(--color-bg-2)] text-[var(--color-brand)]'
@@ -56,7 +79,8 @@
   <button
     type="button"
     title="Switch project — {projectLabel(ws.project)}"
-    onclick={() => ws.backToSelector()}
+    onpointerdown={switchProjectFromPointer}
+    onclick={switchProject}
     class="mt-auto grid h-9 w-9 place-items-center rounded-lg text-red-900 transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-brand)]"
     aria-label="switch project"
   >

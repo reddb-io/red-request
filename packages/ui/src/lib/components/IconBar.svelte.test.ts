@@ -27,6 +27,7 @@ describe("IconBar", () => {
     ws.loadError = null;
     ws.redUiEnabled = false;
     ws.view = "requests";
+    ws.backToSelector = vi.fn();
   });
 
   it("switches top-level views when the vertical rail icons are clicked", async () => {
@@ -54,6 +55,20 @@ describe("IconBar", () => {
     await waitFor(() => expect(ws.view).toBe("requests"));
   });
 
+  it("switches immediately on pointerdown from the icon hit target", async () => {
+    render(IconBar);
+
+    const homeButton = screen.getByRole("button", {
+      name: "Home: dashboard and network pool",
+    });
+    const homeIcon = homeButton.querySelector("svg");
+    expect(homeIcon).toBeTruthy();
+
+    await fireEvent.pointerDown(homeIcon!);
+
+    expect(ws.view).toBe("home");
+  });
+
   it("switches to the database view when the red-ui inspector is enabled", async () => {
     ws.redUiEnabled = true;
     render(IconBar);
@@ -65,5 +80,15 @@ describe("IconBar", () => {
     );
 
     await waitFor(() => expect(ws.view).toBe("database"));
+  });
+
+  it("keeps the bottom project switcher responsive on pointerdown", async () => {
+    render(IconBar);
+
+    await fireEvent.pointerDown(
+      screen.getByRole("button", { name: "switch project" })
+    );
+
+    expect(ws.backToSelector).toHaveBeenCalledTimes(1);
   });
 });

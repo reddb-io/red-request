@@ -26,7 +26,7 @@ describe("project transition CSS", () => {
     );
     const iconBar = readFileSync(iconBarPath, "utf8");
 
-    expect(iconBar).toContain("relative z-[1000]");
+    expect(iconBar).toContain("relative z-[1500] isolate");
     expect(page).toContain("pointer-events-none fixed right-3 top-11 z-[950]");
     expect(page).toContain(
       "pointer-events-auto flex flex-wrap items-center gap-2"
