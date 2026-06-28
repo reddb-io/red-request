@@ -1,6 +1,6 @@
 {
   "name": "@reddb-io/request-ui",
-  "version": "0.45.18",
+  "version": "0.45.19",
   "private": true,
   "type": "module",
   "description": "red-request UI — SvelteKit (static) client surface.",
