@@ -213,17 +213,21 @@ describe("+page error boundary", () => {
     expectButton("Choose another project");
   });
 
-  it("renders an action surface when a project opens with no collections", async () => {
+  it("renders onboarding, not recovery, when a new project opens with no collections", async () => {
     render(AppShellHarness);
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain("No collections yet");
+      expect(document.body.textContent).toContain("Start this project");
     });
     expect(screen.getByLabelText("Close window")).toBeTruthy();
-    expectButton("New collection");
-    expectButton("Retry opening");
-    expectButton("Export crash report");
+    expectButton("Create collection");
     expectButton("Choose another project");
+    expect(document.body.textContent).toContain(
+      "This is a fresh Red Request workspace"
+    );
+    expect(document.body.textContent).not.toContain("Export crash report");
+    expect(document.body.textContent).not.toContain("Retry opening");
+    expect(document.body.textContent).not.toContain("Delete local data");
   });
 
   it("keeps titlebar and recovery visible when pending autosave blocks project switch", async () => {
@@ -232,7 +236,7 @@ describe("+page error boundary", () => {
     render(AppShellHarness);
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain("No collections yet");
+      expect(document.body.textContent).toContain("Start this project");
     });
 
     vi.useFakeTimers();
