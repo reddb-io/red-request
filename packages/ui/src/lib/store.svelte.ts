@@ -284,10 +284,16 @@ class Workspace {
     // Launched via `rr <dir>` → straight into the project; otherwise show the selector.
     if (this.project?.arg_launched) {
       appLog("info", "init: arg_launched → entering app directly");
+      this.openingTarget = this.project.connection_string
+        ? { kind: "connection", connection: this.project.connection_string }
+        : { kind: "local", dir: this.project.project_dir };
       this.screen = "app";
       this.ready = true;
       await this.loadStore();
-      if (!this.loadError) this.startSyncLoop();
+      if (!this.loadError) {
+        this.openingTarget = null;
+        this.startSyncLoop();
+      }
     } else {
       appLog("info", "init: not arg-launched → showing project selector");
       this.screen = "selector";

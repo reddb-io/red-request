@@ -25,6 +25,7 @@
     null
   );
   let now = $state(Date.now());
+  const FAILSAFE_OPEN_RECOVERY_MS = 30_000;
 
   function waitForPaint(): Promise<void> {
     return new Promise((resolve) => {
@@ -98,6 +99,25 @@
   );
   const loadElapsedSeconds = $derived(Math.floor(loadElapsedMs / 1000));
   const loadIsSlow = $derived(loadElapsedMs >= 10_000);
+  const showRecoveryDock = $derived(
+    ws.screen === "app" &&
+      !ws.closing &&
+      (Boolean(ws.loading) || Boolean(ws.loadError) || ws.transitioning)
+  );
+
+  $effect(() => {
+    const loading = ws.loading;
+    if (!loading || ws.loadError) return;
+    if (now - loading.startedAt < FAILSAFE_OPEN_RECOVERY_MS) return;
+    queueMicrotask(() => {
+      if (!ws.loading || ws.loadError) return;
+      ws.forceOpenRecovery(
+        `Project opening hit the failsafe after ${Math.floor(
+          (Date.now() - loading.startedAt) / 1000
+        )}s at step: ${loading.step}.`
+      );
+    });
+  });
 
   // Autosave: persist the active request a short beat after the user stops
   // editing (URL, params, headers, body, auth…), so edits survive a reload or
@@ -367,6 +387,143 @@
   </div>
 {/snippet}
 
+{#snippet loadingRecoveryActions()}
+  <Button onclick={() => ws.backToSelector()} size="xs" variant="outline">
+    Choose another project
+  </Button>
+  <Button onclick={() => ws.retry()} size="xs" variant="outline">
+    Retry opening
+  </Button>
+  <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
+    Export crash report
+  </Button>
+  <Button
+    onclick={() =>
+      ws.forceOpenRecovery(
+        `Project opening was stopped after ${loadElapsedSeconds}s at step: ${ws.loading?.step ?? "unknown"}.`
+      )}
+    size="xs"
+    variant="ghost"
+  >
+    Stop waiting
+  </Button>
+  {#if ws.project?.project_dir}
+    <Button
+      onclick={() => ws.rebuildStore()}
+      size="xs"
+      variant="ghost"
+      title="Back up app.rdb and recreate from scratch"
+    >
+      Rebuild database
+    </Button>
+  {/if}
+  {#if ws.recoveryProjectDir}
+    <Button
+      onclick={() => {
+        if (
+          confirm(
+            "Delete this project's .red/request data and return to the project picker? This cannot be undone."
+          )
+        )
+          void ws.deleteProjectData();
+      }}
+      size="xs"
+      variant="ghost"
+      title="Deletes only this project's .red/request data, not the source folder"
+    >
+      Delete local data
+    </Button>
+  {/if}
+{/snippet}
+
+{#snippet loadErrorRecoveryActions()}
+  <Button onclick={() => ws.retry()} size="xs" variant="outline">
+    Retry
+  </Button>
+  <Button onclick={() => ws.exportCrashReport()} size="xs" variant="outline">
+    Export crash report
+  </Button>
+  {#if ws.project?.project_dir}
+    <Button
+      onclick={() => ws.rebuildStore()}
+      size="xs"
+      variant="outline"
+      title="Back up app.rdb and recreate from scratch — keeps a .incompatible backup next to the file so nothing is lost"
+    >
+      Rebuild database
+    </Button>
+  {/if}
+  <Button onclick={() => ws.backToSelector()} size="xs" variant="ghost">
+    Choose another project
+  </Button>
+  {#if ws.project?.project_dir}
+    <Button onclick={() => ws.forgetProject()} size="xs" variant="ghost">
+      Forget project
+    </Button>
+  {/if}
+  {#if ws.recoveryProjectDir}
+    <Button
+      onclick={() => {
+        if (
+          confirm(
+            "Delete this project's .red/request data and return to the project picker? This cannot be undone."
+          )
+        )
+          void ws.deleteProjectData();
+      }}
+      size="xs"
+      variant="ghost"
+      title="Deletes only this project's .red/request data, not the source folder"
+    >
+      Delete local data
+    </Button>
+  {/if}
+{/snippet}
+
+{#snippet emptyWorkspaceRecovery()}
+  <div class="grid h-full place-items-center px-8 text-center">
+    <div class="max-w-lg">
+      <h1 class="mb-2 text-lg font-semibold text-fg-strong">No collections yet</h1>
+      <p class="mx-auto mb-4 max-w-md text-sm text-fg-muted">
+        The project opened, but there is no request workspace to show.
+      </p>
+      <div class="flex flex-wrap items-center justify-center gap-2">
+        <Button onclick={() => ws.addCollection()} size="xs" variant="outline">
+          New collection
+        </Button>
+        <Button onclick={() => ws.retry()} size="xs" variant="ghost">
+          Retry opening
+        </Button>
+        <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
+          Export crash report
+        </Button>
+        <Button onclick={() => ws.backToSelector()} size="xs" variant="ghost">
+          Choose another project
+        </Button>
+        {#if ws.recoveryProjectDir}
+          <Button
+            onclick={() => {
+              if (
+                confirm(
+                  "Delete this project's .red/request data and return to the project picker? This cannot be undone."
+                )
+              )
+                void ws.deleteProjectData();
+            }}
+            size="xs"
+            variant="ghost"
+          >
+            Delete local data
+          </Button>
+        {/if}
+      </div>
+      {#if ws.project}
+        <p class="mono mt-4 break-all text-xs text-fg-faint">{ws.project.db_path}</p>
+      {/if}
+    </div>
+  </div>
+{/snippet}
+
 <Tooltip.Provider delayDuration={250} disableHoverableContent>
   <div class="flex h-screen w-screen flex-col overflow-hidden">
     <Titlebar />
@@ -424,54 +581,7 @@
               </div>
             {/if}
             <div class="mt-4 flex flex-wrap items-center justify-center gap-2">
-              <Button onclick={() => ws.backToSelector()} size="xs" variant="outline">
-                Choose another project
-              </Button>
-              <Button onclick={() => ws.retry()} size="xs" variant="outline">
-                Retry opening
-              </Button>
-              <Button onclick={() => ws.exportCrashReport()} size="xs" variant="ghost">
-                Export crash report
-              </Button>
-              {#if loadIsSlow}
-                <Button
-                  onclick={() =>
-                    ws.forceOpenRecovery(
-                      `Project opening was stopped after ${loadElapsedSeconds}s at step: ${ws.loading?.step ?? "unknown"}.`
-                    )}
-                  size="xs"
-                  variant="ghost"
-                >
-                  Stop waiting
-                </Button>
-              {/if}
-              {#if ws.project?.project_dir}
-                <Button
-                  onclick={() => ws.rebuildStore()}
-                  size="xs"
-                  variant="ghost"
-                  title="Back up app.rdb and recreate from scratch"
-                >
-                  Rebuild database
-                </Button>
-              {/if}
-              {#if ws.recoveryProjectDir}
-                <Button
-                  onclick={() => {
-                    if (
-                      confirm(
-                        "Delete this project's .red/request data and return to the project picker? This cannot be undone."
-                      )
-                    )
-                      void ws.deleteProjectData();
-                  }}
-                  size="xs"
-                  variant="ghost"
-                  title="Deletes only this project's .red/request data, not the source folder"
-                >
-                  Delete local data
-                </Button>
-              {/if}
+              {@render loadingRecoveryActions()}
             </div>
           </div>
         </div>
@@ -499,47 +609,7 @@
               {ws.loadError}
             </p>
             <div class="flex flex-wrap items-center justify-center gap-2">
-              <Button onclick={() => ws.retry()} size="xs" variant="outline">
-                Retry
-              </Button>
-              <Button onclick={() => ws.exportCrashReport()} size="xs" variant="outline">
-                Export crash report
-              </Button>
-              <Button
-                onclick={() => ws.rebuildStore()}
-                size="xs"
-                variant="outline"
-                title="Back up app.rdb and recreate from scratch — keeps a .incompatible backup next to the file so nothing is lost"
-              >
-                Rebuild database
-              </Button>
-              <Button
-                onclick={() => ws.backToSelector()}
-                size="xs"
-                variant="ghost"
-              >
-                Choose another project
-              </Button>
-              {#if ws.project?.project_dir}
-                <Button onclick={() => ws.forgetProject()} size="xs" variant="ghost">
-                  Forget project
-                </Button>
-                <Button
-                  onclick={() => {
-                    if (
-                      confirm(
-                        "Delete this project's .red/request data and return to the project picker? This cannot be undone."
-                      )
-                    )
-                      void ws.deleteProjectData();
-                  }}
-                  size="xs"
-                  variant="ghost"
-                  title="Deletes only this project's .red/request data, not the source folder"
-                >
-                  Delete local data
-                </Button>
-              {/if}
+              {@render loadErrorRecoveryActions()}
             </div>
             {#if ws.project}
               <p class="mt-4 text-xs text-fg-faint">
@@ -596,6 +666,8 @@
                     <div class="grid h-full place-items-center text-sm text-fg-subtle">loading…</div>
                   {/if}
                 </div>
+              {:else if ws.view === "requests" && ws.collections.length === 0}
+                {@render emptyWorkspaceRecovery()}
               {:else}
                 <div class="flex h-full overflow-hidden">
                   <div
@@ -663,6 +735,29 @@
       </svelte:boundary>
     </div>
   </div>
+  {#if showRecoveryDock}
+    <div
+      data-testid="project-recovery-dock"
+      class="fixed right-3 top-11 z-[950] max-w-[calc(100vw-1.5rem)] rounded-md border border-border bg-[var(--color-bg-0)]/95 px-3 py-2 shadow-xl backdrop-blur"
+    >
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="label mr-1">
+          {#if ws.loadError}
+            Recovery
+          {:else if ws.loading}
+            {ws.loading.step}
+          {:else}
+            Opening project…
+          {/if}
+        </span>
+        {#if ws.loadError}
+          {@render loadErrorRecoveryActions()}
+        {:else}
+          {@render loadingRecoveryActions()}
+        {/if}
+      </div>
+    </div>
+  {/if}
   {#if ws.transitioning}
     <ProjectTransition />
   {/if}
