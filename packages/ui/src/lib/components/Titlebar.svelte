@@ -4,11 +4,15 @@
   // buttons live here so the user can always reach them — even when the
   // webview freezes. The data-tauri-drag-region on the bar keeps it draggable
   // across all three OSes.
-  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { brand } from "../brand.generated";
   import { onMount } from "svelte";
 
   let isMaximized = $state(false);
+
+  async function currentWindow() {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    return getCurrentWindow();
+  }
 
   // Refresh the maximized indicator so the toggle glyph stays accurate when
   // the user double-clicks the title bar to maximize.
@@ -16,7 +20,7 @@
     let unlisten: (() => void) | undefined;
     (async () => {
       try {
-        const w = getCurrentWindow();
+        const w = await currentWindow();
         isMaximized = await w.isMaximized();
         unlisten = await w.onResized(async () => {
           isMaximized = await w.isMaximized();
@@ -30,14 +34,14 @@
 
   async function minimize() {
     try {
-      await getCurrentWindow().minimize();
+      await (await currentWindow()).minimize();
     } catch {
       /* ignore — running outside Tauri */
     }
   }
   async function toggleMaximize() {
     try {
-      const w = getCurrentWindow();
+      const w = await currentWindow();
       if (await w.isMaximized()) await w.unmaximize();
       else await w.maximize();
     } catch {
@@ -46,7 +50,7 @@
   }
   async function closeWindow() {
     try {
-      await getCurrentWindow().close();
+      await (await currentWindow()).close();
     } catch {
       /* ignore */
     }

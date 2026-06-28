@@ -314,6 +314,7 @@ class Workspace {
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.openingTarget = { kind: "local", dir };
+    this.project = null;
     this.loadError = null;
     this.screen = "app";
     this.activeColId = null;
@@ -389,6 +390,7 @@ class Workspace {
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.openingTarget = { kind: "connection", connection: value };
+    this.project = null;
     this.loadError = null;
     this.loading = {
       startedAt: Date.now(),
@@ -496,6 +498,9 @@ class Workspace {
       kind: "red-request-project-open-crash",
       createdAt: new Date().toISOString(),
       project: $state.snapshot(this.project),
+      openingTarget: this.openingTarget
+        ? $state.snapshot(this.openingTarget)
+        : null,
       screen: this.screen,
       view: this.view,
       transitioning: this.transitioning,
@@ -772,21 +777,21 @@ class Workspace {
     const openingTarget = this.openingTarget
       ? $state.snapshot(this.openingTarget)
       : null;
+    if (openingTarget?.kind === "connection") {
+      await this.chooseConnectionString(openingTarget.connection);
+      return;
+    }
+    if (openingTarget?.kind === "local") {
+      await this.chooseProject(openingTarget.dir);
+      return;
+    }
     const connection = target?.connection_string;
     if (connection) {
       await this.chooseConnectionString(connection);
       return;
     }
-    if (openingTarget?.kind === "connection") {
-      await this.chooseConnectionString(openingTarget.connection);
-      return;
-    }
     if (target) {
       await this.chooseProject(target.project_dir);
-      return;
-    }
-    if (openingTarget?.kind === "local") {
-      await this.chooseProject(openingTarget.dir);
       return;
     }
     this.project = await projectInfo().catch(() => this.project);

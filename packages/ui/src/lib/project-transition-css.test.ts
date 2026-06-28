@@ -32,4 +32,26 @@ describe("project transition CSS", () => {
       "pointer-events-auto flex flex-wrap items-center gap-2"
     );
   });
+
+  it("keeps root chrome resilient to Tauri window import and boot crashes", () => {
+    const pagePath = join(process.cwd(), "src/routes/+page.svelte");
+    const page = readFileSync(pagePath, "utf8");
+    const titlebarPath = join(
+      process.cwd(),
+      "src/lib/components/Titlebar.svelte"
+    );
+    const titlebar = readFileSync(titlebarPath, "utf8");
+
+    expect(page).not.toContain(
+      'import { getCurrentWindow } from "@tauri-apps/api/window"'
+    );
+    expect(titlebar).not.toContain(
+      'import { getCurrentWindow } from "@tauri-apps/api/window"'
+    );
+    expect(page).toContain('window.addEventListener("error", onGlobalError)');
+    expect(page).toContain(
+      'window.addEventListener("unhandledrejection", onUnhandledRejection)'
+    );
+    expect(page).toContain("ws.forceOpenRecovery(`${source}: ${detail}`)");
+  });
 });
