@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import Copy from "@lucide/svelte/icons/copy";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -38,6 +38,8 @@
   let secretValue = $state("");
   let draggingEnv = $state<string | null>(null);
   let envDropBefore = $state<string | null | undefined>(undefined);
+  let rootEl = $state<HTMLElement | null>(null);
+  let secretNameInput = $state<HTMLInputElement | null>(null);
 
   function loadVars(env: StoredEnvironment | null) {
     varRows = rowsOf(env);
@@ -48,6 +50,19 @@
     onGlobals = true;
     selected = ws.globals;
     loadVars(ws.globals);
+  }
+
+  async function focusFirstGlobalVarName() {
+    await tick();
+    const input = rootEl?.querySelector<HTMLInputElement>(
+      'input[placeholder="VAR_NAME"]'
+    );
+    input?.focus();
+  }
+
+  async function focusSecretName() {
+    await tick();
+    secretNameInput?.focus();
   }
 
   function select(env: StoredEnvironment) {
@@ -98,6 +113,23 @@
     if (snap === lastVarsSnap) return;
     lastVarsSnap = snap;
     scheduleVarsSave();
+  });
+
+  $effect(() => {
+    const intent = ws.settingsIntent;
+    if (!intent) return;
+    ws.settingsIntent = null;
+    selectGlobals();
+    if (intent === "global-variable") {
+      if (!varRows.some((row) => !row.name.trim() && !row.value.trim())) {
+        varRows.push({ name: "", value: "", enabled: true });
+      }
+      void focusFirstGlobalVarName();
+    } else if (intent === "global-secret") {
+      secretName = "";
+      secretValue = "";
+      void focusSecretName();
+    }
   });
 
   function nextEnvName(): string {
@@ -165,7 +197,7 @@
 </script>
 
 {#snippet body()}
-    <div class="flex flex-1 flex-col overflow-hidden">
+    <div bind:this={rootEl} class="flex flex-1 flex-col overflow-hidden">
       <div class="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-3">
         <button
           type="button"
@@ -305,7 +337,12 @@
               {/if}
             </div>
             <div class="mt-2 flex gap-1">
-              <Input bind:value={secretName} placeholder="NAME" class="h-7 w-40" />
+              <Input
+                bind:ref={secretNameInput}
+                bind:value={secretName}
+                placeholder="NAME"
+                class="h-7 w-40"
+              />
               <Input
                 bind:value={secretValue}
                 type="password"

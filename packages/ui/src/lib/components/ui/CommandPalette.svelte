@@ -308,8 +308,12 @@
     void fn();
   }
 
-  function openSettings(section: typeof ws.settingsSection) {
+  function openSettings(
+    section: typeof ws.settingsSection,
+    intent: typeof ws.settingsIntent = null
+  ) {
     ws.settingsSection = section;
+    ws.settingsIntent = intent;
     ws.view = "settings";
   }
 
@@ -451,8 +455,12 @@
       })}
       {@render action("Settings: environments", "config", () => openSettings("environments"))}
       {@render action("Settings: globals", "config", () => openSettings("environments"))}
-      {@render action("Settings: global variable", "config", () => openSettings("environments"))}
-      {@render action("Settings: global secret", "config", () => openSettings("environments"))}
+      {@render action("Settings: global variable", "config", () =>
+        openSettings("environments", "global-variable")
+      )}
+      {@render action("Settings: global secret", "config", () =>
+        openSettings("environments", "global-secret")
+      )}
       {@render action("Settings: proxies", "config", () => openSettings("proxies"))}
       {@render action("Settings: profiles", "config", () => openSettings("profiles"))}
       {@render action("Settings: data", "config", () => openSettings("data"))}
