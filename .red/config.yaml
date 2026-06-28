@@ -68,7 +68,7 @@ plugins:
         # feedback failure. (#430 / PRD #429)
         #
         # Mirrors the CI `js` job (.github/workflows/ci.yml) verbatim, in order:
-        # build runs FIRST because engine/ui typecheck against @red-request/core's
+        # build runs FIRST because engine/ui typecheck against @reddb-io/request-core's
         # built .d.ts. This also fills the harness blind spot — this repo's typecheck
         # is the `check` script, which the built-in per-scope feedback gate (which
         # only knows `test`/`typecheck`/`lint`/`build`) never runs.

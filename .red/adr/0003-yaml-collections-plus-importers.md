@@ -14,7 +14,7 @@ YAML schema.
 
 ## Decision
 
-Native **YAML**, one request per file, validated by `@red-request/core` schemas:
+Native **YAML**, one request per file, validated by `@reddb-io/request-core` schemas:
 
 ```
 <collection>/collection.yaml
