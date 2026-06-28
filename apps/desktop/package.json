@@ -1,6 +1,6 @@
 {
   "name": "@red-request/desktop",
-  "version": "0.45.6",
+  "version": "0.45.7",
   "private": true,
   "type": "module",
   "scripts": {
