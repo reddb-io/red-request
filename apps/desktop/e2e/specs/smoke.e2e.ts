@@ -15,6 +15,26 @@ describe("app smoke", () => {
     const title = await browser.getTitle();
     expect(title.toLowerCase()).toContain("red");
 
+    // Regression guard for the project-open black-screen class: the native
+    // titlebar is part of the route shell and must remain visible even while
+    // the app workspace is loading or recovering.
+    await browser.waitUntil(
+      async () => {
+        let visible = 0;
+        for (const selector of [
+          "[aria-label='Minimize window']",
+          "[aria-label='Maximize window'], [aria-label='Restore window']",
+          "[aria-label='Close window']",
+        ]) {
+          const control = await $(selector);
+          if ((await control.isExisting()) && (await control.isDisplayed()))
+            visible++;
+        }
+        return visible >= 3;
+      },
+      { timeout: 15_000, timeoutMsg: "native titlebar controls disappeared" }
+    );
+
     // Something interactive exists (button or the project selector / sidebar).
     const interactive = await $$("button, [role='button'], input");
     expect(interactive.length).toBeGreaterThan(0);
