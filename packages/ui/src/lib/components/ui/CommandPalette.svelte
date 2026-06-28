@@ -435,6 +435,11 @@
       {#if ws.activeReq}
         {@render action("Send request", "⏎", () => ws.send())}
         {@render action("Save request", "save", () => ws.save())}
+        {#if ws.activeCookieJarKey}
+          {@render action(`Clear cookie jar: ${ws.activeCookieJarLabel}`, "clear", () =>
+            ws.clearActiveCookies()
+          )}
+        {/if}
         {@render action("Duplicate request", "copy", () =>
           ws.duplicateRequest(ws.activeReq!.id)
         )}

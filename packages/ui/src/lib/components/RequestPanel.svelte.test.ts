@@ -70,6 +70,7 @@ describe("RequestPanel network identity controls", () => {
           userAgent: "",
           headers: [],
           proxyId: "px-team",
+          cookieJar: false,
         },
       ],
     };

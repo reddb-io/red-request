@@ -392,7 +392,14 @@ describe("Workspace persistence coordination", () => {
     finishNetwork({
       proxies: [],
       profiles: [
-        { id: "stale", name: "stale", userAgent: "", headers: [], proxyId: "" },
+        {
+          id: "stale",
+          name: "stale",
+          userAgent: "",
+          headers: [],
+          proxyId: "",
+          cookieJar: false,
+        },
       ],
     });
     await pending;
@@ -601,6 +608,7 @@ describe("Workspace persistence coordination", () => {
             userAgent: "",
             headers: [],
             proxyId: "",
+            cookieJar: false,
           },
         ],
       });
@@ -617,7 +625,14 @@ describe("Workspace persistence coordination", () => {
     finishStaleNetwork({
       proxies: [],
       profiles: [
-        { id: "stale", name: "stale", userAgent: "", headers: [], proxyId: "" },
+        {
+          id: "stale",
+          name: "stale",
+          userAgent: "",
+          headers: [],
+          proxyId: "",
+          cookieJar: false,
+        },
       ],
     });
     await staleLoad;
@@ -1099,6 +1114,7 @@ describe("Workspace persistence coordination", () => {
       userAgent: "red-request/test",
       headers: [{ name: "X-Workspace", value: "engineering", enabled: true }],
       proxyId: "",
+      cookieJar: false,
     };
     const colId = "c1";
     const reqId = "r1";
@@ -1210,6 +1226,7 @@ describe("Workspace persistence coordination", () => {
           userAgent: "",
           headers: [],
           proxyId: "px-profile",
+          cookieJar: false,
         },
       ],
     };
@@ -1252,6 +1269,90 @@ describe("Workspace persistence coordination", () => {
     expect(ws.renderedRequest?.proxy).toBe("socks5h://proxy.internal:1080");
   });
 
+  it("uses the active profile cookie jar before the collection cookie jar", async () => {
+    ws.network = {
+      proxies: [],
+      profiles: [
+        {
+          id: "pf-1",
+          name: "Team identity",
+          userAgent: "",
+          headers: [],
+          proxyId: "",
+          cookieJar: true,
+        },
+      ],
+    };
+    ws.collections = [
+      {
+        ...collection("c1", [
+          request("r1", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            profileId: "pf-1",
+          }),
+        ]),
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          order: ["r1"],
+          folders: [],
+          cookieJar: true,
+        }),
+      },
+    ];
+    ws.selectRequest("c1", "r1");
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: {
+        status: 200,
+        statusText: "OK",
+        ok: true,
+        url: "https://api.example.test/users",
+        headers: {},
+        bodyText: "",
+        size: 0,
+        durationMs: 12,
+      },
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/users",
+    });
+
+    await ws.send();
+
+    expect(rpc.httpSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cookieJarKey: "profile:pf-1",
+      })
+    );
+  });
+
+  it("clears the active profile cookie jar", async () => {
+    ws.network = {
+      proxies: [],
+      profiles: [
+        {
+          id: "pf-1",
+          name: "Team identity",
+          userAgent: "",
+          headers: [],
+          proxyId: "",
+          cookieJar: true,
+        },
+      ],
+    };
+    ws.collections = [
+      collection("c1", [
+        request("r1", {
+          profileId: "pf-1",
+        }),
+      ]),
+    ];
+    ws.selectRequest("c1", "r1");
+
+    await ws.clearActiveCookies();
+
+    expect(rpc.cookiesClear).toHaveBeenCalledWith({ key: "profile:pf-1" });
+  });
+
   it("records profile, proxy and dispatcher identity in request history", async () => {
     ws.network = {
       proxies: [
@@ -1272,6 +1373,7 @@ describe("Workspace persistence coordination", () => {
           userAgent: "",
           headers: [],
           proxyId: "px-profile",
+          cookieJar: false,
         },
       ],
     };
