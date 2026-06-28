@@ -35,6 +35,7 @@ describe("CommandPalette", () => {
     ws.activeColId = null;
     ws.activeReq = null;
     ws.redUiEnabled = false;
+    ws.network = { proxies: [], profiles: [] };
   });
 
   it("jumps directly to settings subsections", async () => {
@@ -154,5 +155,161 @@ describe("CommandPalette", () => {
       expect(ws.activeReq?.id).toBe("req-2");
       expect(send).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("turns off the active request proxy when no profile proxy locks the route", async () => {
+    const req = {
+      ...newRequest("req-1"),
+      name: "Proxied request",
+      proxy: "http://old.proxy:8080",
+    };
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "API",
+          order: ["req-1"],
+          folders: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [req],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "col-1";
+    ws.activeReq = req;
+    ws.network = {
+      proxies: [
+        {
+          id: "px-team",
+          name: "Team proxy",
+          type: "http",
+          host: "proxy.internal",
+          port: "8080",
+          username: "",
+          password: "",
+        },
+      ],
+      profiles: [],
+    };
+    const save = vi.spyOn(ws, "save").mockResolvedValue(undefined);
+
+    render(CommandPalette, { props: { open: true } });
+
+    await fireEvent.click(await screen.findByText("Proxy: direct connection"));
+
+    await waitFor(() => {
+      expect(ws.activeReq?.proxy).toBeUndefined();
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("turns on a saved proxy for the active request from the command surface", async () => {
+    const req = {
+      ...newRequest("req-1"),
+      name: "Direct request",
+      proxy: undefined,
+    };
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "API",
+          order: ["req-1"],
+          folders: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [req],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "col-1";
+    ws.activeReq = req;
+    ws.network = {
+      proxies: [
+        {
+          id: "px-team",
+          name: "Team proxy",
+          type: "http",
+          host: "proxy.internal",
+          port: "8080",
+          username: "",
+          password: "",
+        },
+      ],
+      profiles: [],
+    };
+    const save = vi.spyOn(ws, "save").mockResolvedValue(undefined);
+
+    render(CommandPalette, { props: { open: true } });
+
+    await fireEvent.click(await screen.findByText("Proxy: Team proxy"));
+
+    await waitFor(() => {
+      expect(ws.activeReq?.proxy).toBe("http://proxy.internal:8080");
+      expect(save).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not offer request proxy actions when the active profile owns the proxy", async () => {
+    const req = {
+      ...newRequest("req-1"),
+      name: "Profile locked request",
+      profileId: "prof-1",
+      proxy: "http://request.proxy:8080",
+    };
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "API",
+          order: ["req-1"],
+          folders: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [req],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "col-1";
+    ws.activeReq = req;
+    ws.network = {
+      proxies: [
+        {
+          id: "px-team",
+          name: "Team proxy",
+          type: "http",
+          host: "proxy.internal",
+          port: "8080",
+          username: "",
+          password: "",
+        },
+      ],
+      profiles: [
+        {
+          id: "prof-1",
+          name: "Team profile",
+          userAgent: "",
+          headers: [],
+          proxyId: "px-team",
+        },
+      ],
+    };
+    const save = vi.spyOn(ws, "save").mockResolvedValue(undefined);
+
+    render(CommandPalette, { props: { open: true } });
+
+    expect(screen.queryByText("Proxy: direct connection")).toBeNull();
+    expect(screen.queryByText("Proxy: Team proxy")).toBeNull();
+    expect(save).not.toHaveBeenCalled();
   });
 });
