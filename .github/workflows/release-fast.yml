@@ -22,6 +22,8 @@ concurrency:
 env:
   REDDB_VERSION: ${{ github.event.inputs.reddb_version }}
   REDDB_SOURCE_REF: ${{ github.event.inputs.reddb_source_ref }}
+  APPIMAGE_EXTRACT_AND_RUN: "1"
+  NO_STRIP: "1"
 
 jobs:
   linux-deb:
@@ -38,7 +40,8 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
             librsvg2-dev build-essential curl wget file libssl-dev libxdo-dev \
-            clang mold
+            clang mold xdg-utils
+          sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2
 
       - uses: pnpm/action-setup@v6
         with:
@@ -112,8 +115,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REDDB_TARGET: x86_64-unknown-linux-gnu
 
-      - name: Build Linux deb only
-        run: pnpm --filter @reddb-io/request-desktop tauri build --bundles deb
+      - name: Make ldd tolerant of static sidecars (AppImage)
+        run: |
+          shim="$HOME/.ldd-shim"
+          mkdir -p "$shim"
+          cat > "$shim/ldd" <<'SH'
+          #!/usr/bin/env bash
+          /usr/bin/ldd "$@"; exit 0
+          SH
+          chmod +x "$shim/ldd"
+          echo "$shim" >> "$GITHUB_PATH"
+
+      - name: Build Linux deb + AppImage
+        run: pnpm --filter @reddb-io/request-desktop tauri build --bundles deb,appimage
+
+      - name: Verify AppImage RedDB sidecar resource
+        run: |
+          set -euo pipefail
+          appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -1)"
+          node scripts/check-appimage-reddb-sidecar.mjs "$appimage" "$REDDB_VERSION"
 
       - name: Upload deb artifact
         uses: actions/upload-artifact@v5

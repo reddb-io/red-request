@@ -248,6 +248,14 @@ jobs:
           releaseDraft: false
           prerelease: false
 
+      - name: Verify AppImage RedDB sidecar resource
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -1)"
+          node scripts/check-appimage-reddb-sidecar.mjs "$appimage" "$REDDB_VERSION"
+
       # Re-publish each platform's single-file bundle under a stable, version-free name so
       # install.sh can fetch `…/releases/latest/download/red-request-<os>-<arch>.<ext>` without
       # parsing the API. Best-effort per file: a missing bundle warns, never fails the release.

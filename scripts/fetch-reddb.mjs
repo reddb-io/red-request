@@ -15,9 +15,11 @@ import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { createHash as hash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = join(ROOT, "apps/desktop/src-tauri/binaries");
+const RESOURCE_DIR = join(ROOT, "apps/desktop/src-tauri/resources");
 const REPO = "reddb-io/reddb";
 
 // Tauri's externalBin host triple → RedDB's release asset name (os-arch).
@@ -62,8 +64,11 @@ function assetCandidates(triple) {
   const assetOs = os === "darwin" ? "macos" : os;
   const glibc = `red-${assetOs}-${arch}${ext}`;
   // The static variant is published only for the linux x86_64 / aarch64 sidecars.
-  const preferStatic = os === "linux" && (arch === "x86_64" || arch === "aarch64");
-  const names = preferStatic ? [`red-${assetOs}-${arch}-static`, glibc] : [glibc];
+  const preferStatic =
+    os === "linux" && (arch === "x86_64" || arch === "aarch64");
+  const names = preferStatic
+    ? [`red-${assetOs}-${arch}-static`, glibc]
+    : [glibc];
   return { names, ext, os };
 }
 
@@ -110,7 +115,9 @@ for (let i = 0; i < names.length; i++) {
   } catch (e) {
     const last = i === names.length - 1;
     if (String(e).includes("→ 404") && !last) {
-      console.log(`  (${candidate} not published in ${tag} — trying ${names[i + 1]})`);
+      console.log(
+        `  (${candidate} not published in ${tag} — trying ${names[i + 1]})`
+      );
       continue;
     }
     throw e;
@@ -142,4 +149,13 @@ mkdirSync(OUT_DIR, { recursive: true });
 const dest = join(OUT_DIR, `red-${triple}${ext}`);
 writeFileSync(dest, bin);
 if (os !== "windows") chmodSync(dest, 0o755);
+
+// AppImage tooling mutates executable ELF files in usr/bin while bundling. Keep an
+// immutable gzip copy as a Tauri resource; the app extracts it to cache and runs that
+// copy instead of the mutated AppImage sidecar when the resource is present.
+mkdirSync(RESOURCE_DIR, { recursive: true });
+const resource = join(RESOURCE_DIR, `red-${triple}${ext}.gz`);
+writeFileSync(resource, gzipSync(bin, { level: 9 }));
+
 console.log(`✔ RedDB ${tag} → ${dest}`);
+console.log(`✔ RedDB immutable resource → ${resource}`);

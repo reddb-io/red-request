@@ -16,6 +16,8 @@ apps/desktop/src-tauri/gen/schemas/
 # the reddb `red-<triple>` binary is copied from red-ui (or built from reddb).
 apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/.gitkeep
+apps/desktop/src-tauri/resources/*
+!apps/desktop/src-tauri/resources/.gitkeep
 
 # local data / collections written at runtime
 .data/

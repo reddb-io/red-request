@@ -25,10 +25,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REDDB_SRC = resolve(process.env.REDDB_SRC ?? join(ROOT, "..", "reddb"));
 const OUT_DIR = join(ROOT, "apps/desktop/src-tauri/binaries");
+const RESOURCE_DIR = join(ROOT, "apps/desktop/src-tauri/resources");
 
 function sh(cmd, args, opts = {}) {
   return execFileSync(cmd, args, { encoding: "utf8", ...opts });
@@ -119,6 +121,10 @@ const dest = join(OUT_DIR, `red-${triple}${ext}`);
 copyFileSync(exe, dest);
 if (!isWindows) chmodSync(dest, 0o755);
 
+mkdirSync(RESOURCE_DIR, { recursive: true });
+const resource = join(RESOURCE_DIR, `red-${triple}${ext}.gz`);
+writeFileSync(resource, gzipSync(readFileSync(exe), { level: 9 }));
+
 let builtVersion = `red built for ${triple}`;
 try {
   builtVersion = sh(dest, ["version"]).trim();
@@ -127,3 +133,4 @@ try {
   // targets, so this is only a local-dev fallback.
 }
 console.log(`✔ ${builtVersion} → ${dest}`);
+console.log(`✔ RedDB immutable resource → ${resource}`);

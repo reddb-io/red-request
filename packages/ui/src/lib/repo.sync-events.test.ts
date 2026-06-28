@@ -95,7 +95,7 @@ describe("project sync events", () => {
         queries.push(query);
         if (
           query ===
-          "QUEUE READ rr_sync_events CONSUMER rr_client COUNT 20 WAIT 15000ms"
+          "QUEUE READ rr_sync_events GROUP rr_client CONSUMER rr_client COUNT 20 WAIT 15000ms"
         )
           return rqlOk([
             {
@@ -120,24 +120,72 @@ describe("project sync events", () => {
     });
 
     const messages = await repo.readSyncEvents("rr_client", 15_000, 20);
-    await repo.ackSyncEvent(messages[0]!.messageId, messages[0]!.deliveryId);
+    await repo.ackSyncEvent(
+      messages[0]!.messageId,
+      messages[0]!.deliveryId,
+      messages[0]!.group
+    );
 
     expect(messages).toEqual([
       expect.objectContaining({
         messageId: "123",
         deliveryId: "did-123",
+        group: "rr_client",
         event: expect.objectContaining({
           kind: "request.saved",
           clientId: "client-2",
         }),
       }),
     ]);
+    expect(queries).toContain("QUEUE GROUP CREATE rr_sync_events rr_client");
     expect(queries).toContain(
-      "QUEUE READ rr_sync_events CONSUMER rr_client COUNT 20 WAIT 15000ms"
+      "QUEUE READ rr_sync_events GROUP rr_client CONSUMER rr_client COUNT 20 WAIT 15000ms"
     );
     expect(queries).toContain(
       "QUEUE ACK rr_sync_events WITH delivery_id = 'did-123'"
     );
+  });
+
+  it("acknowledges project sync events by consumer group when delivery_id is absent", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "QUEUE READ rr_sync_events GROUP rr_client CONSUMER rr_client COUNT 20 WAIT 15000ms"
+        )
+          return rqlOk([
+            {
+              message_id: "123",
+              payload: {
+                v: 1,
+                id: "evt-1",
+                ts: 1,
+                source: "red-request",
+                clientId: "client-2",
+                kind: "request.saved",
+                entity: { type: "request", id: "r1", parentId: "c1" },
+                payload: {},
+              },
+              consumer: "rr_client",
+              delivery_count: 1,
+            },
+          ]);
+        return rqlOk([{ message: "ok" }]);
+      },
+    });
+
+    const messages = await repo.readSyncEvents("rr_client", 15_000, 20);
+    await repo.ackSyncEvent(
+      messages[0]!.messageId,
+      messages[0]!.deliveryId,
+      messages[0]!.group
+    );
+
+    expect(queries).toContain("QUEUE GROUP CREATE rr_sync_events rr_client");
+    expect(queries).toContain("QUEUE ACK rr_sync_events GROUP rr_client '123'");
   });
 
   it("emits metadata-only request save events", async () => {
