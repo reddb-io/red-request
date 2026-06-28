@@ -22,6 +22,13 @@ function rqlOk(records: Array<Record<string, unknown>> = []) {
   });
 }
 
+function rqlErr(error: string) {
+  return reply(200, {
+    ok: false,
+    error,
+  });
+}
+
 function request(id: string, patch: Partial<RequestDefinition> = {}) {
   return { ...newRequest(id), ...patch };
 }
@@ -186,6 +193,50 @@ describe("project sync events", () => {
     expect(pushed[0]).not.toContain("password");
     expect(pushed[0]).not.toContain("token=secret");
     expect(queries.join("\n")).not.toContain("settings_sync_client_id");
+  });
+
+  it("does not fail local request saves when sync event emission is unavailable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const queries: string[] = [];
+    const requests: Array<{
+      method: string;
+      path: string;
+      body: string | null;
+    }> = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r1' LIMIT 1"
+        )
+          return rqlOk([]);
+        if (query.startsWith("QUEUE PUSH rr_sync_events "))
+          return rqlErr("queue unavailable");
+        return rqlOk([]);
+      },
+      request: (method, path, body) => {
+        requests.push({ method, path, body });
+        return reply(200, { ok: true, rid: 7 });
+      },
+    });
+
+    await expect(
+      repo.saveRequest("c1", request("r1"))
+    ).resolves.toBeUndefined();
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        path: "/collections/rr_requests/documents",
+      }),
+    ]);
+    expect(queries.some((query) => query.startsWith("QUEUE PUSH "))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("[ui] sync event request.saved not emitted")
+    );
+    warn.mockRestore();
   });
 
   it("uses a runtime client id instead of a project-shared config id", async () => {

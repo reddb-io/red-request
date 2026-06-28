@@ -223,7 +223,7 @@ async function emitSyncEvent(
   kind: ProjectSyncEventKind,
   entity: ProjectSyncEntity,
   payload: Record<string, unknown> = {}
-): Promise<ProjectSyncEvent> {
+): Promise<ProjectSyncEvent | null> {
   const event = projectSyncEventSchema.parse({
     v: 1,
     id: newSyncId(),
@@ -234,7 +234,13 @@ async function emitSyncEvent(
     entity,
     payload,
   });
-  await db.queuePush(SYNC_EVENTS, event);
+  try {
+    await db.queuePush(SYNC_EVENTS, event);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `sync event ${kind} not emitted: ${detail}`);
+    return null;
+  }
   return event;
 }
 
