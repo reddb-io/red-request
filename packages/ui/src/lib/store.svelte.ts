@@ -302,23 +302,20 @@ class Workspace {
   }
 
   /** Open a project dir (or global with `null`): switch reddb, reset, load, enter app.
-   *  Wrapped in a cartoon iris wipe — the screen swap happens while fully black so
-   *  the selector→workspace cut is never visible. Phase durations below must stay in
-   *  sync with ProjectTransition.svelte's CSS transitions. */
+   *  The app enters a visible loading/recovery shell immediately. Never hide this
+   *  behind a black transition: project boot is exactly where we need controls,
+   *  progress, and crash export to stay reachable. */
   async chooseProject(dir: string | null): Promise<void> {
     const generation = ++this.projectOpenGeneration;
     this.stopSyncLoop();
     // Persist any pending edit on the CURRENT project before we swap reddb.
     await this.flushSave();
-    // A hair longer than the matching CSS transitions so each extreme is reached.
-    const CLOSE_MS = 400; // circle shrinks to black  (CSS: 340ms close)
-    const HOLD_MS = 130; // minimum fully-black beat
-    const OPEN_MS = 460; // circle opens on the app   (CSS: 420ms open)
-    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    this.transitioning = true;
-    this.transitionPhase = "closing";
+    this.transitioning = false;
+    this.transitionPhase = "idle";
     this.openingTarget = { kind: "local", dir };
+    this.loadError = null;
+    this.screen = "app";
     this.activeColId = null;
     this.activeReq = null;
     this.activeEnvName = null;
@@ -327,61 +324,39 @@ class Workspace {
     this.runResult = null;
     this.view = "requests";
 
-    // Load in parallel with the closing animation, but defer the visible screen
-    // swap until we're fully black (avoids a flash inside the shrinking circle).
-    // While the iris is closed the user sees an "Opening project…" overlay with
-    // live step text so they always know what's happening (see <LoadingOverlay>
-    // in +page.svelte). If `loadStore` fails inside `loading`, that overlay
-    // stays visible long enough for the user to read the error.
     appLog("info", `chooseProject: switching to ${dir ?? "global"}`);
     this.loading = {
       startedAt: Date.now(),
       step: `switching to ${dir ?? "global"}…`,
       log: [{ ts: Date.now(), step: `switching to ${dir ?? "global"}…` }],
     };
-    const ready = withTimeout(
-      (async () => {
-        const nextProject = await openProject(dir).catch((e) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          appLog(
-            "error",
-            `chooseProject: open_project(${dir ?? "global"}) failed: ${msg}`
-          );
-          throw new Error(msg);
-        });
-        if (generation !== this.projectOpenGeneration) return;
-        this.project = nextProject;
-        appLog(
-          "info",
-          `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
-        );
-        await this.loadStore();
-      })(),
-      PROJECT_OPEN_TIMEOUT_MS,
-      `Opening project timed out after ${Math.round(
-        PROJECT_OPEN_TIMEOUT_MS / 1000
-      )}s: ${dir ?? "global"}`
-    ).then(
-      () => ({ ok: true as const }),
-      (error: unknown) => ({ ok: false as const, error })
-    );
 
     try {
-      await delay(CLOSE_MS);
-      this.screen = "app";
-      this.transitionPhase = "hold";
-      await delay(HOLD_MS);
-      appLog("debug", "chooseProject: opening iris over loading screen");
-      this.transitionPhase = "opening";
-      await delay(OPEN_MS);
-      this.transitioning = false;
-      this.transitionPhase = "idle";
-      appLog("debug", "chooseProject: waiting for project readiness");
-      const result = await ready;
+      const nextProject = await withTimeout(
+        openProject(dir),
+        PROJECT_OPEN_TIMEOUT_MS,
+        `Opening project timed out after ${Math.round(
+          PROJECT_OPEN_TIMEOUT_MS / 1000
+        )}s: ${dir ?? "global"}`
+      ).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        appLog(
+          "error",
+          `chooseProject: open_project(${dir ?? "global"}) failed: ${msg}`
+        );
+        throw new Error(msg);
+      });
       if (generation !== this.projectOpenGeneration) return;
-      if (!result.ok) throw result.error;
-      this.openingTarget = null;
+      this.project = nextProject;
+      appLog(
+        "info",
+        `chooseProject: now is_project=${this.project?.is_project} db=${this.project?.db_path}`
+      );
+      await this.loadStore();
+      if (generation !== this.projectOpenGeneration) return;
+      if (!this.loadError) this.openingTarget = null;
     } catch (e) {
+      if (generation !== this.projectOpenGeneration) return;
       ++this.projectOpenGeneration;
       ++this.loadStoreGeneration;
       const msg = e instanceof Error ? e.message : String(e);
@@ -401,7 +376,7 @@ class Workspace {
     } finally {
       this.transitioning = false;
       this.transitionPhase = "idle";
-      appLog("debug", "chooseProject: transition done (idle)");
+      appLog("debug", "chooseProject: open flow settled (idle)");
     }
   }
 
@@ -430,24 +405,25 @@ class Workspace {
     this.runResult = null;
 
     try {
-      const ready = (async () => {
-        const nextProject = await openConnectionString(value);
-        if (generation !== this.projectOpenGeneration) return;
-        this.project = nextProject;
-        await this.loadStore();
-      })();
-      await withTimeout(
-        ready,
+      const nextProject = await withTimeout(
+        openConnectionString(value),
         PROJECT_OPEN_TIMEOUT_MS,
         `Connecting to RedDB timed out after ${Math.round(
           PROJECT_OPEN_TIMEOUT_MS / 1000
         )}s: ${value}`
       );
-      this.openingTarget = null;
+      if (generation !== this.projectOpenGeneration) return;
+      this.project = nextProject;
+      await this.loadStore();
+      if (generation !== this.projectOpenGeneration) return;
+      if (!this.loadError) this.openingTarget = null;
     } catch (e) {
+      if (generation !== this.projectOpenGeneration) return;
       ++this.projectOpenGeneration;
+      ++this.loadStoreGeneration;
       const msg = e instanceof Error ? e.message : String(e);
       this.loadError = msg;
+      this.loading = null;
       this.project = {
         db_path: value,
         project_dir: null,
@@ -459,7 +435,6 @@ class Workspace {
       };
       appLog("error", `chooseConnectionString failed: ${msg}`);
     } finally {
-      this.loading = null;
       this.transitioning = false;
       this.transitionPhase = "idle";
     }

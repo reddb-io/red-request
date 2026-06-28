@@ -5,7 +5,6 @@
   import { brand } from "$lib/brand.generated";
   import Titlebar from "$lib/components/Titlebar.svelte";
   import ClosingOverlay from "$lib/components/ClosingOverlay.svelte";
-  import ProjectTransition from "$lib/components/ProjectTransition.svelte";
   import DeveloperConsole from "$lib/components/DeveloperConsole.svelte";
   import IconBar from "$lib/components/IconBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
@@ -757,9 +756,6 @@
         {/if}
       </div>
     </div>
-  {/if}
-  {#if ws.transitioning}
-    <ProjectTransition />
   {/if}
   {#if ws.closing}
     <ClosingOverlay />
