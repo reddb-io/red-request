@@ -207,6 +207,24 @@
     void fn();
   }
 
+  function openSettings(section: typeof ws.settingsSection) {
+    ws.settingsSection = section;
+    ws.view = "settings";
+  }
+
+  async function createCollection() {
+    ws.view = "requests";
+    await ws.addCollection();
+  }
+
+  async function createRequest() {
+    ws.view = "requests";
+    if (!ws.activeColId) {
+      await ws.addCollection();
+    }
+    await ws.addRequest("");
+  }
+
   async function navigateToRequest(r: PaletteRequest): Promise<void> {
     ws.view = "requests";
     ws.selectRequest(r.colId, r.reqId);
@@ -217,7 +235,7 @@
   }
 </script>
 
-{#snippet action(label: string, hint: string, fn: () => void)}
+{#snippet action(label: string, hint: string, fn: () => void | Promise<void>)}
   <Command.Item value={label} onSelect={() => go(fn)}>
     <span class="truncate">{label}</span>
     <span class="hint ml-auto">{hint}</span>
@@ -258,7 +276,8 @@
     <Command.Separator />
 
     <Command.Group heading="Actions">
-      {@render action("New request", "create", () => ws.addRequest(""))}
+      {@render action("Create collection", "new", createCollection)}
+      {@render action("New request", "create", createRequest)}
       {#if ws.activeReq}
         {@render action("Send request", "⏎", () => ws.send())}
         {@render action("Save request", "save", () => ws.save())}
@@ -266,12 +285,27 @@
           ws.duplicateRequest(ws.activeReq!.id)
         )}
       {/if}
-      {@render action("Home", "view", () => (ws.view = "home"))}
-      {@render action("Requests", "view", () => (ws.view = "requests"))}
+      {@render action("Home", "view", () => {
+        ws.view = "home";
+      })}
+      {@render action("Requests", "view", () => {
+        ws.view = "requests";
+      })}
       {#if ws.redUiEnabled}
-        {@render action("Database", "view", () => (ws.view = "database"))}
+        {@render action("Database", "view", () => {
+          ws.view = "database";
+        })}
       {/if}
-      {@render action("Settings", "view", () => (ws.view = "settings"))}
+      {@render action("Settings", "view", () => {
+        ws.view = "settings";
+      })}
+      {@render action("Settings: environments", "config", () => openSettings("environments"))}
+      {@render action("Settings: globals", "config", () => openSettings("environments"))}
+      {@render action("Settings: global variable", "config", () => openSettings("environments"))}
+      {@render action("Settings: global secret", "config", () => openSettings("environments"))}
+      {@render action("Settings: proxies", "config", () => openSettings("proxies"))}
+      {@render action("Settings: profiles", "config", () => openSettings("profiles"))}
+      {@render action("Settings: data", "config", () => openSettings("data"))}
       {@render action("Switch project…", "selector", () => ws.backToSelector())}
     </Command.Group>
   </Command.List>
