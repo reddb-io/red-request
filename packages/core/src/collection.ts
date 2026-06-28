@@ -104,6 +104,13 @@ export const historyEntrySchema = z.object({
   testsPassed: z.number().default(0),
   testsFailed: z.number().default(0),
   env: z.string().optional(),
+  profileId: z.string().optional(),
+  profileName: z.string().optional(),
+  proxyId: z.string().optional(),
+  proxyName: z.string().optional(),
+  proxyUrl: z.string().optional(),
+  /** Stable local client id for grouping team runs by dispatcher installation. */
+  dispatcherClientId: z.string().optional(),
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 

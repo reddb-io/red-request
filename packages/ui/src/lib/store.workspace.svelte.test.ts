@@ -1252,6 +1252,73 @@ describe("Workspace persistence coordination", () => {
     expect(ws.renderedRequest?.proxy).toBe("socks5h://proxy.internal:1080");
   });
 
+  it("records profile, proxy and dispatcher identity in request history", async () => {
+    ws.network = {
+      proxies: [
+        {
+          id: "px-profile",
+          name: "Team proxy",
+          type: "socks5h",
+          host: "proxy.internal",
+          port: "1080",
+          username: "",
+          password: "",
+        },
+      ],
+      profiles: [
+        {
+          id: "pf-1",
+          name: "Team identity",
+          userAgent: "",
+          headers: [],
+          proxyId: "px-profile",
+        },
+      ],
+    };
+    ws.collections = [
+      collection("c1", [
+        request("r1", {
+          method: "GET",
+          url: "https://api.example.test/users",
+          profileId: "pf-1",
+        }),
+      ]),
+    ];
+    ws.activeColId = "c1";
+    ws.activeEnvName = "Prod";
+    ws.selectRequest("c1", "r1");
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: {
+        status: 200,
+        statusText: "OK",
+        ok: true,
+        url: "https://api.example.test/users",
+        headers: {},
+        bodyText: "",
+        size: 0,
+        durationMs: 12,
+      },
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/users",
+    });
+
+    await ws.send();
+
+    expect(repo.saveHistory).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reqId: "r1",
+        collectionId: "c1",
+        profileId: "pf-1",
+        profileName: "Team identity",
+        proxyId: "px-profile",
+        proxyName: "Team proxy",
+        proxyUrl: "socks5h://proxy.internal:1080",
+        dispatcherClientId: "client-1",
+        env: "Prod",
+      })
+    );
+  });
+
   it("coalesces overlapping collection creation into one persisted collection", async () => {
     let release!: () => void;
     vi.mocked(repo.saveCollectionMeta).mockImplementationOnce(
