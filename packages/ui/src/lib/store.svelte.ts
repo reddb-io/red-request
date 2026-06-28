@@ -80,6 +80,13 @@ const PENDING_SAVE_TIMEOUT_MS = 5_000;
 const SYNC_QUEUE_WAIT_MS = 15_000;
 const SYNC_RELOAD_DELAY_MS = 250;
 export type AppView = "home" | "requests" | "settings" | "database";
+export type SettingsSection =
+  | "general"
+  | "environments"
+  | "proxies"
+  | "profiles"
+  | "data"
+  | "danger";
 type OpeningTarget =
   | { kind: "local"; dir: string | null }
   | { kind: "connection"; connection: string };
@@ -144,6 +151,7 @@ class Workspace {
   view = $state<AppView>("requests");
   /** Settings > Data opt-in for the embedded red-ui database inspector. */
   redUiEnabled = $state(false);
+  settingsSection = $state<SettingsSection>("general");
 
   sending = $state(false);
   response = $state<ResponseResult | null>(null);

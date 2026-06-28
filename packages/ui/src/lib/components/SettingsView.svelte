@@ -13,6 +13,7 @@
   import { onMount } from "svelte";
   import type { LoadedCollection } from "@reddb-io/request-core";
   import type { Component } from "svelte";
+  import type { SettingsSection } from "../store.svelte";
   import ProxiesPanel from "./ProxiesPanel.svelte";
   import EnvironmentsEditor from "./EnvironmentsEditor.svelte";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
@@ -22,15 +23,7 @@
   import Layers from "@lucide/svelte/icons/layers";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
-  type Section =
-    | "general"
-    | "environments"
-    | "proxies"
-    | "profiles"
-    | "data"
-    | "danger";
-  type MenuItem = { id: Section; label: string; icon: Component; desc: string };
-  let section = $state<Section>("general");
+  type MenuItem = { id: SettingsSection; label: string; icon: Component; desc: string };
   const menu = $derived(
     [
       {
@@ -75,6 +68,7 @@
         : []),
     ] as MenuItem[]
   );
+  const section = $derived(ws.settingsSection);
   const current = $derived(menu.find((m) => m.id === section) ?? menu[0]);
 
   let renaming = $state(false);
@@ -259,7 +253,7 @@
     {#each menu as it (it.id)}
       {@const active = section === it.id}
       <button
-        onclick={() => (section = it.id)}
+        onclick={() => (ws.settingsSection = it.id)}
         class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors
           {active
           ? 'bg-[var(--color-bg-2)] text-[var(--color-brand)]'
@@ -341,11 +335,11 @@
       </div>
     </div>
     <p class="hint mt-3">
-      Manage <button class="underline hover:text-fg" onclick={() => (section = "proxies")}
+      Manage <button class="underline hover:text-fg" onclick={() => (ws.settingsSection = "proxies")}
         >proxies</button
       >
       &amp;
-      <button class="underline hover:text-fg" onclick={() => (section = "profiles")}
+      <button class="underline hover:text-fg" onclick={() => (ws.settingsSection = "profiles")}
         >profiles</button
       > in their own sections.
     </p>
