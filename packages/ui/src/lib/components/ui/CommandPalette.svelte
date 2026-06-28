@@ -3,7 +3,7 @@
   import * as Command from "./command/index.js";
   import { ws } from "../../store.svelte";
   import * as repo from "../../repo";
-  import type { RequestDefinition } from "@reddb-io/request-core";
+  import type { HistoryEntry, RequestDefinition } from "@reddb-io/request-core";
 
   let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -33,6 +33,8 @@
   let searchFailed = $state(false);
   let searchLoading = $state(false);
   let searchTicket = 0;
+  let recentHistory = $state<HistoryEntry[]>([]);
+  let historyTicket = 0;
 
   const collectionNameById = $derived(
     new Map(ws.collections.map((c) => [c.id, c.collection.name]))
@@ -55,6 +57,9 @@
     useSearchResults
       ? mergeRequests(searchResults, filteredLocalRequests)
       : filteredLocalRequests
+  );
+  const runnableRequests = $derived(
+    orderRunnableRequests(localRequests, recentHistory, normalizedQuery)
   );
 
   $effect(() => {
@@ -83,6 +88,21 @@
     }, delay);
 
     return () => window.clearTimeout(timer);
+  });
+
+  $effect(() => {
+    if (!open) return;
+    const ticket = ++historyTicket;
+    void repo
+      .loadHistory()
+      .then((history) => {
+        if (ticket !== historyTicket) return;
+        recentHistory = history;
+      })
+      .catch(() => {
+        if (ticket !== historyTicket) return;
+        recentHistory = [];
+      });
   });
 
   function normalizeQuery(value: string): string {
@@ -194,6 +214,35 @@
     return out;
   }
 
+  function orderRunnableRequests(
+    candidates: PaletteRequest[],
+    history: HistoryEntry[],
+    q: string
+  ): PaletteRequest[] {
+    const byKey = new Map(candidates.map((r) => [requestKey(r), r]));
+    const seen = new Set<string>();
+    const out: PaletteRequest[] = [];
+    for (const h of [...history].sort((a, b) => b.ts - a.ts)) {
+      const key = `${h.collectionId}.${h.reqId}`;
+      if (seen.has(key)) continue;
+      const request = byKey.get(key);
+      if (!request || !matchesRequest(request, q)) continue;
+      seen.add(key);
+      out.push(request);
+    }
+    for (const request of candidates) {
+      const key = requestKey(request);
+      if (seen.has(key) || !matchesRequest(request, q)) continue;
+      seen.add(key);
+      out.push(request);
+    }
+    return out.slice(0, 12);
+  }
+
+  function requestKey(r: PaletteRequest): string {
+    return `${r.colId}.${r.reqId}`;
+  }
+
   function badge(r: PaletteRequest): string {
     return r.kind === "http" ? r.method : r.kind.toUpperCase();
   }
@@ -225,13 +274,23 @@
     await ws.addRequest("");
   }
 
-  async function navigateToRequest(r: PaletteRequest): Promise<void> {
+  async function selectPaletteRequest(r: PaletteRequest): Promise<boolean> {
     ws.view = "requests";
     ws.selectRequest(r.colId, r.reqId);
-    if (ws.activeColId === r.colId && ws.activeReq?.id === r.reqId) return;
+    if (ws.activeColId === r.colId && ws.activeReq?.id === r.reqId) return true;
     await ws.reload().catch(() => {});
     ws.view = "requests";
     ws.selectRequest(r.colId, r.reqId);
+    return ws.activeColId === r.colId && ws.activeReq?.id === r.reqId;
+  }
+
+  async function navigateToRequest(r: PaletteRequest): Promise<void> {
+    await selectPaletteRequest(r);
+  }
+
+  async function runRequest(r: PaletteRequest): Promise<void> {
+    if (!(await selectPaletteRequest(r))) return;
+    await ws.send();
   }
 </script>
 
@@ -262,6 +321,34 @@
           >
           <span class="min-w-0 flex-1">
             <span class="block truncate">{r.name}</span>
+            {#if r.target}
+              <span class="hint block truncate text-xs">{r.target}</span>
+            {/if}
+          </span>
+          <span class="hint ml-auto max-w-[38%] truncate pl-2 text-right"
+            >{locationLabel(r)}</span
+          >
+        </Command.Item>
+      {/each}
+    </Command.Group>
+
+    <Command.Separator />
+
+    <Command.Group heading="Run">
+      {#each runnableRequests as r (r.colId + r.reqId)}
+        <Command.Item
+          value={`run ${r.searchValue}`}
+          class="items-start py-2"
+          onSelect={() => go(() => runRequest(r))}
+        >
+          <span
+            class="mono w-12 shrink-0 pt-0.5 text-xs font-bold {r.kind === 'http'
+              ? (methodColor[r.method] ?? 'text-fg-muted')
+              : 'text-fg-muted'}"
+            >{badge(r)}</span
+          >
+          <span class="min-w-0 flex-1">
+            <span class="block truncate">Run: {r.name}</span>
             {#if r.target}
               <span class="hint block truncate text-xs">{r.target}</span>
             {/if}
