@@ -19,15 +19,14 @@ concurrency:
 
 env:
   # RedDB sidecar pinned for reproducible builds — bump when adopting a newer reddb.
-  # v1.15.0: multi-model MVCC history (reddb PR #1383) — versioned KV/document. REQUIRED
-  # for the app's native VCS (request history / time-travel / restore): earlier releases
-  # pinned v1.13.1, which lacks versioned KV, so VCS silently no-opped in shipped builds
-  # even though it worked against latest reddb in dev. Keeps the static (musl)
+  # v1.18.0 keeps the v1.15+ multi-model MVCC history required for native VCS
+  # (request history / time-travel / restore), plus the current RedDB release
+  # line used by red-ui compatibility work. Keeps the static (musl)
   # `red-linux-<arch>-static` assets fetch-reddb.mjs prefers (the dynamic `red-linux-x86_64`
   # links the build host's glibc and crash-loops on older distros, "GLIBC_2.39 not found",
   # → black/loading screen). Also persists collection contracts so KV collections survive a
   # server restart (reddb fix a8139467).
-  REDDB_VERSION: v1.15.0
+  REDDB_VERSION: v1.18.0
   # Empty means release builds download RedDB's prebuilt `red-*` assets through
   # scripts/fetch-reddb.mjs. Set only for emergency validation against an
   # unpublished RedDB commit; source builds make Linux/Windows release legs slow.

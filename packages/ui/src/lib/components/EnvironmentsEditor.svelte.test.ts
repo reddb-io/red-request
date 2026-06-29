@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/svelte";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/svelte";
 
 import { storedEnvironmentSchema } from "@reddb-io/request-core";
 import { ws } from "../store.svelte";
@@ -49,6 +55,21 @@ describe("EnvironmentsEditor", () => {
       expect(screen.getByText(/base variables/)).toBeTruthy();
       expect(screen.getByPlaceholderText("NAME")).toBeTruthy();
       expect(ws.settingsIntent).toBeNull();
+    });
+  });
+
+  it("renames an environment after double-clicking its tab name", async () => {
+    const renameEnv = vi.spyOn(ws, "renameEnv").mockResolvedValue();
+
+    render(EnvironmentsEditor, { props: { inline: true } });
+
+    await fireEvent.dblClick(screen.getByRole("button", { name: "Local" }));
+    const input = (await screen.findAllByDisplayValue("Local"))[0]!;
+    await fireEvent.input(input, { target: { value: "Staging" } });
+    await fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(renameEnv).toHaveBeenCalledWith(ws.environments[0], "Staging");
     });
   });
 });

@@ -287,6 +287,11 @@
       {/if}
       <button
         onclick={() => ws.selectRequest(col.id, req.id)}
+        ondblclick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          startRename(req);
+        }}
         draggable={renamingId !== req.id}
         ondragstart={(e) => {
           draggingId = req.id;
@@ -394,6 +399,11 @@
           {:else}
             <button
               onclick={() => toggle(col.id)}
+              ondblclick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startRenameCol(col);
+              }}
               class="flex min-w-0 flex-1 items-center gap-1 text-left"
               title="Collapse / expand collection"
             >
