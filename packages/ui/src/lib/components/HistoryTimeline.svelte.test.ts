@@ -39,7 +39,7 @@ const commit = (hash: string, message: string, ts: number) => ({
 beforeEach(() => vi.clearAllMocks());
 
 describe("HistoryTimeline", () => {
-  it("renders versions newest-first, labels the newest 'Current', and shows a diff", async () => {
+  it("renders only request versions newest-first, labels the newest 'Current', and shows a diff", async () => {
     // c3 (current) and c1 changed the request; c2 only touched other collections.
     requestHistory.mockResolvedValue([
       {
@@ -63,8 +63,10 @@ describe("HistoryTimeline", () => {
 
     expect(requestHistory).toHaveBeenCalledWith("col1", "r1", 100);
     expect(await screen.findByText("Current")).toBeTruthy();
-    // the non-changing commit is shown as context (dim), not a version
-    expect(await screen.findByText(/no change to this request/i)).toBeTruthy();
+    // Project commits that did not change this request belong in project history,
+    // not inside this request's focused version list.
+    expect(screen.queryByText(/no change to this request/i)).toBeNull();
+    expect(screen.queryByText("other edit")).toBeNull();
     // newest version selected by default → diff vs the previous version (v1 → v2)
     expect(
       await screen.findByText(/Changes from the previous version/i)

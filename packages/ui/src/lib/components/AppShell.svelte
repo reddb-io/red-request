@@ -12,6 +12,7 @@
   import ProjectSelector from "$lib/components/ProjectSelector.svelte";
   import ConfirmActionModal from "$lib/components/ui/ConfirmActionModal.svelte";
   import { appLog } from "$lib/log";
+  import * as repo from "$lib/repo";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 
@@ -71,7 +72,11 @@
     // Durability net for the debounced autosave: a pending edit must reach reddb before
     // the app loses focus, hides, or closes — otherwise closing within the debounce
     // window drops it. flushSave() is a no-op when nothing is pending, so these are cheap.
-    const flush = () => void ws.flushSave();
+    const flush = () =>
+      void (async () => {
+        await ws.flushSave();
+        await repo.flushPendingCommit();
+      })();
     const onVisibility = () => {
       if (document.hidden) flush();
     };
@@ -103,7 +108,10 @@
           try {
             await waitForPaint();
             await Promise.race([
-              ws.flushSave(),
+              (async () => {
+                await ws.flushSave();
+                await repo.flushPendingCommit();
+              })(),
               new Promise((r) => setTimeout(r, 2000)),
             ]);
           } catch {

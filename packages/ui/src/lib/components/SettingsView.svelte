@@ -13,6 +13,7 @@
   import { onMount } from "svelte";
   import type { LoadedCollection } from "@reddb-io/request-core";
   import type { Component } from "svelte";
+  import type { VcsCommit, VcsDiffSummary } from "../repo";
   import type { SettingsSection } from "../store.svelte";
   import ProxiesPanel from "./ProxiesPanel.svelte";
   import EnvironmentsEditor from "./EnvironmentsEditor.svelte";
@@ -21,6 +22,7 @@
   import Network from "@lucide/svelte/icons/network";
   import IdCard from "@lucide/svelte/icons/id-card";
   import Layers from "@lucide/svelte/icons/layers";
+  import History from "@lucide/svelte/icons/history";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   type MenuItem = { id: SettingsSection; label: string; icon: Component; desc: string };
@@ -51,6 +53,12 @@
         desc: "Reusable bundles of a User-Agent, extra headers and a proxy — pick one in any request's URL bar.",
       },
       {
+        id: "history",
+        label: "History",
+        icon: History,
+        desc: "Project-wide restore points: inspect what changed, who created the checkpoint, and restore the whole project to a previous point.",
+      },
+      {
         id: "data",
         label: "Data",
         icon: Database,
@@ -77,6 +85,15 @@
   let dataBusy = $state(false);
   let redUiSaving = $state(false);
   let redUiError = $state("");
+  let historyBusy = $state(false);
+  let historyRestoring = $state(false);
+  let historyLoaded = $state(false);
+  let historyStatus = $state("");
+  let commits = $state<VcsCommit[]>([]);
+  let selectedCommitHash = $state<string | null>(null);
+  let selectedDiff = $state<VcsDiffSummary | null>(null);
+  let selectedDiffLoading = $state(false);
+  let selectedDiffTicket = 0;
 
   // --- database file info (size / last update / record counts) -------------
   let dbMeta = $state<FileMeta | null>(null);
@@ -110,6 +127,95 @@
       dateStyle: "medium",
       timeStyle: "short",
     });
+  }
+  function shortHash(hash: string): string {
+    return hash.slice(0, 8);
+  }
+
+  function commitLabel(commit: VcsCommit): string {
+    return commit.message.trim() || "edit";
+  }
+
+  const selectedCommit = $derived(
+    commits.find((commit) => commit.hash === selectedCommitHash) ?? commits[0] ?? null
+  );
+  const headHash = $derived(commits[0]?.hash ?? null);
+
+  async function loadProjectHistory() {
+    if (historyBusy) return;
+    historyBusy = true;
+    historyStatus = "";
+    try {
+      await ws.flushSave();
+      await repo.flushPendingCommit().catch(() => null);
+      const next = await repo.listCommits(100);
+      commits = next;
+      if (!next.some((commit) => commit.hash === selectedCommitHash)) {
+        selectedCommitHash = next[0]?.hash ?? null;
+      }
+      historyLoaded = true;
+      await loadSelectedDiff(selectedCommitHash);
+    } catch (e) {
+      historyStatus = `Could not load project history: ${e instanceof Error ? e.message : e}`;
+    } finally {
+      historyBusy = false;
+    }
+  }
+
+  async function loadSelectedDiff(hash: string | null) {
+    const ticket = ++selectedDiffTicket;
+    selectedDiff = null;
+    selectedDiffLoading = false;
+    if (!hash) return;
+    const commit = commits.find((candidate) => candidate.hash === hash);
+    if (!commit) return;
+    const index = commits.findIndex((candidate) => candidate.hash === hash);
+    const parent = commit.parents[0] ?? commits[index + 1]?.hash ?? null;
+    if (!parent) return;
+    selectedDiffLoading = true;
+    try {
+      const diff = await repo.commitDiffSummary(parent, commit.hash);
+      if (ticket === selectedDiffTicket) selectedDiff = diff;
+    } finally {
+      if (ticket === selectedDiffTicket) selectedDiffLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (section !== "history" || historyLoaded || historyBusy) return;
+    void loadProjectHistory();
+  });
+
+  $effect(() => {
+    if (section !== "history") return;
+    void loadSelectedDiff(selectedCommitHash);
+  });
+
+  async function restoreSelectedCommit() {
+    const commit = selectedCommit;
+    if (!commit || historyRestoring) return;
+    const ok = await confirm(
+      `Restore the whole project to "${commitLabel(commit)}" from ${fmtWhen(commit.timestampMs)}?\n\nThis rewinds requests, collections, environments and settings to that checkpoint. A newer checkpoint can still be selected again if it remains in the history list.`,
+      { title: "Restore project checkpoint", kind: "warning" }
+    );
+    if (!ok) return;
+    historyRestoring = true;
+    historyStatus = "";
+    try {
+      await ws.flushSave();
+      await repo.flushPendingCommit();
+      await repo.resetProjectToCommit(commit.hash);
+      await ws.reload();
+      await ws.reloadEnvironments();
+      await loadDbMeta();
+      historyLoaded = false;
+      await loadProjectHistory();
+      historyStatus = `Restored project to ${shortHash(commit.hash)}`;
+    } catch (e) {
+      historyStatus = `Restore failed: ${e instanceof Error ? e.message : e}`;
+    } finally {
+      historyRestoring = false;
+    }
   }
 
   async function withStatus(label: string, fn: () => Promise<string | null>) {
@@ -350,6 +456,130 @@
   <ProxiesPanel show="proxies" />
   {:else if section === "profiles"}
   <ProxiesPanel show="profiles" />
+  {:else if section === "history"}
+  <div class="panel mb-4 overflow-hidden">
+    <div class="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+      <div>
+        <h2 class="label">Project checkpoints</h2>
+        <p class="hint mt-1 text-fg-subtle">
+          Native RedDB commits for the whole request store. Restoring affects the entire project.
+        </p>
+      </div>
+      <Button onclick={loadProjectHistory} disabled={historyBusy || historyRestoring} variant="outline" size="xs">
+        {historyBusy ? "Refreshing..." : "Refresh"}
+      </Button>
+    </div>
+
+    {#if commits.length === 0}
+      <div class="px-4 py-8 text-center text-xs text-fg-faint">
+        {historyBusy ? "Loading project history..." : "No checkpoints yet. Edits create restore points automatically."}
+      </div>
+    {:else}
+      <div class="grid min-h-[420px] grid-cols-[minmax(260px,360px)_1fr]">
+        <ul class="max-h-[560px] overflow-auto border-r border-border py-2">
+          {#each commits as commit, i (commit.hash)}
+            {@const active = selectedCommitHash === commit.hash}
+            <li>
+              <button
+                class="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-[var(--color-bg-2)] {active ? 'bg-[var(--color-bg-2)]' : ''}"
+                onclick={() => (selectedCommitHash = commit.hash)}
+              >
+                <span
+                  class="mt-1 h-2.5 w-2.5 shrink-0 rounded-full border {i === 0 ? 'border-accent bg-accent' : 'border-border bg-bg'}"
+                ></span>
+                <span class="min-w-0 flex-1">
+                  <span class="flex items-center gap-2">
+                    <span class="truncate text-xs font-medium text-fg">{i === 0 ? "Current" : commitLabel(commit)}</span>
+                    {#if i === 0}
+                      <span class="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-fg">HEAD</span>
+                    {/if}
+                  </span>
+                  {#if i === 0 && commitLabel(commit) !== "Current"}
+                    <span class="mt-0.5 block truncate text-[11px] text-muted-fg">{commitLabel(commit)}</span>
+                  {/if}
+                  <span class="mt-0.5 block text-[11px] text-fg-faint">
+                    {fmtWhen(commit.timestampMs)} · {commit.author || "unknown"} · <span class="mono">{shortHash(commit.hash)}</span>
+                  </span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+
+        <div class="min-w-0 p-4">
+          {#if selectedCommit}
+            <div class="mb-4 flex items-start justify-between gap-4">
+              <div class="min-w-0">
+                <h3 class="truncate text-sm font-semibold text-fg">{commitLabel(selectedCommit)}</h3>
+                <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-subtle">
+                  <span>{fmtWhen(selectedCommit.timestampMs)}</span>
+                  <span>by {selectedCommit.author || "unknown"}</span>
+                  <span class="mono">{selectedCommit.hash}</span>
+                </div>
+              </div>
+              <Button
+                onclick={restoreSelectedCommit}
+                disabled={historyRestoring || selectedCommit.hash === headHash}
+                size="xs"
+                variant={selectedCommit.hash === headHash ? "outline" : "default"}
+              >
+                {selectedCommit.hash === headHash
+                  ? "Current checkpoint"
+                  : historyRestoring
+                    ? "Restoring..."
+                    : "Restore project"}
+              </Button>
+            </div>
+
+            <div class="mb-4 grid grid-cols-3 gap-3">
+              <div class="rounded border border-border bg-[var(--color-bg-1)] p-3">
+                <div class="text-lg font-semibold text-fg">{selectedDiff?.added ?? 0}</div>
+                <div class="text-xs text-fg-subtle">added</div>
+              </div>
+              <div class="rounded border border-border bg-[var(--color-bg-1)] p-3">
+                <div class="text-lg font-semibold text-fg">{selectedDiff?.modified ?? 0}</div>
+                <div class="text-xs text-fg-subtle">modified</div>
+              </div>
+              <div class="rounded border border-border bg-[var(--color-bg-1)] p-3">
+                <div class="text-lg font-semibold text-fg">{selectedDiff?.removed ?? 0}</div>
+                <div class="text-xs text-fg-subtle">removed</div>
+              </div>
+            </div>
+
+            <div class="rounded border border-border">
+              <div class="border-b border-border px-3 py-2 text-xs font-medium text-fg">Changed entities</div>
+              {#if selectedDiffLoading}
+                <div class="px-3 py-4 text-xs text-fg-faint">Loading diff...</div>
+              {:else if !selectedDiff}
+                <div class="px-3 py-4 text-xs text-fg-faint">No diff available for this checkpoint.</div>
+              {:else if selectedDiff.entries.length === 0}
+                <div class="px-3 py-4 text-xs text-fg-faint">No entity-level changes reported.</div>
+              {:else}
+                <ul class="max-h-72 overflow-auto">
+                  {#each selectedDiff.entries.slice(0, 80) as entry, i (`${entry.collection}.${entry.entityId}.${i}`)}
+                    <li class="grid grid-cols-[86px_150px_1fr] gap-3 border-b border-border/70 px-3 py-2 last:border-b-0">
+                      <span class="text-xs capitalize text-fg">{entry.change}</span>
+                      <span class="mono truncate text-xs text-muted-fg" title={entry.collection}>{entry.collection}</span>
+                      <span class="mono truncate text-xs text-fg-subtle" title={entry.entityId}>{entry.entityId}</span>
+                    </li>
+                  {/each}
+                </ul>
+                {#if selectedDiff.entries.length > 80}
+                  <div class="border-t border-border px-3 py-2 text-xs text-fg-faint">
+                    Showing 80 of {selectedDiff.entries.length} changes.
+                  </div>
+                {/if}
+              {/if}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
+    {#if historyStatus}
+      <div class="border-t border-border px-4 py-2 text-xs text-fg-subtle">{historyStatus}</div>
+    {/if}
+  </div>
   {:else if section === "data"}
   <!-- Database file ---------------------------------------------------------->
   <div class="panel mb-4 p-4">
