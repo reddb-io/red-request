@@ -121,4 +121,67 @@ describe("buildResponseInsights", () => {
       value: "560 ms",
     });
   });
+
+  it("surfaces gRPC method, status and unary duration", () => {
+    const insights = buildResponseInsights(
+      response({
+        status: 0,
+        statusText: "OK",
+        ok: true,
+        url: "grpcb.in:9000",
+        durationMs: 82,
+        meta: {
+          grpcStatus: "OK",
+          method: "grpcbin.GRPCBin/DummyUnary",
+        },
+      })
+    );
+
+    expect(insights.map((i) => i.title)).toEqual(
+      expect.arrayContaining([
+        "gRPC method",
+        "gRPC status",
+        "Unary call duration",
+      ])
+    );
+    expect(insights.find((i) => i.title === "gRPC method")).toMatchObject({
+      detail: "grpcbin.GRPCBin/DummyUnary",
+      value: "OK",
+      tone: "good",
+    });
+    expect(insights.find((i) => i.title === "Unary call duration")?.value).toBe(
+      "82 ms"
+    );
+  });
+
+  it("calls out failed gRPC statuses separately from transport failures", () => {
+    const insights = buildResponseInsights(
+      response({
+        status: 0,
+        statusText: "INVALID_ARGUMENT",
+        ok: false,
+        url: "grpcb.in:9000",
+        bodyText: "",
+        size: 0,
+        durationMs: 12,
+        meta: {
+          grpcStatus: "INVALID_ARGUMENT",
+          method: "demo.Greeter/Hello",
+        },
+        error: {
+          message: "request message is not valid JSON",
+          classification: "INVALID_ARGUMENT",
+        },
+      })
+    );
+
+    expect(insights.find((i) => i.title === "gRPC status")).toMatchObject({
+      value: "INVALID_ARGUMENT",
+      tone: "warn",
+    });
+    expect(insights.find((i) => i.title === "gRPC method")?.detail).toBe(
+      "demo.Greeter/Hello"
+    );
+    expect(insights.find((i) => i.title === "Transport failure")).toBeTruthy();
+  });
 });

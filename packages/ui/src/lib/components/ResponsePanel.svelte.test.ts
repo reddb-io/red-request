@@ -124,4 +124,27 @@ describe("ResponsePanel insights", () => {
       screen.getAllByText("getaddrinfo ENOTFOUND api.example.test").length
     ).toBeGreaterThan(0);
   });
+
+  it("renders gRPC method, status and duration insights", async () => {
+    ws.response = response({
+      status: 0,
+      statusText: "OK",
+      ok: true,
+      url: "grpcb.in:9000",
+      durationMs: 82,
+      meta: {
+        grpcStatus: "OK",
+        method: "grpcbin.GRPCBin/DummyUnary",
+      },
+    });
+
+    render(ResponsePanel);
+    await fireEvent.click(screen.getByRole("button", { name: "insights" }));
+
+    expect(screen.getByText("gRPC method")).toBeTruthy();
+    expect(screen.getByText("grpcbin.GRPCBin/DummyUnary")).toBeTruthy();
+    expect(screen.getByText("gRPC status")).toBeTruthy();
+    expect(screen.getByText("Unary call duration")).toBeTruthy();
+    expect(screen.getAllByText("82 ms").length).toBeGreaterThan(0);
+  });
 });
