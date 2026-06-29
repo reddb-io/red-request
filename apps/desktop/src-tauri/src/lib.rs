@@ -649,6 +649,13 @@ enum ProjectSource {
     },
 }
 
+fn remote_http_base_for_source(source: &ProjectSource) -> Option<String> {
+    match source {
+        ProjectSource::RemoteHttp { base_url, .. } => Some(base_url.clone()),
+        ProjectSource::Local => None,
+    }
+}
+
 /// A persistent `red connect <grpc> --json` REPL: write an RQL line to stdin, read one
 /// response line. `buf` carries partial stdout between reads; `errbuf` carries partial
 /// stderr — reddb writes query errors there, not to stdout (#rql-error-hang).
@@ -2043,6 +2050,11 @@ async fn reddb_request(
     body: Option<String>,
 ) -> Result<HttpReply, String> {
     let started = Instant::now();
+    let remote_http_base = {
+        let db = app.state::<EmbeddedDb>();
+        let source = db.source.lock().map_err(|e| e.to_string())?.clone();
+        remote_http_base_for_source(&source)
+    };
     let current = || -> Result<Option<String>, String> {
         Ok(app
             .state::<EmbeddedDb>()
@@ -2051,14 +2063,18 @@ async fn reddb_request(
             .map_err(|e| e.to_string())?
             .clone())
     };
-    let mut base = current()?;
-    if base.is_none() {
-        // Self-heal: start_reddb serializes startup and becomes a no-op if another
-        // caller already published the local sidecar while we were waiting.
-        let _ = start_reddb(app.clone()).await;
-        base = current()?;
-    }
-    let base = base.ok_or_else(|| "reddb not ready".to_string())?;
+    let base = if let Some(base_url) = remote_http_base {
+        base_url
+    } else {
+        let mut base = current()?;
+        if base.is_none() {
+            // Self-heal: start_reddb serializes startup and becomes a no-op if another
+            // caller already published the local sidecar while we were waiting.
+            let _ = start_reddb(app.clone()).await;
+            base = current()?;
+        }
+        base.ok_or_else(|| "reddb not ready".to_string())?
+    };
     let m = reqwest::Method::from_bytes(method.as_bytes()).map_err(|e| e.to_string())?;
     log::debug!(target: "http", "{method} {path} -> {base}");
     // Bounded: reddb accepting the socket but never answering must NOT hang the app
@@ -2198,10 +2214,7 @@ async fn reddb_rql(app: tauri::AppHandle, query: String) -> Result<HttpReply, St
 
     let remote_http_base = {
         let source = db.source.lock().map_err(|e| e.to_string())?.clone();
-        match source {
-            ProjectSource::RemoteHttp { base_url, .. } => Some(base_url),
-            ProjectSource::Local => None,
-        }
+        remote_http_base_for_source(&source)
     };
     if let Some(base_url) = remote_http_base {
         return reddb_rql_http(&base_url, &query, &preview, started).await;
@@ -2341,7 +2354,8 @@ mod tests {
         docker_host_http_base, embedded_red_resource_name, ensure_reddb_vault_certificate,
         is_vault_certificate, normalize_http_query_response, open_with_key,
         parse_project_connection, reddb_server_argv_matches_db, reddb_vault_cert_path,
-        seal_with_key, sidecar_env, ParsedProjectConnection, EMBEDDED_REDDB_STORAGE_PRESET,
+        remote_http_base_for_source, seal_with_key, sidecar_env, ParsedProjectConnection,
+        ProjectSource, EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -2480,6 +2494,18 @@ mod tests {
                 base_url: "https://team.reddb.io".to_string(),
                 raw: "wss://team.reddb.io/redwire".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn routes_raw_http_requests_to_remote_project_sources() {
+        assert_eq!(remote_http_base_for_source(&ProjectSource::Local), None);
+        assert_eq!(
+            remote_http_base_for_source(&ProjectSource::RemoteHttp {
+                base_url: "https://team.reddb.io".to_string(),
+                raw: "wss://team.reddb.io/redwire".to_string(),
+            }),
+            Some("https://team.reddb.io".to_string())
         );
     }
 
