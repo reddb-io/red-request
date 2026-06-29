@@ -77,6 +77,38 @@ describe("CommandPalette", () => {
     });
   });
 
+  it("opens a collection from the command surface", async () => {
+    const req = { ...newRequest("req-1"), name: "Users request" };
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "Billing API",
+          order: ["req-1"],
+          folders: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [req],
+        environments: [],
+      },
+    ];
+    ws.activeColId = null;
+    ws.activeReq = null;
+
+    render(CommandPalette, { props: { open: true } });
+
+    await fireEvent.click(await screen.findByText("Collection: Billing API"));
+
+    await waitFor(() => {
+      expect(ws.view).toBe("requests");
+      expect(ws.activeColId).toBe("col-1");
+      expect(ws.activeReq).toBeNull();
+    });
+  });
+
   it("creates a collection before creating a request when the workspace is empty", async () => {
     const addCollection = vi
       .spyOn(ws, "addCollection")

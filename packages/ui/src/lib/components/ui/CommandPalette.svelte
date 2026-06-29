@@ -32,6 +32,13 @@
     searchValue: string;
   };
 
+  type PaletteCollection = {
+    colId: string;
+    name: string;
+    requestCount: number;
+    searchValue: string;
+  };
+
   let query = $state("");
   let searchResults = $state<PaletteRequest[]>([]);
   let searchedQuery = $state<string | null>(null);
@@ -50,10 +57,21 @@
       c.requests.map((r) => requestFromLocal(c.id, c.collection.name, r))
     )
   );
+  const localCollections = $derived(
+    ws.collections.map((c) => ({
+      colId: c.id,
+      name: c.collection.name,
+      requestCount: c.requests.length,
+      searchValue: `collection ${c.collection.name}`,
+    }))
+  );
 
   const normalizedQuery = $derived(normalizeQuery(query));
   const filteredLocalRequests = $derived(
     localRequests.filter((r) => matchesRequest(r, normalizedQuery))
+  );
+  const filteredLocalCollections = $derived(
+    localCollections.filter((c) => matchesCollection(c, normalizedQuery))
   );
   const useSearchResults = $derived(
     searchedQuery === normalizedQuery && !searchFailed
@@ -212,6 +230,12 @@
     return q.split(/\s+/).every((term) => haystack.includes(term));
   }
 
+  function matchesCollection(c: PaletteCollection, q: string): boolean {
+    if (!q) return true;
+    const haystack = c.searchValue.toLowerCase();
+    return q.split(/\s+/).every((term) => haystack.includes(term));
+  }
+
   function mergeRequests(
     primary: PaletteRequest[],
     fallback: PaletteRequest[]
@@ -330,6 +354,12 @@
     await ws.addRequest("");
   }
 
+  function openCollection(c: PaletteCollection): void {
+    ws.view = "requests";
+    ws.activeColId = c.colId;
+    ws.activeReq = null;
+  }
+
   async function selectPaletteRequest(r: PaletteRequest): Promise<boolean> {
     ws.view = "requests";
     ws.selectRequest(r.colId, r.reqId);
@@ -389,6 +419,31 @@
           </span>
           <span class="hint ml-auto max-w-[38%] truncate pl-2 text-right"
             >{locationLabel(r)}</span
+          >
+        </Command.Item>
+      {/each}
+    </Command.Group>
+
+    <Command.Separator />
+
+    <Command.Group heading="Collections">
+      {#each filteredLocalCollections as c (c.colId)}
+        <Command.Item
+          value={c.searchValue}
+          class="items-start py-2"
+          onSelect={() => go(() => openCollection(c))}
+        >
+          <span class="mono w-12 shrink-0 pt-0.5 text-xs font-bold text-fg-muted"
+            >COL</span
+          >
+          <span class="min-w-0 flex-1">
+            <span class="block truncate">Collection: {c.name}</span>
+            <span class="hint block truncate text-xs">
+              {c.requestCount} {c.requestCount === 1 ? "request" : "requests"}
+            </span>
+          </span>
+          <span class="hint ml-auto max-w-[38%] truncate pl-2 text-right"
+            >collection</span
           >
         </Command.Item>
       {/each}
