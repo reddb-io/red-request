@@ -28,7 +28,13 @@ describe("EnvironmentsEditor", () => {
       storedEnvironmentSchema.parse({
         name: "Local",
         vars: { LOCAL_TOKEN: "local" },
-        secrets: {},
+        secrets: {
+          API_KEY: {
+            ref: "red_request_secrets.e_4c6f63616c.s_4150495f4b4559",
+            vault: "red_request_secrets",
+            configKey: "secret_4c6f63616c_4150495f4b4559",
+          },
+        },
       }),
     ];
     ws.settingsIntent = null;
@@ -63,13 +69,43 @@ describe("EnvironmentsEditor", () => {
 
     render(EnvironmentsEditor, { props: { inline: true } });
 
-    await fireEvent.dblClick(screen.getByRole("button", { name: "Local" }));
+    await fireEvent.dblClick(screen.getByRole("button", { name: /Local/ }));
     const input = (await screen.findAllByDisplayValue("Local"))[0]!;
     await fireEvent.input(input, { target: { value: "Staging" } });
     await fireEvent.keyDown(input, { key: "Enter" });
 
     await waitFor(() => {
       expect(renameEnv).toHaveBeenCalledWith(ws.environments[0], "Staging");
+    });
+  });
+
+  it("overwrites an existing secret from its row action", async () => {
+    const setSecret = vi.spyOn(ws, "setSecret").mockResolvedValue();
+
+    render(EnvironmentsEditor, { props: { inline: true } });
+
+    await fireEvent.click(
+      screen.getByRole("button", { name: "overwrite API_KEY secret" })
+    );
+    expect(
+      (screen.getByPlaceholderText("NAME") as HTMLInputElement).value
+    ).toBe("API_KEY");
+
+    const secretValueInput = document.querySelector<HTMLInputElement>(
+      'input[type="password"][placeholder="value"]'
+    );
+    expect(secretValueInput).toBeTruthy();
+    await fireEvent.input(secretValueInput!, {
+      target: { value: "sk_next" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Overwrite" }));
+
+    await waitFor(() => {
+      expect(setSecret).toHaveBeenCalledWith(
+        ws.environments[0],
+        "API_KEY",
+        "sk_next"
+      );
     });
   });
 });

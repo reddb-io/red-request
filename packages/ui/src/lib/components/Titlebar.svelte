@@ -6,13 +6,14 @@
   // across all three OSes.
   import { brand } from "../brand.generated";
   import { onMount } from "svelte";
+  import {
+    closeWindow as closeTauriWindow,
+    minimizeWindow,
+    toggleMaximizeWindow,
+    watchMaximizedState,
+  } from "../window-controls";
 
   let isMaximized = $state(false);
-
-  async function currentWindow() {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    return getCurrentWindow();
-  }
 
   // Refresh the maximized indicator so the toggle glyph stays accurate when
   // the user double-clicks the title bar to maximize.
@@ -20,10 +21,8 @@
     let unlisten: (() => void) | undefined;
     (async () => {
       try {
-        const w = await currentWindow();
-        isMaximized = await w.isMaximized();
-        unlisten = await w.onResized(async () => {
-          isMaximized = await w.isMaximized();
+        unlisten = await watchMaximizedState((value) => {
+          isMaximized = value;
         });
       } catch {
         /* not running inside the Tauri shell (browser dev) — controls just no-op */
@@ -34,23 +33,21 @@
 
   async function minimize() {
     try {
-      await (await currentWindow()).minimize();
+      await minimizeWindow();
     } catch {
       /* ignore — running outside Tauri */
     }
   }
   async function toggleMaximize() {
     try {
-      const w = await currentWindow();
-      if (await w.isMaximized()) await w.unmaximize();
-      else await w.maximize();
+      isMaximized = await toggleMaximizeWindow();
     } catch {
       /* ignore */
     }
   }
   async function closeWindow() {
     try {
-      await (await currentWindow()).close();
+      await closeTauriWindow();
     } catch {
       /* ignore */
     }
@@ -59,10 +56,9 @@
 
 <div
   class="sticky top-0 z-[2000] isolate flex h-8 shrink-0 select-none items-center border-b border-border bg-[var(--color-bg-0)]"
-  data-tauri-drag-region
 >
   <!-- Brand, left -->
-  <div class="flex items-center gap-2 pl-2.5 pr-3">
+  <div class="flex items-center gap-2 pl-2.5 pr-3" data-tauri-drag-region>
     <span
       class="grid h-5 w-5 place-items-center rounded bg-[var(--color-brand)] text-xs font-bold text-black"
       >{brand.monogram}</span
@@ -71,7 +67,7 @@
   </div>
 
   <!-- Spacer so window controls stay right-aligned -->
-  <div class="flex-1"></div>
+  <div class="h-full flex-1" data-tauri-drag-region></div>
 
   <!-- Window controls (only meaningful inside Tauri — no-op in browser dev).
        Order matches OS convention: minimize → maximize → close. The close

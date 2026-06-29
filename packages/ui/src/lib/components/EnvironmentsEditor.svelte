@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, tick } from "svelte";
   import Copy from "@lucide/svelte/icons/copy";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import Plus from "@lucide/svelte/icons/plus";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
@@ -40,9 +41,13 @@
   let envDropBefore = $state<string | null | undefined>(undefined);
   let rootEl = $state<HTMLElement | null>(null);
   let secretNameInput = $state<HTMLInputElement | null>(null);
+  let secretValueInput = $state<HTMLInputElement | null>(null);
   let renamingEnvName = $state<string | null>(null);
   let envRenameValue = $state("");
   let envRenameInput = $state<HTMLInputElement | null>(null);
+  const secretExists = $derived(
+    Boolean(selected && secretName.trim() in selected.secrets)
+  );
 
   $effect(() => {
     void renamingEnvName;
@@ -195,6 +200,13 @@
     await ws.setSecret(selected, secretName.trim(), secretValue);
     secretName = "";
     secretValue = "";
+  }
+
+  async function startSecretOverwrite(name: string) {
+    secretName = name;
+    secretValue = "";
+    await tick();
+    secretValueInput?.focus();
   }
 
   function envDragOver(e: DragEvent, env: StoredEnvironment, index: number) {
@@ -363,6 +375,15 @@
                       {secretNeedsValue(selected, name) ? "needs value" : "•••• set"}
                     </span>
                     <Button
+                      onclick={() => startSecretOverwrite(name)}
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`overwrite ${name} secret`}
+                      title={`Overwrite ${name}`}
+                    >
+                      <Pencil size={13} />
+                    </Button>
+                    <Button
                       onclick={() => ws.removeSecret(selected!, name)}
                       variant="ghost"
                       size="icon-xs"
@@ -386,13 +407,14 @@
                 class="h-7 w-40"
               />
               <Input
+                bind:ref={secretValueInput}
                 bind:value={secretValue}
                 type="password"
                 placeholder="value"
                 class="h-7 flex-1"
                 onkeydown={(e) => e.key === "Enter" && addSecret()}
               />
-              <Button onclick={addSecret} size="xs">Set</Button>
+              <Button onclick={addSecret} size="xs">{secretExists ? "Overwrite" : "Set"}</Button>
             </div>
           </section>
           {/if}
