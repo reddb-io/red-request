@@ -6,11 +6,19 @@
   import VarField from "./VarField.svelte";
   import HexViewer from "./HexViewer.svelte";
   import { RotateCcw } from "@lucide/svelte";
+  import { buildStreamInsights } from "../streamInsights";
 
   let draft = $state("");
   const connected = $derived(ws.wsStatus === "open");
   const pending = $derived(ws.wsStatus === "connecting");
   const isSse = $derived(ws.activeReq?.kind === "sse");
+  const insights = $derived(
+    buildStreamInsights({
+      kind: isSse ? "sse" : "ws",
+      status: ws.wsStatus,
+      messages: ws.wsMessages,
+    })
+  );
 
   function toggle() {
     if (connected || pending) void ws.streamDisconnect();
@@ -57,6 +65,31 @@
       class="shrink-0">{connected || pending ? "Disconnect" : "Connect"}</Button
     >
   </div>
+
+  {#if insights.length}
+    <div class="grid grid-cols-1 gap-2 md:grid-cols-3">
+      {#each insights.slice(0, 6) as insight (insight.title)}
+        <div
+          class="rounded border border-border bg-[var(--color-bg-1)] p-2 text-xs"
+          class:border-amber-500={insight.tone === "warn"}
+          class:border-red-500={insight.tone === "bad"}
+          class:border-emerald-500={insight.tone === "good"}
+        >
+          <div class="flex items-start gap-2">
+            <div class="min-w-0">
+              <div class="label mb-0.5">{insight.title}</div>
+              <div class="break-all text-fg">{insight.detail}</div>
+            </div>
+            {#if insight.value}
+              <div class="mono ml-auto shrink-0 rounded bg-[var(--color-bg-2)] px-1.5 py-0.5 text-fg-muted">
+                {insight.value}
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
   <div
     class="mono flex-1 overflow-y-auto rounded border border-border bg-[var(--color-bg-0)] p-2 text-xs"

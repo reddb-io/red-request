@@ -199,6 +199,14 @@ class Workspace {
       correlationId?: string;
       /** True for binary WebSocket frames; `data` is base64-encoded. */
       isBinary?: boolean;
+      /** Protocol-level event name for SSE, GraphQL WS, or Phoenix channel frames. */
+      streamEvent?: string;
+      /** Structured lifecycle marker for system rows. */
+      sysEvent?: "open" | "close" | "error";
+      url?: string;
+      openStatus?: number;
+      closeCode?: number;
+      closeReason?: string;
     }[]
   >([]);
   private wsConnId: string | null = null;
@@ -1902,7 +1910,15 @@ class Workspace {
     status?: "sent" | "error",
     frameId?: string,
     correlationId?: string,
-    isBinary?: boolean
+    isBinary?: boolean,
+    meta: {
+      streamEvent?: string;
+      sysEvent?: "open" | "close" | "error";
+      url?: string;
+      openStatus?: number;
+      closeCode?: number;
+      closeReason?: string;
+    } = {}
   ): void {
     this.wsMessages = [
       ...this.wsMessages.slice(-499),
@@ -1914,6 +1930,7 @@ class Workspace {
         ...(frameId !== undefined ? { frameId } : {}),
         ...(correlationId !== undefined ? { correlationId } : {}),
         ...(isBinary ? { isBinary } : {}),
+        ...meta,
       },
     ];
   }
@@ -1928,7 +1945,19 @@ class Workspace {
     switch (n.event) {
       case "open":
         this.wsStatus = "open";
-        this.pushWs("sys", `● connected ${d.url ?? ""}`.trim());
+        this.pushWs(
+          "sys",
+          `● connected ${d.url ?? ""}`.trim(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          {
+            sysEvent: "open",
+            url: d.url as string | undefined,
+            openStatus: d.status as number | undefined,
+          }
+        );
         break;
       case "message":
         this.pushWs(
@@ -1939,16 +1968,37 @@ class Workspace {
             : undefined,
           d.frameId as string | undefined,
           d.correlationId as string | undefined,
-          d.isBinary as boolean | undefined
+          d.isBinary as boolean | undefined,
+          { streamEvent: d.event as string | undefined }
         );
         break;
       case "close":
         this.wsStatus = "closed";
-        this.pushWs("sys", `● closed ${d.code ?? ""} ${d.reason ?? ""}`.trim());
+        this.pushWs(
+          "sys",
+          `● closed ${d.code ?? ""} ${d.reason ?? ""}`.trim(),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          {
+            sysEvent: "close",
+            closeCode: d.code as number | undefined,
+            closeReason: d.reason as string | undefined,
+          }
+        );
         break;
       case "error":
         this.wsStatus = "error";
-        this.pushWs("sys", `● ${d.message ?? "error"}`);
+        this.pushWs(
+          "sys",
+          `● ${d.message ?? "error"}`,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { sysEvent: "error" }
+        );
         break;
     }
   }
