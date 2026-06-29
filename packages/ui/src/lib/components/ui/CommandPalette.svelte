@@ -523,6 +523,7 @@
       )}
       {@render action("Settings: proxies", "config", () => openSettings("proxies"))}
       {@render action("Settings: profiles", "config", () => openSettings("profiles"))}
+      {@render action("Settings: history", "config", () => openSettings("history"))}
       {@render action("Settings: data", "config", () => openSettings("data"))}
       {@render action("Switch project…", "selector", () => ws.backToSelector())}
     </Command.Group>

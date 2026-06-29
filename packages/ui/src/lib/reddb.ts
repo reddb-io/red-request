@@ -907,8 +907,31 @@ export interface VcsCommit {
   height: number;
 }
 
+export interface VcsDiffEntry {
+  collection: string;
+  entityId: string;
+  change: "added" | "removed" | "modified";
+}
+
+export interface VcsDiffSummary {
+  from: string;
+  to: string;
+  added: number;
+  removed: number;
+  modified: number;
+  entries: VcsDiffEntry[];
+}
+
 const COMMIT_AUTHOR = "red-request";
 const COMMIT_EMAIL = "app@red-request.local";
+
+function reddbError(r: { status: number; json: unknown }): string {
+  const root = r.json as { error?: unknown; message?: unknown } | null;
+  const error = root?.error ?? root?.message;
+  return typeof error === "string" && error.trim()
+    ? error
+    : `RedDB request failed with status ${r.status}`;
+}
 
 /** Create a commit pinning the current snapshot. Returns the full commit hash, or
  *  null when nothing changed / the server declined (non-fatal). */
@@ -936,6 +959,15 @@ export function commitSoon(message = "edit", delayMs = 1500): void {
     commitTimer = null;
     void commit(pendingMessage);
   }, delayMs);
+}
+
+/** Force any debounced commit to land now, before a durability boundary such as
+ *  closing the app or swapping the RedDB sidecar to another project. */
+export async function flushPendingCommit(): Promise<string | null> {
+  if (!commitTimer) return null;
+  clearTimeout(commitTimer);
+  commitTimer = null;
+  return commit(pendingMessage);
 }
 
 /** Recent commits, newest first. */
@@ -979,6 +1011,51 @@ export async function listCommits(limit = 50): Promise<VcsCommit[]> {
     });
   }
   return out;
+}
+
+export async function commitDiffSummary(
+  from: string,
+  to: string
+): Promise<VcsDiffSummary | null> {
+  const r = await reddbHttp(
+    "GET",
+    `/repo/commits/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}?summary=true`
+  );
+  if (!r.ok) return null;
+  const root = r.json as { result?: Record<string, unknown> } | null;
+  const result = root?.result;
+  if (!result) return null;
+  const entries = Array.isArray(result.entries) ? result.entries : [];
+  return {
+    from: typeof result.from === "string" ? result.from : from,
+    to: typeof result.to === "string" ? result.to : to,
+    added: typeof result.added === "number" ? result.added : 0,
+    removed: typeof result.removed === "number" ? result.removed : 0,
+    modified: typeof result.modified === "number" ? result.modified : 0,
+    entries: entries
+      .map((entry): VcsDiffEntry | null => {
+        const e = entry as Record<string, unknown>;
+        const collection = e.collection;
+        const entityId = e.entity_id;
+        const change = e.change;
+        if (
+          typeof collection !== "string" ||
+          typeof entityId !== "string" ||
+          (change !== "added" && change !== "removed" && change !== "modified")
+        )
+          return null;
+        return { collection, entityId, change };
+      })
+      .filter((entry): entry is VcsDiffEntry => entry !== null),
+  };
+}
+
+export async function resetProjectToCommit(commitHash: string): Promise<void> {
+  const r = await reddbHttp("POST", "/repo/sessions/0/reset", {
+    target: commitHash,
+    mode: "hard",
+  });
+  if (!r.ok) throw new Error(reddbError(r));
 }
 
 /** Time-travel read: the JSON value of a KV `key` as of `commitHash` (full 64-char

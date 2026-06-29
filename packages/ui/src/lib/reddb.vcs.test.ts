@@ -546,6 +546,27 @@ describe("setVersioned", () => {
 });
 
 describe("commitSoon", () => {
+  it("can flush a pending debounced commit immediately", async () => {
+    vi.useFakeTimers();
+    let commits = 0;
+    ipc({
+      request: () => {
+        commits++;
+        return reply(200, { ok: true, result: { hash: "e".repeat(64) } });
+      },
+    });
+
+    db.commitSoon("edit", 1500);
+
+    await expect(db.flushPendingCommit()).resolves.toBe("e".repeat(64));
+    expect(commits).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(commits).toBe(1);
+
+    vi.useRealTimers();
+  });
+
   it("debounces a burst of edits into a single commit", async () => {
     vi.useFakeTimers();
     let commits = 0;
@@ -565,5 +586,74 @@ describe("commitSoon", () => {
     expect(commits).toBe(1); // one coalesced commit
 
     vi.useRealTimers();
+  });
+});
+
+describe("project VCS time travel", () => {
+  it("loads a commit diff summary", async () => {
+    let seen: { method: string; path: string; body: string | null } | null =
+      null;
+    ipc({
+      request: (method, path, body) => {
+        seen = { method, path, body };
+        return reply(200, {
+          ok: true,
+          result: {
+            from: "a".repeat(64),
+            to: "b".repeat(64),
+            added: 1,
+            removed: 0,
+            modified: 2,
+            entries: [
+              {
+                collection: "rr_requests",
+                entity_id: "col.req",
+                change: "modified",
+              },
+            ],
+          },
+        });
+      },
+    });
+
+    await expect(
+      db.commitDiffSummary("a".repeat(64), "b".repeat(64))
+    ).resolves.toMatchObject({
+      added: 1,
+      removed: 0,
+      modified: 2,
+      entries: [
+        {
+          collection: "rr_requests",
+          entityId: "col.req",
+          change: "modified",
+        },
+      ],
+    });
+    expect(seen).toEqual({
+      method: "GET",
+      path: `/repo/commits/${"a".repeat(64)}/diff/${"b".repeat(64)}?summary=true`,
+      body: null,
+    });
+  });
+
+  it("restores the project by hard-resetting session 0 to a commit", async () => {
+    let seen: { method: string; path: string; body: string | null } | null =
+      null;
+    ipc({
+      request: (method, path, body) => {
+        seen = { method, path, body };
+        return reply(200, { ok: true, result: {} });
+      },
+    });
+
+    await expect(
+      db.resetProjectToCommit("f".repeat(64))
+    ).resolves.toBeUndefined();
+    expect(seen).toEqual({
+      method: "POST",
+      path: "/repo/sessions/0/reset",
+      body: JSON.stringify({ target: "f".repeat(64), mode: "hard" }),
+    });
   });
 });

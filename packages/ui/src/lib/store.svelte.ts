@@ -86,6 +86,7 @@ export type SettingsSection =
   | "environments"
   | "proxies"
   | "profiles"
+  | "history"
   | "data"
   | "danger";
 export type SettingsIntent = "global-variable" | "global-secret" | null;
@@ -387,7 +388,10 @@ class Workspace {
   ): Promise<boolean> {
     try {
       await withTimeout(
-        this.flushSave(),
+        (async () => {
+          await this.flushSave();
+          await repo.flushPendingCommit();
+        })(),
         PENDING_SAVE_TIMEOUT_MS,
         `Saving current project timed out after ${Math.round(
           PENDING_SAVE_TIMEOUT_MS / 1000

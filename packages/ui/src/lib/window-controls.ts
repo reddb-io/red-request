@@ -1,7 +1,6 @@
 type TauriWindow = {
   minimize(): Promise<void>;
-  maximize(): Promise<void>;
-  unmaximize(): Promise<void>;
+  toggleMaximize(): Promise<void>;
   close(): Promise<void>;
   isMaximized(): Promise<boolean>;
   onResized(cb: () => void | Promise<void>): Promise<() => void>;
@@ -28,12 +27,8 @@ export async function minimizeWindow(): Promise<void> {
 
 export async function toggleMaximizeWindow(): Promise<boolean> {
   const w = await currentWindow();
-  if (await w.isMaximized()) {
-    await w.unmaximize();
-    return false;
-  }
-  await w.maximize();
-  return true;
+  await w.toggleMaximize();
+  return w.isMaximized();
 }
 
 export async function closeWindow(): Promise<void> {

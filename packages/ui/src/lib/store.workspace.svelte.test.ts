@@ -19,6 +19,7 @@ vi.mock("./repo", () => ({
   deleteRequest: vi.fn(async () => {}),
   deleteCollection: vi.fn(async () => {}),
   saveHistory: vi.fn(async () => {}),
+  flushPendingCommit: vi.fn(async () => null),
   ensureStore: vi.fn(async () => {}),
   runMigrations: vi.fn(async () => {}),
   ensureSample: vi.fn(async () => {}),
@@ -152,6 +153,47 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
+  it("flushes the request autosave and VCS checkpoint before switching projects", async () => {
+    const { openProject } = await import("./project");
+    const calls: string[] = [];
+    vi.mocked(repo.saveRequest).mockImplementationOnce(async () => {
+      calls.push("save");
+    });
+    vi.mocked(repo.flushPendingCommit).mockImplementationOnce(async () => {
+      calls.push("commit");
+      return "c".repeat(64);
+    });
+    vi.mocked(openProject).mockImplementationOnce(async () => {
+      calls.push("open");
+      return {
+        db_path: "/tmp/new-project/.red/request/app.rdb",
+        project_dir: "/tmp/new-project",
+        is_project: true,
+        arg_launched: false,
+        name: "new-project",
+      };
+    });
+    vi.mocked(repo.loadAll).mockResolvedValueOnce([]);
+
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    ws.collections = [collection("c1", [request("r1")])];
+    ws.activeColId = "c1";
+    ws.activeReq = request("r1", { url: "https://example.test/new" });
+    ws.scheduleSave();
+
+    await ws.chooseProject("/tmp/new-project");
+
+    expect(calls).toEqual(["save", "commit", "open"]);
+    expect(repo.flushPendingCommit).toHaveBeenCalledTimes(1);
+  });
+
   it("init exits a stuck project_info call into recovery", async () => {
     vi.useFakeTimers();
     const { projectInfo } = await import("./project");

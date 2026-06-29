@@ -1,8 +1,6 @@
 <script lang="ts">
   // Git-style version timeline for the active request, powered by reddb's native VCS.
-  // Left: a vertical commit graph (newest at top, scroll down to the first version) —
-  // commits that changed THIS request are prominent nodes; commits that only touched
-  // other collections are dim dots, so you still see the full store history (the trunk).
+  // Left: a vertical version graph (newest at top, scroll down to the first version).
   // Right: the request at the selected version, a line diff vs the previous version, and
   // a one-click rollback. The graph renders a single lane today (the app commits linearly
   // on `main`); it's laid out to extend to multiple lanes once branching lands.
@@ -136,8 +134,7 @@
     <span class="text-xs text-muted-fg">{ws.activeReq?.name ?? ""}</span>
     {#if !loading}
       <span class="text-[11px] text-fg-faint"
-        >· {versions.length} version{versions.length === 1 ? "" : "s"} across {nodes.length}
-        commit{nodes.length === 1 ? "" : "s"}</span
+        >· {versions.length} version{versions.length === 1 ? "" : "s"}</span
       >
     {/if}
     {#if showClose && onClose}
@@ -165,8 +162,7 @@
     <div class="flex flex-1 overflow-hidden">
       <!-- graph timeline -->
       <ul class="w-[320px] shrink-0 overflow-auto py-2">
-        {#each nodes as n, i (n.commit.hash)}
-          {@const changed = n.changedHere && !!n.value}
+        {#each versions as n, i (n.commit.hash)}
           {@const isSel = selected?.commit.hash === n.commit.hash}
           <li class="relative">
             <!-- graph gutter: vertical spine + node -->
@@ -176,31 +172,23 @@
               class="relative flex w-full items-start gap-3 py-1.5 pr-3 pl-2 text-left hover:bg-muted/60 disabled:cursor-default {isSel
                 ? 'bg-muted'
                 : ''}"
-              disabled={!changed}
-              onclick={() => changed && (selected = n)}
+              onclick={() => (selected = n)}
             >
               <span class="relative z-10 mt-1 flex h-[14px] w-[14px] shrink-0 items-center justify-center">
-                {#if changed}
-                  <span
-                    class="h-3 w-3 rounded-full border-2 {isSel
-                      ? 'border-accent bg-accent'
-                      : 'border-accent bg-bg'}"
-                  ></span>
-                {:else}
-                  <span class="h-1.5 w-1.5 rounded-full bg-border"></span>
-                {/if}
+                <span
+                  class="h-3 w-3 rounded-full border-2 {isSel
+                    ? 'border-accent bg-accent'
+                    : 'border-accent bg-bg'}"
+                ></span>
               </span>
               <span class="min-w-0 flex-1">
                 <span
-                  class="block truncate text-xs {changed
-                    ? 'font-medium text-fg'
-                    : 'text-fg-faint'}"
+                  class="block truncate text-xs font-medium text-fg"
                 >
-                  {i === 0 && changed ? "Current" : n.commit.message || "edit"}
+                  {i === 0 ? "Current" : n.commit.message || "edit"}
                 </span>
                 <span class="block text-[11px] text-muted-fg">
                   {relTime(n.commit.timestampMs)} · <span class="mono">{shortHash(n.commit.hash)}</span>
-                  {#if !changed}· no change to this request{/if}
                 </span>
               </span>
             </button>
