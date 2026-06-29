@@ -231,20 +231,9 @@ jobs:
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
           releaseName: "Red Request ${{ github.event.inputs.tag || github.ref_name }}"
           releaseBody: |
-            ## Install
-
-            **Linux / macOS** — one line; auto-detects your OS + arch, auto-upgrades on re-run:
-            ```
-            curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
-            ```
-            On Linux it installs the `.deb` (or `--appimage`) and puts `red-request` (+ an `rr`
-            shortcut) on your PATH; on macOS it downloads + verifies the `.dmg` for you to open.
-
-            **Windows** — download `red-request-windows-x86_64-setup.exe` below and run it.
-
-            Builds for **linux** (x86_64 · aarch64), **macOS** (Apple Silicon) and
-            **windows** (x86_64). Every asset's sha256 is in `checksums.txt`. Unsigned for now —
-            macOS: right-click → Open; Windows: "More info → Run anyway" past SmartScreen.
+            Release packaging is in progress. Final release notes, verification commands,
+            checksums, and asset details are published by the checksums job after every
+            platform build has uploaded its installer assets.
           releaseDraft: false
           prerelease: false
 
@@ -301,9 +290,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
       - name: Generate + publish checksums.txt
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
@@ -315,5 +314,18 @@ jobs:
           assets=(red-request-*)
           [[ ${#assets[@]} -gt 0 ]] || { echo "no portable assets to checksum"; exit 0; }
           sha256sum "${assets[@]}" > checksums.txt
+          cp checksums.txt SHA256SUMS
+          {
+            echo "| Asset | Size |"
+            echo "| --- | ---: |"
+            for asset in "${assets[@]}"; do
+              bytes="$(wc -c < "$asset" | tr -d ' ')"
+              echo "| \`$asset\` | $bytes bytes |"
+            done
+          } > artifact-sizes.md
           echo "── checksums.txt ──"; cat checksums.txt
-          gh release upload "$TAG" checksums.txt --clobber -R "$GITHUB_REPOSITORY"
+          echo "── artifact-sizes.md ──"; cat artifact-sizes.md
+          gh release upload "$TAG" checksums.txt SHA256SUMS artifact-sizes.md --clobber -R "$GITHUB_REPOSITORY"
+          cd "$GITHUB_WORKSPACE"
+          node scripts/generate-release-notes.mjs "$TAG" > "$work/release-notes.md"
+          gh release edit "$TAG" --notes-file "$work/release-notes.md" -R "$GITHUB_REPOSITORY"
