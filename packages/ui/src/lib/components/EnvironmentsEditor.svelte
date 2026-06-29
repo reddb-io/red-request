@@ -40,6 +40,15 @@
   let envDropBefore = $state<string | null | undefined>(undefined);
   let rootEl = $state<HTMLElement | null>(null);
   let secretNameInput = $state<HTMLInputElement | null>(null);
+  let renamingEnvName = $state<string | null>(null);
+  let envRenameValue = $state("");
+  let envRenameInput = $state<HTMLInputElement | null>(null);
+
+  $effect(() => {
+    void renamingEnvName;
+    envRenameInput?.focus();
+    envRenameInput?.select();
+  });
 
   function loadVars(env: StoredEnvironment | null) {
     varRows = rowsOf(env);
@@ -168,6 +177,19 @@
     await ws.renameEnv(selected, renaming.trim());
   }
 
+  function startEnvTabRename(env: StoredEnvironment) {
+    renamingEnvName = env.name;
+    envRenameValue = env.name;
+  }
+
+  async function commitEnvTabRename(env: StoredEnvironment) {
+    const next = envRenameValue.trim();
+    renamingEnvName = null;
+    if (!next || next === env.name) return;
+    await ws.renameEnv(env, next);
+    if (selected === env) renaming = env.name;
+  }
+
   async function addSecret() {
     if (!selected || !secretName.trim()) return;
     await ws.setSecret(selected, secretName.trim(), secretValue);
@@ -209,36 +231,56 @@
           Global
         </button>
         {#each ws.environments as env, i (env.name)}
-          <button
-            type="button"
-            draggable="true"
-            onclick={() => select(env)}
-            ondragstart={(e) => {
-              draggingEnv = env.name;
-              e.dataTransfer?.setData("text/plain", env.name);
-              if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-            }}
-            ondragover={(e) => envDragOver(e, env, i)}
-            ondrop={(e) => {
-              e.preventDefault();
-              void envDrop();
-            }}
-            ondragend={() => {
-              draggingEnv = null;
-              envDropBefore = undefined;
-            }}
-            class="relative h-8 max-w-44 shrink-0 rounded-t border border-border px-3 text-xs font-medium {selected?.name === env.name && !onGlobals
-              ? 'bg-[var(--color-bg-2)] text-fg'
-              : 'bg-transparent text-fg-subtle hover:text-fg'}"
-          >
-            {#if envDropBefore === env.name}
-              <span class="absolute top-1 bottom-1 -left-1 w-0.5 rounded bg-[var(--color-brand)]"></span>
-            {/if}
-            <span class="truncate">{env.name}</span>
-            {#if Object.keys(env.secrets).length > 0}
-              <span class="ml-2 text-[10px] text-fg-faint">{Object.keys(env.secrets).length}</span>
-            {/if}
-          </button>
+          {#if renamingEnvName === env.name}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              bind:this={envRenameInput}
+              bind:value={envRenameValue}
+              autofocus
+              onblur={() => commitEnvTabRename(env)}
+              onkeydown={(e) => {
+                if (e.key === "Enter") void commitEnvTabRename(env);
+                if (e.key === "Escape") renamingEnvName = null;
+              }}
+              class="h-8 w-32 shrink-0 rounded-t border border-border bg-[var(--color-bg-2)] px-3 text-xs font-medium text-fg outline-none"
+            />
+          {:else}
+            <button
+              type="button"
+              draggable="true"
+              onclick={() => select(env)}
+              ondblclick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startEnvTabRename(env);
+              }}
+              ondragstart={(e) => {
+                draggingEnv = env.name;
+                e.dataTransfer?.setData("text/plain", env.name);
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+              }}
+              ondragover={(e) => envDragOver(e, env, i)}
+              ondrop={(e) => {
+                e.preventDefault();
+                void envDrop();
+              }}
+              ondragend={() => {
+                draggingEnv = null;
+                envDropBefore = undefined;
+              }}
+              class="relative h-8 max-w-44 shrink-0 rounded-t border border-border px-3 text-xs font-medium {selected?.name === env.name && !onGlobals
+                ? 'bg-[var(--color-bg-2)] text-fg'
+                : 'bg-transparent text-fg-subtle hover:text-fg'}"
+            >
+              {#if envDropBefore === env.name}
+                <span class="absolute top-1 bottom-1 -left-1 w-0.5 rounded bg-[var(--color-brand)]"></span>
+              {/if}
+              <span class="truncate">{env.name}</span>
+              {#if Object.keys(env.secrets).length > 0}
+                <span class="ml-2 text-[10px] text-fg-faint">{Object.keys(env.secrets).length}</span>
+              {/if}
+            </button>
+          {/if}
         {/each}
         <button
           type="button"
