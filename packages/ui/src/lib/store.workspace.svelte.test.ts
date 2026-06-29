@@ -433,6 +433,34 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loadError).toMatch(/timed out while running migrations/i);
   });
 
+  it("loadStore allows a slow cold database open before exposing recovery", async () => {
+    vi.useFakeTimers();
+    vi.mocked(repo.ensureStore).mockImplementationOnce(
+      () => new Promise((resolve) => setTimeout(resolve, 20_000))
+    );
+    let completed = false;
+
+    const pending = ws.loadStore().then(() => {
+      completed = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ws.loading?.step).toBe("opening database file");
+
+    await vi.advanceTimersByTimeAsync(16_000);
+
+    expect(completed).toBe(false);
+    expect(ws.loading?.step).toBe("opening database file");
+    expect(ws.loadError).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await pending;
+
+    expect(completed).toBe(true);
+    expect(ws.loading).toBeNull();
+    expect(ws.loadError).toBeNull();
+  });
+
   it("retry reopens the failed local project instead of only reloading the current store", async () => {
     vi.useFakeTimers();
     const { openProject } = await import("./project");

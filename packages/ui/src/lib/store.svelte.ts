@@ -75,6 +75,7 @@ import {
 const GLOBALS_ENV = "Globals";
 const STARTUP_INFO_TIMEOUT_MS = 15_000;
 const PROJECT_OPEN_TIMEOUT_MS = 15_000;
+const LOAD_OPEN_TIMEOUT_MS = 60_000;
 const LOAD_STEP_TIMEOUT_MS = 15_000;
 const PENDING_SAVE_TIMEOUT_MS = 5_000;
 const SYNC_QUEUE_WAIT_MS = 15_000;
@@ -718,9 +719,9 @@ class Workspace {
       step("opening database file");
       await withTimeout(
         repo.ensureStore(),
-        LOAD_STEP_TIMEOUT_MS,
+        LOAD_OPEN_TIMEOUT_MS,
         `Loading project timed out while opening database file after ${Math.round(
-          LOAD_STEP_TIMEOUT_MS / 1000
+          LOAD_OPEN_TIMEOUT_MS / 1000
         )}s`
       );
       if (abortIfStale()) return;
