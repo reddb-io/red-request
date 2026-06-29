@@ -344,6 +344,7 @@ class Workspace {
   }
 
   private enterOpeningShell(target: OpeningTarget, step: string): void {
+    this.captureActiveRequestForSave();
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.openingTarget = target;
@@ -1101,6 +1102,7 @@ class Workspace {
 
   private applyLoadedCollections(collections: LoadedCollection[]): void {
     this.collections = collections;
+    this.resetRequestBaselines(collections);
     const first = this.collections[0];
     if (first && !this.activeColId) {
       this.activeColId = first.id;
@@ -1112,6 +1114,7 @@ class Workspace {
     const col = this.collections.find((c) => c.id === colId);
     const req = col?.requests.find((r) => r.id === reqId);
     if (!col || !req) return;
+    this.rememberRequestSnapshot(colId, req);
     this.activeColId = colId;
     this.activeReq = structuredClone($state.snapshot(req)) as RequestDefinition;
     this.activeEnvName =
@@ -2074,6 +2077,7 @@ class Workspace {
     snap: RequestDefinition
   ): Promise<void> {
     await repo.saveRequest(colId, snap);
+    this.rememberRequestSnapshot(colId, snap);
     const col = this.collections.find((c) => c.id === colId);
     if (col) {
       const idx = col.requests.findIndex((r) => r.id === snap.id);
@@ -2084,20 +2088,61 @@ class Workspace {
 
   /** Pending debounced autosave timer for the active request. */
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingSave: { colId: string; request: RequestDefinition } | null =
-    null;
+  private pendingSaves = new Map<
+    string,
+    { colId: string; request: RequestDefinition }
+  >();
+  private saveInFlight: Promise<void> | null = null;
+  private requestBaselines = new Map<string, string>();
+
+  private requestStorageKey(colId: string, reqId: string): string {
+    return `${colId}\0${reqId}`;
+  }
+
+  private requestSnapshotJson(req: RequestDefinition): string {
+    return JSON.stringify(req);
+  }
+
+  private rememberRequestSnapshot(colId: string, req: RequestDefinition): void {
+    this.requestBaselines.set(
+      this.requestStorageKey(colId, req.id),
+      this.requestSnapshotJson(req)
+    );
+  }
+
+  private resetRequestBaselines(collections: LoadedCollection[]): void {
+    this.requestBaselines.clear();
+    for (const col of collections)
+      for (const req of col.requests) this.rememberRequestSnapshot(col.id, req);
+  }
+
+  private queueRequestSave(colId: string, req: RequestDefinition): void {
+    this.pendingSaves.set(this.requestStorageKey(colId, req.id), {
+      colId,
+      request: req,
+    });
+  }
+
+  private captureActiveRequestForSave(): void {
+    if (!this.activeReq || !this.activeColId) return;
+    const snap = structuredClone(
+      $state.snapshot(this.activeReq)
+    ) as RequestDefinition;
+    const key = this.requestStorageKey(this.activeColId, snap.id);
+    if (this.requestBaselines.get(key) === this.requestSnapshotJson(snap))
+      return;
+    this.queueRequestSave(this.activeColId, snap);
+  }
 
   /** Debounced autosave: persist the active request shortly after the last edit,
    *  so URL / params / headers / body changes survive a reload or project switch
    *  even without an explicit Ctrl-S. Driven by an effect in +page.svelte. */
   scheduleSave(): void {
     if (!this.activeReq || !this.activeColId) return;
-    this.pendingSave = {
-      colId: this.activeColId,
-      request: structuredClone(
-        $state.snapshot(this.activeReq)
-      ) as RequestDefinition,
-    };
+    this.queueRequestSave(
+      this.activeColId,
+      structuredClone($state.snapshot(this.activeReq)) as RequestDefinition
+    );
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       this.saveTimer = null;
@@ -2108,13 +2153,31 @@ class Workspace {
   /** Flush a pending autosave immediately — call before switching project or
    *  closing, so an in-flight edit isn't dropped when the sidecar is swapped. */
   async flushSave(): Promise<void> {
+    this.captureActiveRequestForSave();
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
-    const pending = this.pendingSave;
-    this.pendingSave = null;
-    if (pending) await this.saveRequestSnapshot(pending.colId, pending.request);
+    const pending = [...this.pendingSaves.values()];
+    this.pendingSaves.clear();
+    const previous = this.saveInFlight;
+    if (pending.length > 0) {
+      const work = (async () => {
+        if (previous) await previous;
+        for (const item of pending)
+          await this.saveRequestSnapshot(item.colId, item.request);
+      })();
+      this.saveInFlight = work;
+      void work.then(
+        () => {
+          if (this.saveInFlight === work) this.saveInFlight = null;
+        },
+        () => {
+          if (this.saveInFlight === work) this.saveInFlight = null;
+        }
+      );
+    }
+    if (this.saveInFlight) await this.saveInFlight;
   }
 
   /** Media type sent for each body kind (Content-Type). */

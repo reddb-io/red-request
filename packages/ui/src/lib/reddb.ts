@@ -993,6 +993,26 @@ export async function commit(message: string): Promise<string | null> {
 
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingMessage = "edit";
+let commitInFlight: Promise<string | null> | null = null;
+
+function startCommit(message: string): Promise<string | null> {
+  const previous = commitInFlight;
+  const work = (async () => {
+    if (previous) await previous.catch(() => null);
+    return commit(message);
+  })();
+  commitInFlight = work;
+  void work.then(
+    () => {
+      if (commitInFlight === work) commitInFlight = null;
+    },
+    () => {
+      if (commitInFlight === work) commitInFlight = null;
+    }
+  );
+  return work;
+}
+
 /** Debounced auto-commit: coalesces a burst of edits into one restore point. Call
  *  freely from write paths; the actual commit fires `delayMs` after the last call. */
 export function commitSoon(message = "edit", delayMs = 1500): void {
@@ -1000,17 +1020,17 @@ export function commitSoon(message = "edit", delayMs = 1500): void {
   if (commitTimer) clearTimeout(commitTimer);
   commitTimer = setTimeout(() => {
     commitTimer = null;
-    void commit(pendingMessage);
+    void startCommit(pendingMessage);
   }, delayMs);
 }
 
 /** Force any debounced commit to land now, before a durability boundary such as
  *  closing the app or swapping the RedDB sidecar to another project. */
 export async function flushPendingCommit(): Promise<string | null> {
-  if (!commitTimer) return null;
+  if (!commitTimer) return commitInFlight ? await commitInFlight : null;
   clearTimeout(commitTimer);
   commitTimer = null;
-  return commit(pendingMessage);
+  return startCommit(pendingMessage);
 }
 
 /** Recent commits, newest first. */

@@ -587,6 +587,40 @@ describe("commitSoon", () => {
 
     vi.useRealTimers();
   });
+
+  it("waits for an in-flight debounced commit when flushed", async () => {
+    vi.useFakeTimers();
+    let resolveCommit!: () => void;
+    let commits = 0;
+    ipc({
+      request: async () => {
+        commits++;
+        await new Promise<void>((resolve) => {
+          resolveCommit = resolve;
+        });
+        return reply(200, { ok: true, result: { hash: "f".repeat(64) } });
+      },
+    });
+
+    db.commitSoon("edit", 1500);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(commits).toBe(1);
+
+    let flushed = false;
+    const flushing = db.flushPendingCommit().then((hash) => {
+      flushed = true;
+      return hash;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(flushed).toBe(false);
+
+    resolveCommit();
+    await expect(flushing).resolves.toBe("f".repeat(64));
+    expect(flushed).toBe(true);
+
+    vi.useRealTimers();
+  });
 });
 
 describe("project VCS time travel", () => {
