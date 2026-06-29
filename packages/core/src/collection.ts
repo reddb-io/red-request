@@ -111,6 +111,10 @@ export const historyEntrySchema = z.object({
   proxyUrl: z.string().optional(),
   /** Stable local client id for grouping team runs by dispatcher installation. */
   dispatcherClientId: z.string().optional(),
+  /** Best-effort local machine name for team-run grouping. */
+  dispatcherHost: z.string().optional(),
+  /** Best-effort local OS/user name for team-run grouping. */
+  dispatcherUser: z.string().optional(),
 });
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 

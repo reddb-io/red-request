@@ -66,6 +66,8 @@ describe("Dashboard network identity metrics", () => {
         proxyName: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
         dispatcherClientId: "client-1",
+        dispatcherHost: "ci-runner-7",
+        dispatcherUser: "alice",
       },
       {
         id: "run-1",
@@ -87,6 +89,8 @@ describe("Dashboard network identity metrics", () => {
         proxyName: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
         dispatcherClientId: "client-1",
+        dispatcherHost: "ci-runner-7",
+        dispatcherUser: "alice",
       },
     ]);
 
@@ -97,6 +101,7 @@ describe("Dashboard network identity metrics", () => {
     ).toBeTruthy();
     expect(screen.getByText("Team identity")).toBeTruthy();
     expect(screen.getByText("Team proxy")).toBeTruthy();
+    expect(screen.getByText("alice@ci-runner-7")).toBeTruthy();
     expect(screen.getByText("client-1")).toBeTruthy();
     expect(screen.getByText("2 runs")).toBeTruthy();
     expect(screen.getByText("50% errors")).toBeTruthy();

@@ -14,7 +14,7 @@ const base = {
 } satisfies Partial<HistoryEntry>;
 
 describe("networkIdentityRows", () => {
-  it("groups runs by profile, proxy and dispatcher with latency and error rates", () => {
+  it("groups runs by profile, proxy and dispatcher host/user with latency and error rates", () => {
     const rows = networkIdentityRows([
       {
         ...base,
@@ -29,6 +29,8 @@ describe("networkIdentityRows", () => {
         proxyName: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
         dispatcherClientId: "client-1",
+        dispatcherHost: "ci-runner-7",
+        dispatcherUser: "alice",
       },
       {
         ...base,
@@ -43,16 +45,21 @@ describe("networkIdentityRows", () => {
         proxyName: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
         dispatcherClientId: "client-1",
+        dispatcherHost: "ci-runner-7",
+        dispatcherUser: "alice",
       },
     ] as HistoryEntry[]);
 
     expect(rows).toEqual([
       {
-        key: "pf-team|px-team|client-1",
+        key: "pf-team|px-team|ci-runner-7|alice|client-1",
         profile: "Team identity",
         proxy: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
-        dispatcher: "client-1",
+        dispatcher: "alice@ci-runner-7",
+        dispatcherClientId: "client-1",
+        dispatcherHost: "ci-runner-7",
+        dispatcherUser: "alice",
         runs: 2,
         errors: 1,
         errorRate: 50,

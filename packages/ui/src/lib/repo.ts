@@ -38,6 +38,7 @@ import * as db from "./reddb";
 import * as secrets from "./secrets";
 import { MIGRATIONS } from "./migrations";
 import { appLog } from "./log";
+import { invoke } from "@tauri-apps/api/core";
 
 /** Register + apply any pending RedDB-native migrations. Run on every project boot. */
 export const runMigrations = () => db.runMigrations(MIGRATIONS);
@@ -214,6 +215,32 @@ function syncClientId(): string {
 }
 
 export const currentSyncClientId = async () => syncClientId();
+
+export interface DispatcherIdentity {
+  clientId: string;
+  host?: string;
+  user?: string;
+}
+
+function cleanIdentityValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+export async function currentDispatcherIdentity(): Promise<DispatcherIdentity> {
+  const clientId = await currentSyncClientId();
+  try {
+    const native = await invoke<{ host?: unknown; user?: unknown }>(
+      "dispatcher_identity"
+    );
+    return {
+      clientId,
+      host: cleanIdentityValue(native.host),
+      user: cleanIdentityValue(native.user),
+    };
+  } catch {
+    return { clientId };
+  }
+}
 
 export async function syncConsumerName(): Promise<string> {
   return `rr_${hexUtf8(syncClientId()).slice(0, 56) || "client"}`;
