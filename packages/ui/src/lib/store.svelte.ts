@@ -1136,7 +1136,7 @@ class Workspace {
     this.wsStatus = "idle";
     this.wsMessages = [];
     this.grpcServices = [];
-    void this.refreshReqHistory();
+    this.reqHistory = [];
   }
 
   /** Secrets that failed to open through RedDB's native vault/config layer on the
@@ -1482,8 +1482,7 @@ class Workspace {
       return;
     }
     try {
-      const all = await repo.loadHistory(this.activeColId);
-      this.reqHistory = all.filter((h) => h.reqId === req.id);
+      this.reqHistory = await repo.loadHistory(this.activeColId, req.id);
     } catch {
       /* best-effort */
     }

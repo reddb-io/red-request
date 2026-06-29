@@ -87,7 +87,7 @@ export function environmentToFile(env: StoredEnvironment): EnvironmentFile {
 /** A request file (`requests/<slug>.yaml`) is exactly a RequestDefinition. */
 export const requestFileSchema = requestDefinitionSchema;
 
-/** One recorded run (for the project dashboard). Stored in the `rr_history` KV. */
+/** One recorded run (for the project dashboard). Stored in the `rr_history` document collection. */
 export const historyEntrySchema = z.object({
   id: z.string(),
   reqId: z.string(),

@@ -137,6 +137,13 @@ describe("Document-backed request storage", () => {
     expect(create).toContain(
       "CREATE INDEX IF NOT EXISTS rr_requests_name ON rr_requests (request_name)"
     );
+    expect(
+      queries.find((query) =>
+        query.startsWith("CREATE MIGRATION run_history_document_indexes AS")
+      )
+    ).toContain(
+      "CREATE INDEX IF NOT EXISTS rr_history_request_id ON rr_history (request_id) USING HASH"
+    );
     expect(queries).toContain("APPLY MIGRATION *");
   });
 
@@ -516,5 +523,135 @@ describe("Document-backed request storage", () => {
     await expect(
       repo.requestAsOf("c1", "r1", "e".repeat(64))
     ).resolves.toMatchObject({ name: "Legacy commit" });
+  });
+
+  it("uses VCS diffs to avoid AS OF reads for commits that did not touch requests", async () => {
+    const h4 = "4".repeat(64);
+    const h3 = "3".repeat(64);
+    const h2 = "2".repeat(64);
+    const h1 = "1".repeat(64);
+    const asOfQueries: string[] = [];
+    const diffPaths: string[] = [];
+
+    ipc({
+      request: (method, path) => {
+        if (method === "GET" && path === "/repo/commits?limit=100") {
+          return reply(200, {
+            ok: true,
+            result: {
+              commits: [
+                {
+                  hash: h4,
+                  message: "update settings",
+                  author: { name: "red-request" },
+                  timestamp_ms: 4,
+                  parents: [h3],
+                  height: 4,
+                },
+                {
+                  hash: h3,
+                  message: "save request",
+                  author: { name: "red-request" },
+                  timestamp_ms: 3,
+                  parents: [h2],
+                  height: 3,
+                },
+                {
+                  hash: h2,
+                  message: "save env",
+                  author: { name: "red-request" },
+                  timestamp_ms: 2,
+                  parents: [h1],
+                  height: 2,
+                },
+                {
+                  hash: h1,
+                  message: "create request",
+                  author: { name: "red-request" },
+                  timestamp_ms: 1,
+                  parents: [],
+                  height: 1,
+                },
+              ],
+            },
+          });
+        }
+        if (method === "GET" && path.includes("/diff/")) {
+          diffPaths.push(path);
+          const touchedRequests = path.startsWith(
+            `/repo/commits/${h2}/diff/${h3}`
+          );
+          return reply(200, {
+            ok: true,
+            result: {
+              from: touchedRequests
+                ? h2
+                : path.includes(`${h3}/diff/${h4}`)
+                  ? h3
+                  : h1,
+              to: touchedRequests
+                ? h3
+                : path.includes(`${h3}/diff/${h4}`)
+                  ? h4
+                  : h2,
+              added: touchedRequests ? 0 : 0,
+              removed: 0,
+              modified: touchedRequests ? 1 : 0,
+              entries: touchedRequests
+                ? [
+                    {
+                      collection: REQ,
+                      entity_id: "42",
+                      change: "modified",
+                    },
+                  ]
+                : [],
+            },
+          });
+        }
+        return reply(404, { ok: false, error: path });
+      },
+      rql: (query) => {
+        if (query.includes(" AS OF COMMIT ")) asOfQueries.push(query);
+        if (
+          query ===
+          `SELECT rid, body FROM rr_requests AS OF COMMIT '${h3}' WHERE app_key = 'c1.r1' LIMIT 1`
+        )
+          return rqlOk([
+            { rid: 42, body: requestDoc("c1", request("r1", { name: "v2" })) },
+          ]);
+        if (
+          query ===
+          `SELECT rid, body FROM rr_requests AS OF COMMIT '${h1}' WHERE app_key = 'c1.r1' LIMIT 1`
+        )
+          return rqlOk([
+            { rid: 42, body: requestDoc("c1", request("r1", { name: "v1" })) },
+          ]);
+        return rqlOk([]);
+      },
+    });
+
+    await expect(repo.requestHistory("c1", "r1", 100)).resolves.toEqual([
+      expect.objectContaining({
+        commit: expect.objectContaining({ hash: h3 }),
+        value: expect.objectContaining({ name: "v2" }),
+        changedHere: true,
+      }),
+      expect.objectContaining({
+        commit: expect.objectContaining({ hash: h1 }),
+        value: expect.objectContaining({ name: "v1" }),
+        changedHere: true,
+      }),
+    ]);
+
+    expect(diffPaths).toEqual([
+      `/repo/commits/${h3}/diff/${h4}?summary=true&collection=rr_requests`,
+      `/repo/commits/${h2}/diff/${h3}?summary=true&collection=rr_requests`,
+      `/repo/commits/${h1}/diff/${h2}?summary=true&collection=rr_requests`,
+    ]);
+    expect(asOfQueries).toEqual([
+      `SELECT rid, body FROM rr_requests AS OF COMMIT '${h3}' WHERE app_key = 'c1.r1' LIMIT 1`,
+      `SELECT rid, body FROM rr_requests AS OF COMMIT '${h1}' WHERE app_key = 'c1.r1' LIMIT 1`,
+    ]);
   });
 });

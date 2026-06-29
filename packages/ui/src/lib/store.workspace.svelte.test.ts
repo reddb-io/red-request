@@ -19,6 +19,7 @@ vi.mock("./repo", () => ({
   deleteRequest: vi.fn(async () => {}),
   deleteCollection: vi.fn(async () => {}),
   saveHistory: vi.fn(async () => {}),
+  loadHistory: vi.fn(async () => []),
   flushPendingCommit: vi.fn(async () => null),
   ensureStore: vi.fn(async () => {}),
   runMigrations: vi.fn(async () => {}),
@@ -153,6 +154,41 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace persistence coordination", () => {
+  it("does not list run history when selecting a request", async () => {
+    const refreshHistory = vi
+      .spyOn(ws, "refreshReqHistory")
+      .mockResolvedValue(undefined);
+    ws.collections = [collection("c1", [request("r1"), request("r2")])];
+    ws.reqHistory = [
+      {
+        id: "old-run",
+        reqId: "old",
+        collectionId: "c1",
+        name: "old",
+        method: "GET",
+        url: "https://example.test",
+        ts: 1,
+        status: 200,
+        ok: true,
+        durationMs: 1,
+        size: 0,
+        testsPassed: 0,
+        testsFailed: 0,
+      },
+    ];
+
+    try {
+      ws.selectRequest("c1", "r1");
+      ws.selectRequest("c1", "r2");
+
+      expect(refreshHistory).not.toHaveBeenCalled();
+      expect(repo.loadHistory).not.toHaveBeenCalled();
+      expect(ws.reqHistory).toEqual([]);
+    } finally {
+      refreshHistory.mockRestore();
+    }
+  });
+
   it("flushes the request autosave and VCS checkpoint before switching projects", async () => {
     const { openProject } = await import("./project");
     const calls: string[] = [];

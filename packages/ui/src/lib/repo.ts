@@ -2,6 +2,7 @@
 //
 //   rr_collections    KV key=<colId>         → CollectionFile
 //   rr_requests       Document app_key=<colId>.<reqId> → RequestDefinition envelope
+//   rr_history        Document id=<runId>    → execution/run history envelope
 //   red_request       CONFIG env_<hex>       → StoredEnvironment (project-level vars + native secret refs)
 //   red_request       CONFIG settings_*      → project-local app settings
 //   red_request_secrets VAULT e_<hex>.s_<hex> → RedDB-native secret values
@@ -55,6 +56,7 @@ export const SYNC_EVENTS = "rr_sync_events";
 
 const MAX_HISTORY_PER_REQ = 50;
 const REQ_MIGRATION_STAGE = "rr_requests_migration_stage";
+const HIST_MIGRATION_STAGE = "rr_history_migration_stage";
 // RedDB enforces one declared model per collection, so app CONFIG and VAULT
 // data must live in separate collections.
 const APP_CONFIG = "red_request";
@@ -84,6 +86,21 @@ type RequestDocumentBody = {
   request: RequestDefinition;
 };
 
+type HistoryDocumentBody = {
+  record_type: "run_history";
+  app_key: string;
+  collection_id: string;
+  request_id: string;
+  run_ts: number;
+  request_name: string;
+  request_method: string;
+  request_url: string;
+  run_status: number;
+  run_ok: boolean;
+  duration_ms: number;
+  entry: HistoryEntry;
+};
+
 /** Cached OAuth2/OIDC token set, keyed by a connection id (hash of tokenUrl|clientId|
  *  scope|grantType). Token strings are sealed (AES-GCM) before they land here; the
  *  metadata (expiry/scope) stays in clear so the UI can show status without unsealing. */
@@ -104,27 +121,31 @@ export async function recordCounts(): Promise<{
 }> {
   const kinds: { label: string; name: string }[] = [
     { label: "collections", name: COL },
-    { label: "history", name: HIST },
     { label: "oauth tokens", name: OAUTH },
   ];
-  const [kvCounts, requestCount, envCount, settingsCount] = await Promise.all([
-    Promise.all(kinds.map((k) => db.kvCount(k.name))),
-    countRequests(),
-    db.configList<unknown>(APP_CONFIG, ENV_CONFIG_PREFIX).then((r) => r.length),
-    db.configList<unknown>(APP_CONFIG, "settings_").then((r) => r.length),
-  ]);
+  const [kvCounts, requestCount, historyCount, envCount, settingsCount] =
+    await Promise.all([
+      Promise.all(kinds.map((k) => db.kvCount(k.name))),
+      countRequests(),
+      countRunHistory(),
+      db
+        .configList<unknown>(APP_CONFIG, ENV_CONFIG_PREFIX)
+        .then((r) => r.length),
+      db.configList<unknown>(APP_CONFIG, "settings_").then((r) => r.length),
+    ]);
   const kvByLabel = new Map(kinds.map((k, i) => [k.label, kvCounts[i] ?? 0]));
   const byKind = [
     { label: "collections", count: kvByLabel.get("collections") ?? 0 },
     { label: "requests", count: requestCount },
     { label: "environments", count: envCount },
-    { label: "history", count: kvByLabel.get("history") ?? 0 },
+    { label: "history", count: historyCount },
     { label: "settings", count: settingsCount },
     { label: "oauth tokens", count: kvByLabel.get("oauth tokens") ?? 0 },
   ];
   return {
     total:
       requestCount +
+      historyCount +
       envCount +
       settingsCount +
       kvCounts.reduce((s, n) => s + n, 0),
@@ -379,6 +400,35 @@ function requestDocumentBody(
   };
 }
 
+function historyDocumentBody(entry: HistoryEntry): HistoryDocumentBody {
+  const parsed = historyEntrySchema.parse(entry);
+  return {
+    record_type: "run_history",
+    app_key: parsed.id,
+    collection_id: parsed.collectionId,
+    request_id: parsed.reqId,
+    run_ts: parsed.ts,
+    request_name: parsed.name,
+    request_method: parsed.method,
+    request_url: parsed.url,
+    run_status: parsed.status,
+    run_ok: parsed.ok,
+    duration_ms: parsed.durationMs,
+    entry: parsed,
+  };
+}
+
+function parseHistoryDocumentBody(value: unknown): HistoryEntry | null {
+  if (!isPlainRecord(value)) return null;
+  const raw = value as Partial<HistoryDocumentBody>;
+  if (raw.record_type !== "run_history" || !raw.entry) return null;
+  try {
+    return historyEntrySchema.parse(raw.entry);
+  } catch {
+    return null;
+  }
+}
+
 function parseRequestDocumentBody(value: unknown): RequestDocumentBody | null {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return null;
@@ -467,6 +517,105 @@ async function countRequests(): Promise<number> {
   for (const doc of await listRequestDocuments().catch(() => []))
     keys.add(doc.key);
   return keys.size;
+}
+
+async function countRunHistory(): Promise<number> {
+  const model = await db.collectionModel(HIST).catch(() => null);
+  if (model === "document") return db.documentCount(HIST).catch(() => 0);
+  return db.kvCount(HIST).catch(() => 0);
+}
+
+async function listHistoryDocuments(
+  filters: Record<string, string | number | boolean> = {},
+  limit?: number
+): Promise<Array<{ rid: string; value: HistoryEntry }>> {
+  const docs = await db.documentQuery<HistoryDocumentBody>(HIST, {
+    filters,
+    orderBy: { field: "run_ts", direction: "DESC" },
+    limit,
+  });
+  const out: Array<{ rid: string; value: HistoryEntry }> = [];
+  for (const doc of docs) {
+    const entry = parseHistoryDocumentBody(doc.body);
+    if (entry) out.push({ rid: doc.rid, value: entry });
+  }
+  return out;
+}
+
+async function insertMissingHistoryDocuments(
+  collection: string,
+  entries: HistoryEntry[]
+): Promise<void> {
+  const docs = await db.documentQuery<HistoryDocumentBody>(collection);
+  const have = new Set(
+    docs
+      .map((doc) => parseHistoryDocumentBody(doc.body)?.id)
+      .filter((id): id is string => typeof id === "string")
+  );
+  for (const entry of entries) {
+    const parsed = historyEntrySchema.safeParse(entry);
+    if (!parsed.success || have.has(parsed.data.id)) continue;
+    await db.documentInsert(collection, historyDocumentBody(parsed.data));
+    have.add(parsed.data.id);
+  }
+}
+
+async function legacyHistoryEntries(): Promise<HistoryEntry[]> {
+  const out: HistoryEntry[] = [];
+  for (const { value } of await db.kvList<unknown>(HIST).catch(() => [])) {
+    const parsed = historyEntrySchema.safeParse(value);
+    if (parsed.success) out.push(parsed.data);
+  }
+  return out;
+}
+
+async function stagedHistoryEntries(): Promise<HistoryEntry[]> {
+  const model = await db.collectionModel(HIST_MIGRATION_STAGE);
+  if (model !== "document") return [];
+  return (await db.documentQuery<HistoryDocumentBody>(HIST_MIGRATION_STAGE))
+    .map((doc) => parseHistoryDocumentBody(doc.body))
+    .filter((entry): entry is HistoryEntry => entry !== null);
+}
+
+async function dropHistoryMigrationStage(): Promise<void> {
+  await db.dropCollection(HIST_MIGRATION_STAGE).catch((error) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    appLog("warn", `history migration stage cleanup failed: ${detail}`);
+  });
+}
+
+async function recoverStagedHistoryMigration(): Promise<void> {
+  const staged = await stagedHistoryEntries();
+  if (staged.length === 0) return;
+  await insertMissingHistoryDocuments(HIST, staged);
+  await dropHistoryMigrationStage();
+}
+
+async function ensureRunHistoryCollection(): Promise<void> {
+  const model = await db.collectionModel(HIST);
+  if (model === "document") {
+    await db.ensureDocumentCollection(HIST);
+    await recoverStagedHistoryMigration();
+    return;
+  }
+
+  if (!model) {
+    await db.ensureDocumentCollection(HIST);
+    await recoverStagedHistoryMigration();
+    return;
+  }
+
+  const legacy = await legacyHistoryEntries();
+  const stageModel = await db.collectionModel(HIST_MIGRATION_STAGE);
+  if (stageModel) await db.dropCollection(HIST_MIGRATION_STAGE);
+  await db.ensureDocumentCollection(HIST_MIGRATION_STAGE);
+  await insertMissingHistoryDocuments(HIST_MIGRATION_STAGE, legacy);
+
+  const staged = await stagedHistoryEntries();
+  await db.dropCollection(HIST);
+  await db.ensureDocumentCollection(HIST);
+  await insertMissingHistoryDocuments(HIST, staged);
+  await dropHistoryMigrationStage();
 }
 
 async function insertMissingRequestDocuments(
@@ -736,7 +885,7 @@ export const VERSIONED_COLLECTIONS = [COL, REQ] as const;
 
 export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(COL);
-  await db.ensureKvCollection(HIST);
+  await ensureRunHistoryCollection();
   await db.ensureKvCollection(OAUTH);
   await ensureRequestCollection();
   await db.ensureVaultCollection(APP_VAULT);
@@ -810,26 +959,27 @@ export const saveUiSettings = async (settings: UiSettings) => {
 
 /** Append a run to history and prune to the last MAX_HISTORY_PER_REQ for that request. */
 export async function saveHistory(entry: HistoryEntry): Promise<void> {
-  await db.kvPut(HIST, entry.id, entry);
-  const mine: HistoryEntry[] = [];
-  for (const { value } of await db.kvList<HistoryEntry>(HIST)) {
-    if (value.reqId === entry.reqId) mine.push(value);
-  }
-  mine.sort((a, b) => b.ts - a.ts);
+  const parsed = historyEntrySchema.parse(entry);
+  await db.documentInsert(HIST, historyDocumentBody(parsed));
+  const mine = await listHistoryDocuments({
+    collection_id: parsed.collectionId,
+    request_id: parsed.reqId,
+  });
   for (let i = MAX_HISTORY_PER_REQ; i < mine.length; i++) {
     const old = mine[i]!;
-    await db.kvDelete(HIST, old.id);
+    await db.documentDelete(HIST, old.rid);
   }
 }
 
 /** All history entries, newest first (optionally scoped to a collection). */
-export async function loadHistory(colId?: string): Promise<HistoryEntry[]> {
-  const out: HistoryEntry[] = [];
-  for (const { value } of await db.kvList<HistoryEntry>(HIST)) {
-    const entry = historyEntrySchema.parse(value);
-    if (!colId || entry.collectionId === colId) out.push(entry);
-  }
-  return out.sort((a, b) => b.ts - a.ts);
+export async function loadHistory(
+  colId?: string,
+  reqId?: string
+): Promise<HistoryEntry[]> {
+  const filters: Record<string, string> = {};
+  if (colId) filters.collection_id = colId;
+  if (reqId) filters.request_id = reqId;
+  return (await listHistoryDocuments(filters)).map((h) => h.value);
 }
 
 export async function loadAll(): Promise<LoadedCollection[]> {
@@ -1326,15 +1476,13 @@ export const deleteEnvironment = async (name: string) => {
 export async function deleteCollection(colId: string): Promise<void> {
   const [docReqs, hist] = await Promise.all([
     listRequestDocuments().catch(() => []),
-    db.kvList<HistoryEntry>(HIST),
+    listHistoryDocuments({ collection_id: colId }),
   ]);
   await Promise.all([
     ...docReqs
       .filter((r) => ownedBy(colId, r.key))
       .map((r) => db.documentDelete(REQ, r.rid)),
-    ...hist
-      .filter((h) => h.value.collectionId === colId)
-      .map((h) => db.kvDelete(HIST, h.key)),
+    ...hist.map((h) => db.documentDelete(HIST, h.rid)),
   ]);
   await db.kvDelete(COL, colId);
   await emitSyncEvent(
@@ -1412,8 +1560,11 @@ export type { VcsCommit, VcsDiffSummary } from "./reddb";
 /** Recent store commits (restore points), newest first. */
 export const listCommits = (limit = 50) => db.listCommits(limit);
 export const flushPendingCommit = () => db.flushPendingCommit();
-export const commitDiffSummary = (from: string, to: string) =>
-  db.commitDiffSummary(from, to);
+export const commitDiffSummary = (
+  from: string,
+  to: string,
+  collection?: string
+) => db.commitDiffSummary(from, to, collection);
 export const resetProjectToCommit = (commitHash: string) =>
   db.resetProjectToCommit(commitHash);
 
@@ -1442,21 +1593,52 @@ export interface RequestHistoryNode {
   changedHere: boolean;
 }
 
-/** Full timeline of a request across the store's commits (newest first). Resolves the
- *  request AS OF every commit and flags the commits where it actually changed. */
+async function requestHistoryBySnapshotScan(
+  colId: string,
+  reqId: string,
+  commits: import("./reddb").VcsCommit[]
+): Promise<RequestHistoryNode[]> {
+  const values = await Promise.all(
+    commits.map((c) => requestAsOf(colId, reqId, c.hash).catch(() => null))
+  );
+  const json = values.map((v) => (v ? JSON.stringify(v) : null));
+  return commits
+    .map((commit, i) => ({
+      commit,
+      value: values[i],
+      changedHere: json[i] !== (json[i + 1] ?? null),
+    }))
+    .filter((node) => node.changedHere && node.value);
+}
+
+/** Focused timeline of a request across the store's commits (newest first).
+ *  RedDB's current diff API reports physical entity ids, not document `app_key`,
+ *  so we first narrow to commits that touched `rr_requests`, then resolve this
+ *  request AS OF only those candidates and drop unchanged candidates. */
 export async function requestHistory(
   colId: string,
   reqId: string,
   limit = 100
 ): Promise<RequestHistoryNode[]> {
   const commits = await db.listCommits(limit);
-  const values = await Promise.all(
-    commits.map((c) => requestAsOf(colId, reqId, c.hash).catch(() => null))
-  );
-  const json = values.map((v) => (v ? JSON.stringify(v) : null));
-  return commits.map((commit, i) => ({
-    commit,
-    value: values[i],
-    changedHere: json[i] !== (json[i + 1] ?? null),
-  }));
+  if (commits.length === 0) return [];
+
+  const candidateIndexes: number[] = [];
+  for (let i = 0; i < commits.length; i++) {
+    const commit = commits[i]!;
+    const parent = commit.parents[0] ?? commits[i + 1]?.hash ?? null;
+    if (!parent) {
+      candidateIndexes.push(i);
+      continue;
+    }
+    const diff = await db
+      .commitDiffSummary(parent, commit.hash, REQ)
+      .catch(() => null);
+    if (!diff) return requestHistoryBySnapshotScan(colId, reqId, commits);
+    if (diff.added > 0 || diff.removed > 0 || diff.modified > 0)
+      candidateIndexes.push(i);
+  }
+
+  const candidates = candidateIndexes.map((i) => commits[i]!);
+  return requestHistoryBySnapshotScan(colId, reqId, candidates);
 }
