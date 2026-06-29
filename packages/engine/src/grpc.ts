@@ -109,6 +109,7 @@ export interface GrpcCallInput {
 /** Make a unary gRPC call and map it onto a ResponseResult (status 0; gRPC status in meta). */
 export function grpcCall(input: GrpcCallInput): Promise<ResponseResult> {
   const started = Date.now();
+  const method = `${input.service}/${input.method}`;
   const fail = (message: string, classification = "ERROR"): ResponseResult => ({
     status: 0,
     statusText: classification,
@@ -119,6 +120,7 @@ export function grpcCall(input: GrpcCallInput): Promise<ResponseResult> {
     size: 0,
     durationMs: Date.now() - started,
     error: { message, classification },
+    meta: { grpcStatus: classification, method },
   });
 
   return new Promise<ResponseResult>((resolve) => {
@@ -178,7 +180,7 @@ export function grpcCall(input: GrpcCallInput): Promise<ResponseResult> {
         contentType: "application/json",
         size: bodyText.length,
         durationMs: Date.now() - started,
-        meta: { grpcStatus: "OK", method: `${input.service}/${input.method}` },
+        meta: { grpcStatus: "OK", method },
       });
     });
   });

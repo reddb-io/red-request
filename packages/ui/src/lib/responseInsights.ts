@@ -16,6 +16,11 @@ interface TlsMeta {
   } | null;
 }
 
+interface GrpcMeta {
+  grpcStatus?: string;
+  method?: string;
+}
+
 export type InsightTone = "info" | "good" | "warn" | "bad";
 
 export type ResponseInsight = {
@@ -65,6 +70,16 @@ function hostFor(url: string): string {
 
 function tlsFor(res: ResponseResult): TlsMeta | undefined {
   return res.meta?.tls as TlsMeta | undefined;
+}
+
+function stringMetaValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function grpcFor(res: ResponseResult): GrpcMeta | undefined {
+  const grpcStatus = stringMetaValue(res.meta?.grpcStatus);
+  const method = stringMetaValue(res.meta?.method);
+  return grpcStatus || method ? { grpcStatus, method } : undefined;
 }
 
 function remoteFor(tls: TlsMeta | undefined): string | undefined {
@@ -129,9 +144,31 @@ function looksTextual(contentType: string | undefined): boolean {
   );
 }
 
+function grpcTone(status: string | undefined, ok: boolean): InsightTone {
+  const normalized = status?.toUpperCase();
+  if (normalized === "OK") return "good";
+  if (
+    normalized &&
+    [
+      "INVALID_ARGUMENT",
+      "NOT_FOUND",
+      "ALREADY_EXISTS",
+      "PERMISSION_DENIED",
+      "UNAUTHENTICATED",
+      "UNIMPLEMENTED",
+      "RESOURCE_EXHAUSTED",
+      "FAILED_PRECONDITION",
+    ].includes(normalized)
+  ) {
+    return "warn";
+  }
+  return ok ? "info" : "bad";
+}
+
 export function buildResponseInsights(res: ResponseResult): ResponseInsight[] {
   const out: ResponseInsight[] = [];
   const tls = tlsFor(res);
+  const grpc = grpcFor(res);
   const remote = remoteFor(tls);
   out.push({
     title: "Destination",
@@ -195,6 +232,34 @@ export function buildResponseInsights(res: ResponseResult): ResponseInsight[] {
         .join(" | "),
       value: tls.cert?.san?.[0],
       tone: "info",
+    });
+  }
+
+  if (grpc) {
+    const tone = grpcTone(grpc.grpcStatus, res.ok);
+    if (grpc.method) {
+      out.push({
+        title: "gRPC method",
+        detail: grpc.method,
+        value: grpc.grpcStatus,
+        tone,
+      });
+    }
+    if (grpc.grpcStatus) {
+      out.push({
+        title: "gRPC status",
+        detail: res.error?.message
+          ? `Unary call returned ${grpc.grpcStatus}: ${res.error.message}`
+          : `Unary call returned ${grpc.grpcStatus}.`,
+        value: grpc.grpcStatus,
+        tone,
+      });
+    }
+    out.push({
+      title: "Unary call duration",
+      detail: "Wall-clock duration reported by the gRPC invocation.",
+      value: fmtMs(res.durationMs),
+      tone: res.durationMs > 1000 ? "warn" : "info",
     });
   }
 
