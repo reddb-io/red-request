@@ -694,6 +694,7 @@ class Workspace {
       return true;
     };
     this.loadError = null;
+    repo.setProjectSyncQueueEnabled(this.usesProjectSyncQueue());
     if (showLoading) {
       this.loadingGeneration = generation;
       this.loading = {
@@ -818,8 +819,22 @@ class Workspace {
     }
   }
 
+  private usesProjectSyncQueue(): boolean {
+    const project = this.project;
+    if (!project) return false;
+    if (project.connection_string?.trim()) return true;
+    const source = project.source?.toLowerCase();
+    return Boolean(source && source !== "local");
+  }
+
   private startSyncLoop(): void {
-    if (!isTauri || this.syncLoopRunning || this.screen !== "app") return;
+    if (
+      !isTauri ||
+      this.syncLoopRunning ||
+      this.screen !== "app" ||
+      !this.usesProjectSyncQueue()
+    )
+      return;
     const generation = ++this.syncLoopGeneration;
     this.syncLoopRunning = true;
     void this.syncLoop(generation);
@@ -852,7 +867,8 @@ class Workspace {
     while (
       generation === this.syncLoopGeneration &&
       this.syncLoopRunning &&
-      this.screen === "app"
+      this.screen === "app" &&
+      this.usesProjectSyncQueue()
     ) {
       try {
         const messages = await repo.readSyncEvents(
