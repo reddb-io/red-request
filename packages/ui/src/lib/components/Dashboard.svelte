@@ -173,7 +173,14 @@
               <td class="py-1.5 pr-3 {row.errors ? 'text-red-400' : 'text-emerald-400'}">
                 {row.errorRate}% errors
               </td>
-              <td class="mono py-1.5 pr-2 text-fg-muted">{row.avgMs}ms</td>
+              <td class="py-1.5 pr-2">
+                <div class="mono text-fg-muted">{row.avgMs}ms</div>
+                {#if row.avgProxyMs !== undefined && row.avgOriginMs !== undefined}
+                  <div class="mono text-[10px] text-fg-faint">
+                    proxy {row.avgProxyMs}ms · origin {row.avgOriginMs}ms
+                  </div>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>

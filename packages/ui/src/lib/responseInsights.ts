@@ -31,6 +31,7 @@ const PHASES = [
   { key: "dns", label: "DNS" },
   { key: "tcp", label: "TCP" },
   { key: "tls", label: "TLS" },
+  { key: "originConnect", label: "Origin" },
   { key: "firstByte", label: "Wait" },
   { key: "total", label: "Download" },
 ] as const;
@@ -329,21 +330,27 @@ export function buildResponseInsights(res: ResponseResult): ResponseInsight[] {
 
   if (
     typeof res.timings?.proxyConnect === "number" ||
-    typeof res.timings?.proxyTls === "number" ||
-    typeof res.timings?.originConnect === "number"
+    typeof res.timings?.proxyTls === "number"
   ) {
-    const proxyMs = Math.max(
-      0,
-      res.timings?.proxyConnect ?? 0,
-      res.timings?.proxyTls ?? 0,
-      res.timings?.originConnect ?? 0
-    );
+    const proxyMs =
+      (phaseMs(res.timings, "proxyConnect") ?? 0) +
+      (phaseMs(res.timings, "proxyTls") ?? 0);
+    const totalMs = res.timings?.total ?? res.durationMs;
     out.push({
       title: "Proxy route observed",
-      detail: "This request reported proxy or tunneled-origin timing.",
+      detail: "This request reported proxy handshake or tunnel timing.",
       value: proxyMs ? fmtMs(proxyMs) : undefined,
-      tone: "info",
+      tone: proxyMs > Math.max(500, totalMs * 0.4) ? "warn" : "info",
     });
+    if (totalMs > proxyMs) {
+      out.push({
+        title: "Origin after proxy",
+        detail:
+          "Remaining measured time after the proxy route was established.",
+        value: fmtMs(totalMs - proxyMs),
+        tone: "info",
+      });
+    }
   }
 
   const dominant = segments(res.timings).reduce<

@@ -95,4 +95,30 @@ describe("buildResponseInsights", () => {
       ])
     );
   });
+
+  it("separates proxy route latency from the remaining origin time", () => {
+    const insights = buildResponseInsights(
+      response({
+        durationMs: 900,
+        timings: {
+          proxyConnect: 220,
+          proxyTls: 340,
+          firstByte: 700,
+          total: 900,
+        },
+      })
+    );
+
+    expect(
+      insights.find((i) => i.title === "Proxy route observed")
+    ).toMatchObject({
+      value: "340 ms",
+      tone: "info",
+    });
+    expect(
+      insights.find((i) => i.title === "Origin after proxy")
+    ).toMatchObject({
+      value: "560 ms",
+    });
+  });
 });

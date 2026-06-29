@@ -90,6 +90,7 @@ describe("ResponsePanel insights", () => {
     expect(screen.getByText("api.example.test")).toBeTruthy();
     expect(screen.getByText("203.0.113.10:443")).toBeTruthy();
     expect(screen.getByText("Proxy route observed")).toBeTruthy();
+    expect(screen.getByText("Origin after proxy")).toBeTruthy();
     expect(screen.getByText("Redirect target")).toBeTruthy();
     expect(screen.getByText("https://api.example.test/login")).toBeTruthy();
     expect(screen.getByText("Response is not cacheable")).toBeTruthy();
