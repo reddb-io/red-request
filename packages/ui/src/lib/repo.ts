@@ -66,6 +66,7 @@ const SETTINGS_UI_KEY = "settings_ui";
 const SETTINGS_GLOBALS_KEY = "settings_globals";
 const SETTINGS_ENV_ORDER_KEY = "settings_env_order";
 let runtimeSyncClientId: string | null = null;
+let projectSyncQueueEnabled = false;
 
 type RequestDocumentBody = {
   record_type: "request";
@@ -214,6 +215,10 @@ function syncClientId(): string {
   return runtimeSyncClientId;
 }
 
+export function setProjectSyncQueueEnabled(enabled: boolean): void {
+  projectSyncQueueEnabled = enabled;
+}
+
 export const currentSyncClientId = async () => syncClientId();
 
 export interface DispatcherIdentity {
@@ -251,6 +256,7 @@ async function emitSyncEvent(
   entity: ProjectSyncEntity,
   payload: Record<string, unknown> = {}
 ): Promise<ProjectSyncEvent | null> {
+  if (!projectSyncQueueEnabled) return null;
   const event = projectSyncEventSchema.parse({
     v: 1,
     id: newSyncId(),
@@ -734,7 +740,7 @@ export async function ensureStore(): Promise<void> {
   await db.ensureKvCollection(OAUTH);
   await ensureRequestCollection();
   await db.ensureVaultCollection(APP_VAULT);
-  await db.ensureQueue(SYNC_EVENTS);
+  if (projectSyncQueueEnabled) await db.ensureQueue(SYNC_EVENTS);
   // Opt the document collections into MVCC versioning so commits time-travel.
   // Idempotent + best-effort: an older sidecar that lacks versioning just no-ops.
   for (const c of VERSIONED_COLLECTIONS) await db.setVersioned(c);

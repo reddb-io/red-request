@@ -60,12 +60,36 @@ function syncPayload(query: string): Record<string, unknown> {
 }
 
 afterEach(() => {
+  repo.setProjectSyncQueueEnabled(false);
   vi.clearAllTimers();
   vi.useRealTimers();
 });
 
 describe("project sync events", () => {
-  it("creates the durable fanout queue during store boot", async () => {
+  it("does not create the durable fanout queue during local store boot", async () => {
+    const queries: string[] = [];
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT model FROM red.collections WHERE name = 'rr_requests' LIMIT 1"
+        )
+          return rqlOk([{ model: "document" }]);
+        return rqlOk([]);
+      },
+    });
+
+    await repo.ensureStore();
+
+    expect(queries).not.toContain(
+      "CREATE QUEUE IF NOT EXISTS rr_sync_events FANOUT"
+    );
+  });
+
+  it("creates the durable fanout queue during shared store boot", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     const queries: string[] = [];
 
     ipc({
@@ -188,7 +212,32 @@ describe("project sync events", () => {
     expect(queries).toContain("QUEUE ACK rr_sync_events GROUP rr_client '123'");
   });
 
-  it("emits metadata-only request save events", async () => {
+  it("does not emit queue events for local request saves by default", async () => {
+    const queries: string[] = [];
+    const req = request("r1", { name: "Create user" });
+
+    ipc({
+      rql: (query) => {
+        queries.push(query);
+        if (
+          query ===
+          "SELECT rid, body FROM rr_requests WHERE app_key = 'c1.r1' LIMIT 1"
+        )
+          return rqlOk([]);
+        return rqlOk([]);
+      },
+      request: () => reply(200, { ok: true, rid: 7 }),
+    });
+
+    await repo.saveRequest("c1", req);
+
+    expect(
+      queries.filter((query) => query.startsWith("QUEUE PUSH rr_sync_events "))
+    ).toHaveLength(0);
+  });
+
+  it("emits metadata-only request save events for shared projects", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-27T12:00:00Z"));
     const queries: string[] = [];
@@ -243,7 +292,8 @@ describe("project sync events", () => {
     expect(queries.join("\n")).not.toContain("settings_sync_client_id");
   });
 
-  it("does not fail local request saves when sync event emission is unavailable", async () => {
+  it("does not fail shared request saves when sync event emission is unavailable", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const queries: string[] = [];
     const requests: Array<{
@@ -306,7 +356,8 @@ describe("project sync events", () => {
     expect(queries).toEqual([]);
   });
 
-  it("keeps one runtime id for all local events without writing it into the project", async () => {
+  it("keeps one runtime id for all shared events without writing it into the project", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     const queries: string[] = [];
 
     ipc({
@@ -342,6 +393,7 @@ describe("project sync events", () => {
   });
 
   it("does not leak secret values into queue events", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     const queries: string[] = [];
     const env = storedEnvironmentSchema.parse({
       name: "dev",
@@ -379,6 +431,7 @@ describe("project sync events", () => {
   });
 
   it("emits collection delete events after deleting owned rows", async () => {
+    repo.setProjectSyncQueueEnabled(true);
     const queries: string[] = [];
 
     ipc({

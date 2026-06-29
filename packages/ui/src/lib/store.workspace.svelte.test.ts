@@ -27,6 +27,7 @@ vi.mock("./repo", () => ({
   loadEnvironments: vi.fn(async () => []),
   loadAll: vi.fn(async () => []),
   loadGlobals: vi.fn(async () => null),
+  setProjectSyncQueueEnabled: vi.fn(),
   syncConsumerName: vi.fn(async () => "rr_client"),
   currentSyncClientId: vi.fn(async () => "client-1"),
   currentDispatcherIdentity: vi.fn(async () => ({
@@ -737,8 +738,18 @@ describe("Workspace persistence coordination", () => {
       .mockResolvedValueOnce([collection("c1", [request("r2")])]);
 
     ws.screen = "app";
+    ws.project = {
+      db_path: "https://team.reddb.io",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "https://team.reddb.io",
+      name: "Remote RedDB",
+    };
     await ws.loadStore();
     expect(ws.collections[0]?.requests.map((req) => req.id)).toEqual(["r1"]);
+    expect(repo.setProjectSyncQueueEnabled).toHaveBeenLastCalledWith(true);
 
     await vi.waitUntil(
       () => vi.mocked(repo.ackSyncEvent).mock.calls.length > 0
@@ -755,7 +766,33 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loading).toBeNull();
   });
 
-  it("acks local sync events without reloading the project", async () => {
+  it("does not poll the project sync queue for local file projects", async () => {
+    vi.useFakeTimers();
+    vi.mocked(repo.loadAll).mockResolvedValue([
+      collection("c1", [request("r1")]),
+    ]);
+
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/local-project/.red/request/app.rdb",
+      project_dir: "/tmp/local-project",
+      is_project: true,
+      arg_launched: false,
+      source: "local",
+      connection_string: null,
+      name: "local-project",
+    };
+
+    await ws.loadStore();
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(repo.setProjectSyncQueueEnabled).toHaveBeenLastCalledWith(false);
+    expect(repo.readSyncEvents).not.toHaveBeenCalled();
+    expect(repo.ackSyncEvent).not.toHaveBeenCalled();
+    expect(repo.loadAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("acks own shared sync events without reloading the project", async () => {
     vi.useFakeTimers();
     let readCalls = 0;
     vi.mocked(repo.readSyncEvents).mockImplementation(async () => {
@@ -785,6 +822,15 @@ describe("Workspace persistence coordination", () => {
     ]);
 
     ws.screen = "app";
+    ws.project = {
+      db_path: "https://team.reddb.io",
+      project_dir: null,
+      is_project: false,
+      arg_launched: false,
+      source: "remote-http",
+      connection_string: "https://team.reddb.io",
+      name: "Remote RedDB",
+    };
     await ws.loadStore();
     await vi.waitUntil(
       () => vi.mocked(repo.ackSyncEvent).mock.calls.length > 0
