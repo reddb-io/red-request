@@ -1343,6 +1343,8 @@ class Workspace {
       | "proxyName"
       | "proxyUrl"
       | "dispatcherClientId"
+      | "dispatcherHost"
+      | "dispatcherUser"
     >
   > {
     const col = this.activeCollection;
@@ -1368,16 +1370,16 @@ class Workspace {
             return proxyToUrl(p) === proxyUrl;
           })
         : undefined);
-    const dispatcherClientId = await repo
-      .currentSyncClientId()
-      .catch(() => undefined);
+    const dispatcher = await repo.currentDispatcherIdentity().catch(() => null);
     return {
       profileId: profile?.id,
       profileName: profile?.name || undefined,
       proxyId: savedProxy?.id,
       proxyName: savedProxy?.name || undefined,
       proxyUrl,
-      dispatcherClientId,
+      dispatcherClientId: dispatcher?.clientId,
+      dispatcherHost: dispatcher?.host,
+      dispatcherUser: dispatcher?.user,
     };
   }
 

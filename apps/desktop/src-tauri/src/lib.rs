@@ -2909,6 +2909,27 @@ fn app_log(level: String, message: String) {
     }
 }
 
+#[derive(Serialize)]
+struct DispatcherIdentity {
+    host: Option<String>,
+    user: Option<String>,
+}
+
+fn env_first(keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+#[tauri::command]
+fn dispatcher_identity() -> DispatcherIdentity {
+    DispatcherIdentity {
+        host: env_first(&["HOSTNAME", "COMPUTERNAME"]),
+        user: env_first(&["USER", "USERNAME"]),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Headless `--version` / `-V`: print and exit BEFORE building the GUI, so installers and
@@ -3117,6 +3138,7 @@ pub fn run() {
             reddb_version,
             oauth_authorize,
             app_log,
+            dispatcher_identity,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -161,7 +161,14 @@
                   </div>
                 {/if}
               </td>
-              <td class="mono py-1.5 pr-3 text-xs text-fg-muted">{row.dispatcher}</td>
+              <td class="py-1.5 pr-3">
+                <div class="mono text-xs text-fg-muted">{row.dispatcher}</div>
+                {#if row.dispatcherClientId && row.dispatcherClientId !== row.dispatcher}
+                  <div class="mono text-[10px] text-fg-faint" title={row.dispatcherClientId}>
+                    {row.dispatcherClientId}
+                  </div>
+                {/if}
+              </td>
               <td class="py-1.5 pr-3 text-fg">{row.runs} run{row.runs === 1 ? "" : "s"}</td>
               <td class="py-1.5 pr-3 {row.errors ? 'text-red-400' : 'text-emerald-400'}">
                 {row.errorRate}% errors

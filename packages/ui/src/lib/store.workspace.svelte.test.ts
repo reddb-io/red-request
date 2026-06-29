@@ -29,6 +29,11 @@ vi.mock("./repo", () => ({
   loadGlobals: vi.fn(async () => null),
   syncConsumerName: vi.fn(async () => "rr_client"),
   currentSyncClientId: vi.fn(async () => "client-1"),
+  currentDispatcherIdentity: vi.fn(async () => ({
+    clientId: "client-1",
+    host: "dev-laptop",
+    user: "alice",
+  })),
   readSyncEvents: vi.fn(async () => []),
   ackSyncEvent: vi.fn(async () => {}),
 }));
@@ -1353,7 +1358,7 @@ describe("Workspace persistence coordination", () => {
     expect(rpc.cookiesClear).toHaveBeenCalledWith({ key: "profile:pf-1" });
   });
 
-  it("records profile, proxy and dispatcher identity in request history", async () => {
+  it("records profile, proxy and dispatcher host/user identity in request history", async () => {
     ws.network = {
       proxies: [
         {
@@ -1416,6 +1421,8 @@ describe("Workspace persistence coordination", () => {
         proxyName: "Team proxy",
         proxyUrl: "socks5h://proxy.internal:1080",
         dispatcherClientId: "client-1",
+        dispatcherHost: "dev-laptop",
+        dispatcherUser: "alice",
         env: "Prod",
       })
     );
