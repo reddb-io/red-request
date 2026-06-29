@@ -614,6 +614,47 @@ export async function documentSearchByTextField<T>(
     .filter((row): row is DocumentRecord<T> => row !== null);
 }
 
+export interface DocumentQueryOptions {
+  filters?: Record<string, string | number | boolean>;
+  orderBy?: { field: string; direction?: "ASC" | "DESC" };
+  limit?: number;
+}
+
+function literal(value: string | number | boolean): string {
+  if (typeof value === "number")
+    return Number.isFinite(value) ? String(value) : "0";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return `'${esc(value)}'`;
+}
+
+/** Query documents through promoted top-level body fields. */
+export async function documentQuery<T>(
+  collection: string,
+  options: DocumentQueryOptions = {}
+): Promise<DocumentRecord<T>[]> {
+  const filters = options.filters ?? {};
+  const clauses = Object.entries(filters).map(
+    ([field, value]) => `${ident(field)} = ${literal(value)}`
+  );
+  const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const order = options.orderBy
+    ? ` ORDER BY ${ident(options.orderBy.field)} ${
+        options.orderBy.direction === "ASC" ? "ASC" : "DESC"
+      }`
+    : "";
+  const limit =
+    typeof options.limit === "number"
+      ? ` LIMIT ${queryLimit(options.limit)}`
+      : "";
+  const r = await rql(
+    `SELECT rid, body FROM ${ident(collection)}${where}${order}${limit}`
+  );
+  if (!r.ok) return [];
+  return r.records
+    .map((row) => parseDocumentRecord<T>(row))
+    .filter((row): row is DocumentRecord<T> => row !== null);
+}
+
 /** Read one document by a promoted top-level body field. */
 export async function documentFindByField<T>(
   collection: string,
@@ -830,9 +871,11 @@ export async function migrationSummary(): Promise<{
 // --- RedDB-native VCS ("Git for Data") -------------------------------------
 // reddb ≥1.15 retains MVCC history for KV collections opted into versioning, so
 // `SELECT ... AS OF COMMIT '<hash>'` time-travels each key. Writes go through the
-// gRPC `red connect` conduit (autocommit connection 0); a commit is an HTTP
-// `POST /repo/commits {connection_id:0}` on the SAME embedded server — it pins the
-// current global snapshot (root_xid), so AS OF reads of prior versions resolve.
+// gRPC `red connect` conduit (autocommit connection 0). RedDB currently exposes
+// VCS metadata operations (commit log, diff, reset, create commit) through the
+// `/repo/*` API while versioned data reads stay in RQL (`AS OF COMMIT`) over the
+// same project connection. A commit pins the current global snapshot (root_xid),
+// so AS OF reads of prior versions resolve.
 // Validated against reddb 1.15.0; commit needs author+email and AS OF needs the full
 // 64-char hash. Commits are best-effort: the data is already persisted by the write,
 // so a failed commit only costs a missing restore point (never data).
@@ -1015,11 +1058,14 @@ export async function listCommits(limit = 50): Promise<VcsCommit[]> {
 
 export async function commitDiffSummary(
   from: string,
-  to: string
+  to: string,
+  collection?: string
 ): Promise<VcsDiffSummary | null> {
+  const query = new URLSearchParams({ summary: "true" });
+  if (collection) query.set("collection", collection);
   const r = await reddbHttp(
     "GET",
-    `/repo/commits/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}?summary=true`
+    `/repo/commits/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}?${query}`
   );
   if (!r.ok) return null;
   const root = r.json as { result?: Record<string, unknown> } | null;

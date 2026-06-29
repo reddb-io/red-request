@@ -27,4 +27,13 @@ export const MIGRATIONS: MigrationDef[] = [
       CREATE INDEX IF NOT EXISTS rr_requests_name ON rr_requests (request_name)
     `,
   },
+  {
+    name: "run_history_document_indexes",
+    sql: `
+      CREATE INDEX IF NOT EXISTS rr_history_app_key ON rr_history (app_key) USING HASH;
+      CREATE INDEX IF NOT EXISTS rr_history_collection_id ON rr_history (collection_id) USING HASH;
+      CREATE INDEX IF NOT EXISTS rr_history_request_id ON rr_history (request_id) USING HASH;
+      CREATE INDEX IF NOT EXISTS rr_history_run_ts ON rr_history (run_ts)
+    `,
+  },
 ];

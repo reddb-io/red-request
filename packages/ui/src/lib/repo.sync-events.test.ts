@@ -450,11 +450,41 @@ describe("project sync events", () => {
               },
             },
           ]);
-        if (query === "LIST KV rr_history")
+        if (
+          query ===
+          "SELECT rid, body FROM rr_history WHERE collection_id = 'c1' ORDER BY run_ts DESC"
+        )
           return rqlOk([
             {
-              key: "h1",
-              value: JSON.stringify({ collectionId: "c1" }),
+              rid: 4,
+              body: {
+                record_type: "run_history",
+                app_key: "h1",
+                collection_id: "c1",
+                request_id: "r1",
+                run_ts: 1,
+                request_name: "GET",
+                request_method: "GET",
+                request_url: "https://example.test",
+                run_status: 200,
+                run_ok: true,
+                duration_ms: 1,
+                entry: {
+                  id: "h1",
+                  reqId: "r1",
+                  collectionId: "c1",
+                  name: "GET",
+                  method: "GET",
+                  url: "https://example.test",
+                  ts: 1,
+                  status: 200,
+                  ok: true,
+                  durationMs: 1,
+                  size: 0,
+                  testsPassed: 0,
+                  testsFailed: 0,
+                },
+              },
             },
           ]);
         return rqlOk([]);
@@ -465,6 +495,7 @@ describe("project sync events", () => {
     await repo.deleteCollection("c1");
 
     expect(queries).toContain("KV DELETE rr_collections.'c1'");
+    expect(queries).not.toContain("LIST KV rr_history");
     const pushed = queries.filter((query) =>
       query.startsWith("QUEUE PUSH rr_sync_events ")
     );
