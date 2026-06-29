@@ -23,6 +23,11 @@ describe("networkIdentityRows", () => {
         status: 502,
         ok: false,
         durationMs: 250,
+        timings: {
+          proxyConnect: 120,
+          proxyTls: 170,
+          total: 250,
+        },
         profileId: "pf-team",
         profileName: "Team identity",
         proxyId: "px-team",
@@ -39,6 +44,11 @@ describe("networkIdentityRows", () => {
         status: 200,
         ok: true,
         durationMs: 100,
+        timings: {
+          proxyConnect: 40,
+          proxyTls: 60,
+          total: 100,
+        },
         profileId: "pf-team",
         profileName: "Team identity",
         proxyId: "px-team",
@@ -65,6 +75,9 @@ describe("networkIdentityRows", () => {
         errorRate: 50,
         okRate: 50,
         avgMs: 175,
+        avgProxyMs: 115,
+        avgOriginMs: 60,
+        proxyMeasuredRuns: 2,
         lastTs: 200,
       },
     ]);

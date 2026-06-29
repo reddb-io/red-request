@@ -57,6 +57,11 @@ describe("Dashboard network identity metrics", () => {
         status: 502,
         ok: false,
         durationMs: 250,
+        timings: {
+          proxyConnect: 120,
+          proxyTls: 170,
+          total: 250,
+        },
         size: 0,
         testsPassed: 0,
         testsFailed: 0,
@@ -80,6 +85,11 @@ describe("Dashboard network identity metrics", () => {
         status: 200,
         ok: true,
         durationMs: 100,
+        timings: {
+          proxyConnect: 40,
+          proxyTls: 60,
+          total: 100,
+        },
         size: 0,
         testsPassed: 0,
         testsFailed: 0,
@@ -106,5 +116,6 @@ describe("Dashboard network identity metrics", () => {
     expect(screen.getByText("2 runs")).toBeTruthy();
     expect(screen.getByText("50% errors")).toBeTruthy();
     expect(screen.getAllByText("175ms").length).toBeGreaterThan(0);
+    expect(screen.getByText("proxy 115ms · origin 60ms")).toBeTruthy();
   });
 });
