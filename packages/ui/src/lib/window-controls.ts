@@ -11,6 +11,15 @@ async function currentWindow(): Promise<TauriWindow> {
   return getCurrentWindow();
 }
 
+async function toggleMaximizeViaRust(): Promise<boolean | null> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<boolean>("window_toggle_maximize");
+  } catch {
+    return null;
+  }
+}
+
 export async function watchMaximizedState(
   setMaximized: (value: boolean) => void
 ): Promise<() => void> {
@@ -26,6 +35,8 @@ export async function minimizeWindow(): Promise<void> {
 }
 
 export async function toggleMaximizeWindow(): Promise<boolean> {
+  const nativeState = await toggleMaximizeViaRust();
+  if (nativeState !== null) return nativeState;
   const w = await currentWindow();
   await w.toggleMaximize();
   return w.isMaximized();

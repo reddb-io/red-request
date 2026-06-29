@@ -230,6 +230,98 @@ describe("Workspace persistence coordination", () => {
     expect(repo.flushPendingCommit).toHaveBeenCalledTimes(1);
   });
 
+  it("captures a dirty active request before project switch even if autosave has not scheduled yet", async () => {
+    const { openProject } = await import("./project");
+    const calls: string[] = [];
+    vi.mocked(repo.saveRequest).mockImplementationOnce(async (_colId, req) => {
+      calls.push(`save:${req.url}`);
+    });
+    vi.mocked(openProject).mockImplementationOnce(async () => {
+      calls.push("open");
+      return {
+        db_path: "/tmp/new-project/.red/request/app.rdb",
+        project_dir: "/tmp/new-project",
+        is_project: true,
+        arg_launched: false,
+        name: "new-project",
+      };
+    });
+    vi.mocked(repo.loadAll).mockResolvedValueOnce([]);
+
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    ws.collections = [collection("c1", [request("r1")])];
+    ws.selectRequest("c1", "r1");
+    ws.activeReq!.url = "https://example.test/edited-before-effect";
+
+    await ws.chooseProject("/tmp/new-project");
+
+    expect(calls).toEqual([
+      "save:https://example.test/edited-before-effect",
+      "open",
+    ]);
+    expect(repo.saveRequest).toHaveBeenCalledWith(
+      "c1",
+      expect.objectContaining({
+        id: "r1",
+        url: "https://example.test/edited-before-effect",
+      })
+    );
+    expect(repo.flushPendingCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for an in-flight autosave before switching projects", async () => {
+    vi.useFakeTimers();
+    const { openProject } = await import("./project");
+    let resolveSave!: () => void;
+    vi.mocked(repo.saveRequest).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    vi.mocked(openProject).mockResolvedValueOnce({
+      db_path: "/tmp/new-project/.red/request/app.rdb",
+      project_dir: "/tmp/new-project",
+      is_project: true,
+      arg_launched: false,
+      name: "new-project",
+    });
+    vi.mocked(repo.loadAll).mockResolvedValueOnce([]);
+
+    ws.screen = "app";
+    ws.project = {
+      db_path: "/tmp/old-project/.red/request/app.rdb",
+      project_dir: "/tmp/old-project",
+      is_project: true,
+      arg_launched: false,
+      name: "old-project",
+    };
+    ws.collections = [collection("c1", [request("r1")])];
+    ws.activeColId = "c1";
+    ws.activeReq = request("r1", { url: "https://example.test/in-flight" });
+    ws.scheduleSave();
+
+    await vi.advanceTimersByTimeAsync(300);
+    expect(repo.saveRequest).toHaveBeenCalledTimes(1);
+
+    const switching = ws.chooseProject("/tmp/new-project");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(openProject).not.toHaveBeenCalled();
+
+    resolveSave();
+    await switching;
+
+    expect(openProject).toHaveBeenCalledTimes(1);
+  });
+
   it("init exits a stuck project_info call into recovery", async () => {
     vi.useFakeTimers();
     const { projectInfo } = await import("./project");
@@ -252,8 +344,12 @@ describe("Workspace persistence coordination", () => {
 
   it("chooseProject does not wait invisibly forever when the previous project's autosave hangs", async () => {
     vi.useFakeTimers();
+    let resolveSave!: () => void;
     vi.mocked(repo.saveRequest).mockImplementationOnce(
-      () => new Promise<never>(() => {})
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve;
+        })
     );
     ws.screen = "app";
     ws.project = {
@@ -268,7 +364,7 @@ describe("Workspace persistence coordination", () => {
     ws.activeReq = request("r1", { url: "https://example.test" });
     ws.scheduleSave();
 
-    void ws.chooseProject("/tmp/new-project");
+    const switching = ws.chooseProject("/tmp/new-project");
     await vi.advanceTimersByTimeAsync(0);
 
     expect(ws.screen).toBe("app");
@@ -283,6 +379,9 @@ describe("Workspace persistence coordination", () => {
     expect(ws.loading).toBeNull();
     expect(ws.loadError).toMatch(/saving current project/i);
     expect(ws.recoveryProjectDir).toBe("/tmp/new-project");
+
+    resolveSave();
+    await switching;
   });
 
   it("chooseConnectionString exposes recovery when the previous project's autosave fails", async () => {

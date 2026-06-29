@@ -44,6 +44,18 @@ fn arm_close_watchdog(window: tauri::Window) {
     });
 }
 
+#[tauri::command]
+async fn window_toggle_maximize(window: tauri::Window) -> Result<bool, String> {
+    let was_maximized = window.is_maximized().map_err(|e| e.to_string())?;
+    if was_maximized {
+        window.unmaximize().map_err(|e| e.to_string())?;
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // OS keychain bridge (verbatim pattern from red-ui). Secrets referenced by an
 // environment's `secretRefs` live here, never in the YAML on disk.
@@ -3165,6 +3177,7 @@ pub fn run() {
             oauth_authorize,
             app_log,
             dispatcher_identity,
+            window_toggle_maximize,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
