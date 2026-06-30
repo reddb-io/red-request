@@ -37,6 +37,7 @@
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
+      hour12: false,
     });
   }
 
@@ -207,7 +208,9 @@
                     : ''}"
                 >
                   <span class="h-1.5 w-1.5 rounded-full {levelDotClass(entry.level)}"></span>
-                  <time class="mono text-fg-faint" datetime={new Date(entry.ts).toISOString()}
+                  <time
+                    class="mono whitespace-nowrap text-fg-faint"
+                    datetime={new Date(entry.ts).toISOString()}
                     >{timeLabel(entry.ts)}</time
                   >
                   <span class="capitalize {levelClass(entry.level)}">{sourceLabel(entry.source)}</span>
