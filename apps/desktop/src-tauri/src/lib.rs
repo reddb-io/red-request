@@ -1577,6 +1577,68 @@ async fn reddb_wait_ready(bind: &str) -> Result<(), String> {
     }
 }
 
+/// Build a human-readable failure reason from the sidecar's captured startup output. The
+/// fatal error is on the last non-empty stderr line (e.g. "internal auth error: no vault
+/// certificate" or "database is locked"); fall back to a generic message when nothing was
+/// captured before the process died.
+fn startup_failure_reason(startup_log: &std::sync::Arc<Mutex<String>>) -> String {
+    let tail = startup_log
+        .lock()
+        .map(|b| b.trim().to_string())
+        .unwrap_or_default();
+    match tail.lines().rev().find(|l| !l.trim().is_empty()) {
+        Some(reason) => format!("reddb exited before becoming ready: {}", reason.trim()),
+        None => "reddb exited before becoming ready".to_string(),
+    }
+}
+
+/// Whether a failed open looks like a genuinely unreadable / incompatible on-disk store —
+/// the *only* case where rotating the file aside and starting fresh is justified. Transient
+/// or environmental failures (a stale file lock, a missing vault certificate, a port clash,
+/// a slow start that merely timed out) must NOT trigger the destructive rotation: doing so
+/// turns a recoverable hiccup into apparent data loss. Conservative by design — defaults to
+/// "not corrupt" unless a positive corruption marker is present.
+fn looks_like_corrupt_store(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    // Recoverable / environmental — never treat as corruption. NOTE: do not list the
+    // generic "exited before becoming ready" wrapper here — that prefix is present on BOTH
+    // recoverable and corrupt early exits; classify by the real reason that follows it.
+    const TRANSIENT: &[&str] = &[
+        "did not become ready",
+        "vault certificate",
+        "certificate",
+        "locked",
+        "in use",
+        "address already in use",
+        "permission denied",
+        "resource temporarily unavailable",
+        "timed out",
+        "timeout",
+        "connection refused",
+        "auth",
+    ];
+    if TRANSIENT.iter().any(|m| e.contains(m)) {
+        return false;
+    }
+    // Positive markers of an unreadable / incompatible store.
+    const CORRUPT: &[&str] = &[
+        "incompatible",
+        "corrupt",
+        "bad magic",
+        "magic number",
+        "unsupported version",
+        "format version",
+        "checksum",
+        "btree",
+        "b-tree",
+        "deserialize",
+        "decode error",
+        "malformed",
+        "invalid header",
+    ];
+    CORRUPT.iter().any(|m| e.contains(m))
+}
+
 fn comparable_db_path(path: &std::path::Path) -> String {
     let normalized = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let value = normalized.to_string_lossy().replace('\\', "/");
@@ -1816,36 +1878,80 @@ async fn spawn_reddb_once(
     // (bumping `gen`); without the generation guard the old child's async Terminated
     // event would null the URL the NEW sidecar just published → app stuck "reddb not
     // ready" (black screen on switch).
+    // The sidecar logs to its own rotating file only AFTER telemetry init — fatal early
+    // errors (a missing vault certificate, a locked store, an incompatible on-disk format)
+    // are printed to stderr and exit before that, so without capturing the child's output
+    // here a failed start is a black box. `startup_log` keeps a bounded tail of that output;
+    // `exit_tx`/`exit_rx` lets the readiness wait fail fast with the real reason instead of
+    // blindly polling a dead port for the full 20s.
+    let startup_log = std::sync::Arc::new(Mutex::new(String::new()));
+    let (exit_tx, exit_rx) = oneshot::channel::<()>();
     let watch = app.clone();
+    let watch_log = startup_log.clone();
     tauri::async_runtime::spawn(async move {
+        let mut exit_tx = Some(exit_tx);
         while let Some(ev) = rx.recv().await {
-            if let CommandEvent::Terminated(_) = ev {
-                if let Some(s) = watch.try_state::<EmbeddedDb>() {
-                    // Stale child from a superseded generation — its death is expected
-                    // (we killed it to switch projects); leave the current state alone.
-                    if s.gen.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
-                        break;
-                    }
-                    if let Ok(mut u) = s.url.lock() {
-                        *u = None;
-                    }
-                    // Clear the gRPC addr too so the next RQL call respawns the server, and
-                    // drop the now-orphaned `red connect` REPL that pointed at it.
-                    if let Ok(mut g) = s.grpc.lock() {
-                        *g = None;
-                    }
-                    if let Ok(mut sess) = s.rql.try_lock() {
-                        if let Some(old) = sess.take() {
-                            let _ = old.child.kill();
+            match ev {
+                CommandEvent::Stdout(bytes) | CommandEvent::Stderr(bytes) => {
+                    let chunk = String::from_utf8_lossy(&bytes);
+                    for line in chunk.lines() {
+                        let line = line.trim();
+                        if !line.is_empty() {
+                            log::warn!(target: "reddb", "sidecar[gen {my_gen}]: {line}");
                         }
                     }
-                    log::warn!(target: "reddb", "sidecar terminated (gen {my_gen}); url cleared, next request will respawn");
+                    if let Ok(mut buf) = watch_log.lock() {
+                        buf.push_str(&chunk);
+                        // Keep only a bounded tail — the failure reason is in the last lines.
+                        if buf.len() > 4096 {
+                            let mut cut = buf.len() - 4096;
+                            while cut < buf.len() && !buf.is_char_boundary(cut) {
+                                cut += 1;
+                            }
+                            *buf = buf[cut..].to_string();
+                        }
+                    }
                 }
-                break;
+                CommandEvent::Terminated(_) => {
+                    // Wake the readiness wait immediately (fail fast on early exit).
+                    if let Some(tx) = exit_tx.take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(s) = watch.try_state::<EmbeddedDb>() {
+                        // Stale child from a superseded generation — its death is expected
+                        // (we killed it to switch projects); leave the current state alone.
+                        if s.gen.load(std::sync::atomic::Ordering::SeqCst) != my_gen {
+                            break;
+                        }
+                        if let Ok(mut u) = s.url.lock() {
+                            *u = None;
+                        }
+                        // Clear the gRPC addr too so the next RQL call respawns the server, and
+                        // drop the now-orphaned `red connect` REPL that pointed at it.
+                        if let Ok(mut g) = s.grpc.lock() {
+                            *g = None;
+                        }
+                        if let Ok(mut sess) = s.rql.try_lock() {
+                            if let Some(old) = sess.take() {
+                                let _ = old.child.kill();
+                            }
+                        }
+                        log::warn!(target: "reddb", "sidecar terminated (gen {my_gen}); url cleared, next request will respawn");
+                    }
+                    break;
+                }
+                // CommandEvent is #[non_exhaustive]; ignore any other event kinds.
+                _ => {}
             }
         }
     });
-    if let Err(e) = reddb_wait_ready(&bind).await {
+    // Fail fast: if the child exits before binding, surface its captured stderr instead of
+    // waiting the full 20s on a dead port. A live-but-slow start still gets the deadline.
+    let ready = tokio::select! {
+        r = reddb_wait_ready(&bind) => r,
+        _ = exit_rx => Err(startup_failure_reason(&startup_log)),
+    };
+    if let Err(e) = ready {
         log::error!(target: "reddb", "sidecar not ready (gen {my_gen}) on {bind}: {e}; killing it");
         let _ = child.kill();
         return Err(e);
@@ -2000,6 +2106,19 @@ async fn start_reddb_locked(app: &tauri::AppHandle) -> Result<(), String> {
                 .map(|m| m.len() > 0)
                 .unwrap_or(false);
             if !nonempty {
+                return Err(e);
+            }
+            // Only rotate a non-empty store aside when it's *genuinely* unreadable. A
+            // transient failure — a stale lock, a missing vault certificate, a slow start
+            // that timed out — must not destroy data: surface the error and let the UI
+            // offer Retry. (This used to fire on any persistent failure, which turned a
+            // credential/lock hiccup into apparent data loss — see #186-era startup loop.)
+            if !looks_like_corrupt_store(&e) {
+                log::error!(
+                    target: "reddb",
+                    "could not open {} after retries ({e}); leaving the store intact (failure looks transient/recoverable, not corrupt) — not rotating",
+                    db_path.display()
+                );
                 return Err(e);
             }
             let bak = db_path.with_file_name(format!(
@@ -2364,10 +2483,11 @@ fn normalize_http_query_response(status: u16, text: &str) -> Result<String, Stri
 mod tests {
     use super::{
         docker_host_http_base, embedded_red_resource_name, ensure_reddb_vault_certificate,
-        is_vault_certificate, normalize_http_query_response, open_with_key,
-        parse_project_connection, reddb_server_argv_matches_db, reddb_vault_cert_path,
-        remote_http_base_for_source, seal_with_key, sidecar_env, ParsedProjectConnection,
-        ProjectSource, EMBEDDED_REDDB_STORAGE_PRESET,
+        is_vault_certificate, looks_like_corrupt_store, normalize_http_query_response,
+        open_with_key, parse_project_connection, reddb_server_argv_matches_db,
+        reddb_vault_cert_path, remote_http_base_for_source, seal_with_key, sidecar_env,
+        startup_failure_reason, ParsedProjectConnection, ProjectSource,
+        EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
     fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -2427,6 +2547,59 @@ mod tests {
         assert!(err.contains("invalid RedDB vault certificate"));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn transient_open_failures_do_not_count_as_corrupt() {
+        // None of these justify rotating the user's store aside — they're recoverable.
+        for err in [
+            "embedded reddb did not become ready within 20s",
+            "reddb exited before becoming ready: internal auth error: no vault certificate: set REDDB_CERTIFICATE or REDDB_CERTIFICATE_FILE",
+            "reddb exited before becoming ready: database is locked",
+            "failed to start reddb: Address already in use (os error 98)",
+            "permission denied",
+        ] {
+            assert!(
+                !looks_like_corrupt_store(err),
+                "transient failure wrongly classified as corrupt: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn genuinely_unreadable_stores_count_as_corrupt() {
+        for err in [
+            "reddb exited before becoming ready: incompatible on-disk format version 3 (expected 4)",
+            "reddb exited before becoming ready: bad magic number in header",
+            "store is corrupt: btree page checksum mismatch",
+            "malformed database: invalid header",
+        ] {
+            assert!(
+                looks_like_corrupt_store(err),
+                "corrupt store wrongly classified as transient: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn startup_failure_reason_surfaces_last_stderr_line() {
+        let log = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        {
+            let mut buf = log.lock().unwrap();
+            buf.push_str("telemetry initialised\n");
+            buf.push_str("red server: internal auth error: no vault certificate\n\n");
+        }
+        let reason = startup_failure_reason(&log);
+        assert_eq!(
+            reason,
+            "reddb exited before becoming ready: red server: internal auth error: no vault certificate"
+        );
+
+        let empty = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        assert_eq!(
+            startup_failure_reason(&empty),
+            "reddb exited before becoming ready"
+        );
     }
 
     #[test]
