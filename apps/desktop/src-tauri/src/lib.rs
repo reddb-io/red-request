@@ -395,6 +395,49 @@ fn ensure_reddb_vault_certificate(db_path: &std::path::Path) -> Result<std::path
     Ok(cert_path)
 }
 
+/// Physical companion files/dirs a reddb store keeps next to its main `.rdb`. The serverless
+/// storage layout holds the page metadata OUT OF BAND in `.meta.rdbx` / `-meta`; the WAL,
+/// double-write buffer, header, ops journal and VCS index live alongside too. Renaming the
+/// `.rdb` ALONE orphans these, and a store missing its `.meta.rdbx` is UNOPENABLE under the
+/// serverless preset ("invalid physical metadata JSON: No such file or directory"). So any
+/// move of a store must carry the whole set. `.vault-cert` is deliberately excluded — it is
+/// reused at the live path across generations and unseals every store sealed with it.
+const DB_COMPANION_SUFFIXES: &[&str] = &[
+    "-hdr",
+    "-uwal",
+    "-dwb",
+    "-meta",
+    ".meta.rdbx",
+    ".ops",
+    ".red",
+    ".result-cache.l2",
+    ".result-cache.l2-dwb",
+];
+
+/// Move a reddb store and ALL its physical companions together (see [`DB_COMPANION_SUFFIXES`]),
+/// so a rotated-aside or restored store stays openable. The main `.rdb` move is the operation
+/// that must succeed; companion moves are best-effort (a missing or locked sidecar must not
+/// abort an already-completed rename), each renamed to track the new base name.
+fn move_db_fileset(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)?;
+    let (Some(from_dir), Some(from_name)) = (from.parent(), from.file_name()) else {
+        return Ok(());
+    };
+    let (Some(to_dir), Some(to_name)) = (to.parent(), to.file_name()) else {
+        return Ok(());
+    };
+    let from_name = from_name.to_string_lossy();
+    let to_name = to_name.to_string_lossy();
+    for suffix in DB_COMPANION_SUFFIXES {
+        let comp_from = from_dir.join(format!("{from_name}{suffix}"));
+        if comp_from.exists() {
+            let comp_to = to_dir.join(format!("{to_name}{suffix}"));
+            let _ = std::fs::rename(&comp_from, &comp_to);
+        }
+    }
+    Ok(())
+}
+
 fn spawn_engine(
     app: &tauri::AppHandle,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
@@ -2015,12 +2058,12 @@ fn recover_incompatible_backup(db_path: &std::path::Path) {
     }
     if cur_size > 0 {
         let aside = db_path.with_file_name(format!("{stem}.superseded-{}", now_secs()));
-        if let Err(e) = std::fs::rename(db_path, &aside) {
+        if let Err(e) = move_db_fileset(db_path, &aside) {
             log::error!(target: "reddb", "recovery: could not move current store aside: {e}");
             return;
         }
     }
-    match std::fs::rename(&bak_path, db_path) {
+    match move_db_fileset(&bak_path, db_path) {
         Ok(_) => log::warn!(
             target: "reddb",
             "recovery: restored {} ({bak_size} bytes) over the fresh store at {}",
@@ -2129,12 +2172,15 @@ async fn start_reddb_locked(app: &tauri::AppHandle) -> Result<(), String> {
                     .unwrap_or_else(|| "app.rdb".to_string()),
                 now_secs()
             ));
-            std::fs::rename(&db_path, &bak).map_err(|re| {
+            // Move the WHOLE fileset (incl. `.meta.rdbx`) so the rotated-aside store stays
+            // openable for recovery — renaming the bare `.rdb` orphans its physical metadata
+            // and makes the backup unrecoverable under the serverless preset.
+            move_db_fileset(&db_path, &bak).map_err(|re| {
                 format!("reddb could not open the database ({e}) and backup failed: {re}")
             })?;
             log::warn!(
                 target: "reddb",
-                "could not open {} after retries ({e}); backed it up to {} and started fresh",
+                "could not open {} after retries ({e}); backed it up (with companions) to {} and started fresh",
                 db_path.display(), bak.display()
             );
             spawn_reddb_once(&app, &db_path).await?
@@ -2483,10 +2529,10 @@ fn normalize_http_query_response(status: u16, text: &str) -> Result<String, Stri
 mod tests {
     use super::{
         docker_host_http_base, embedded_red_resource_name, ensure_reddb_vault_certificate,
-        is_vault_certificate, looks_like_corrupt_store, normalize_http_query_response,
-        open_with_key, parse_project_connection, reddb_server_argv_matches_db,
-        reddb_vault_cert_path, remote_http_base_for_source, seal_with_key, sidecar_env,
-        startup_failure_reason, ParsedProjectConnection, ProjectSource,
+        is_vault_certificate, looks_like_corrupt_store, move_db_fileset,
+        normalize_http_query_response, open_with_key, parse_project_connection,
+        reddb_server_argv_matches_db, reddb_vault_cert_path, remote_http_base_for_source,
+        seal_with_key, sidecar_env, startup_failure_reason, ParsedProjectConnection, ProjectSource,
         EMBEDDED_REDDB_STORAGE_PRESET,
     };
 
@@ -2600,6 +2646,88 @@ mod tests {
             startup_failure_reason(&empty),
             "reddb exited before becoming ready"
         );
+    }
+
+    #[test]
+    fn move_db_fileset_carries_companions_and_keeps_cert() {
+        let dir = temp_test_dir("fileset-move");
+        let db = dir.join("app.rdb");
+        // main store + the physical companions that make it openable, plus an ops dir
+        std::fs::write(&db, b"main").unwrap();
+        for suffix in [
+            "-hdr",
+            "-uwal",
+            "-dwb",
+            "-meta",
+            ".meta.rdbx",
+            ".result-cache.l2",
+        ] {
+            std::fs::write(dir.join(format!("app.rdb{suffix}")), suffix.as_bytes()).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("app.rdb.ops")).unwrap();
+        std::fs::write(dir.join("app.rdb.ops/manifest.json"), b"{}").unwrap();
+        // the shared cert and an unrelated sibling must NOT be moved
+        std::fs::write(dir.join("app.rdb.vault-cert"), b"deadbeef").unwrap();
+        std::fs::write(dir.join("backups"), b"x").unwrap();
+
+        let bak = dir.join("app.rdb.corrupt-42.bak");
+        move_db_fileset(&db, &bak).unwrap();
+
+        // main + every companion moved under the new base name
+        assert!(!db.exists(), "original .rdb should be gone");
+        assert!(bak.exists(), "renamed .rdb should exist");
+        for suffix in [
+            "-hdr",
+            "-uwal",
+            "-dwb",
+            "-meta",
+            ".meta.rdbx",
+            ".result-cache.l2",
+        ] {
+            assert!(
+                dir.join(format!("app.rdb.corrupt-42.bak{suffix}")).exists(),
+                "companion {suffix} should have moved"
+            );
+            assert!(
+                !dir.join(format!("app.rdb{suffix}")).exists(),
+                "old companion {suffix} should be gone"
+            );
+        }
+        assert!(
+            dir.join("app.rdb.corrupt-42.bak.ops/manifest.json")
+                .exists(),
+            "ops dir should have moved with its contents"
+        );
+        // cert and unrelated files stay put
+        assert!(
+            dir.join("app.rdb.vault-cert").exists(),
+            "vault-cert must NOT move"
+        );
+        assert!(!dir.join("app.rdb.corrupt-42.bak.vault-cert").exists());
+        assert!(dir.join("backups").exists());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn move_db_fileset_round_trips_without_companions() {
+        // A legacy bak created by the old single-file rotation has no companions; moving it
+        // must still succeed (best-effort companions) and not invent files.
+        let dir = temp_test_dir("fileset-bare");
+        let bak = dir.join("app.rdb.incompatible-7.bak");
+        std::fs::write(&bak, b"data").unwrap();
+        let db = dir.join("app.rdb");
+
+        move_db_fileset(&bak, &db).unwrap();
+
+        assert!(db.exists());
+        assert!(!bak.exists());
+        assert!(
+            !dir.join("app.rdb.meta.rdbx").exists(),
+            "must not fabricate companions"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
