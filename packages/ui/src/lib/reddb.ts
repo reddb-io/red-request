@@ -871,14 +871,19 @@ export async function migrationSummary(): Promise<{
 // --- RedDB-native VCS ("Git for Data") -------------------------------------
 // reddb ≥1.15 retains MVCC history for KV collections opted into versioning, so
 // `SELECT ... AS OF COMMIT '<hash>'` time-travels each key. Writes go through the
-// gRPC `red connect` conduit (autocommit connection 0). RedDB currently exposes
-// VCS metadata operations (commit log, diff, reset, create commit) through the
-// `/repo/*` API while versioned data reads stay in RQL (`AS OF COMMIT`) over the
-// same project connection. A commit pins the current global snapshot (root_xid),
-// so AS OF reads of prior versions resolve.
-// Validated against reddb 1.15.0; commit needs author+email and AS OF needs the full
-// 64-char hash. Commits are best-effort: the data is already persisted by the write,
-// so a failed commit only costs a missing restore point (never data).
+// gRPC `red connect` conduit (autocommit connection 0). Since reddb 1.19 the entire
+// native VCS surface is RQL — the `/repo/*` HTTP transport was retired — so commit
+// (`CHECKPOINT`), log/diff (`red.commits` / `red.diff(a,b)`), and `RESET` all ride
+// the same `red connect` project connection as the data reads. The connection id is
+// implicit (`current_connection_id()` on the server), so nothing is passed out of band
+// and a remote (`reds://`) project is routed correctly by the conduit itself.
+// A checkpoint pins the current global snapshot (root_xid), so AS OF reads of prior
+// versions resolve. Author is a single `name <email>` string and AS OF needs the full
+// 64-char hash. Checkpoints are best-effort: the data is already persisted by the
+// write, so a failed checkpoint only costs a missing restore point (never data).
+// Note: reddb 1.19's RQL `CHECKPOINT` is allow-empty; the debounced, write-gated
+// callers below ensure a checkpoint only follows a real edit, so empty restore points
+// stay rare.
 
 /** Raw request to the embedded reddb HTTP/repo API, via the Rust `reddb_request`
  *  proxy (sidesteps the webview mixed-content block, frames Content-Length). */
@@ -968,27 +973,53 @@ export interface VcsDiffSummary {
 const COMMIT_AUTHOR = "red-request";
 const COMMIT_EMAIL = "app@red-request.local";
 
-function reddbError(r: { status: number; json: unknown }): string {
-  const root = r.json as { error?: unknown; message?: unknown } | null;
-  const error = root?.error ?? root?.message;
-  return typeof error === "string" && error.trim()
-    ? error
-    : `RedDB request failed with status ${r.status}`;
+/** RQL scalars can arrive as numbers or numeric strings depending on the column type
+ *  the conduit serialises; coerce to a finite number, else 0. */
+function coerceVcsNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
-/** Create a commit pinning the current snapshot. Returns the full commit hash, or
- *  null when nothing changed / the server declined (non-fatal). */
+/** `red.commits.parents` may arrive as a JSON array or a JSON-encoded array string. */
+function coerceVcsStringArray(value: unknown): string[] {
+  const arr =
+    typeof value === "string"
+      ? (() => {
+          try {
+            return JSON.parse(value);
+          } catch {
+            return [];
+          }
+        })()
+      : value;
+  return Array.isArray(arr)
+    ? arr.filter((p): p is string => typeof p === "string")
+    : [];
+}
+
+/** Create a commit (RedDB VCS "checkpoint") pinning the current snapshot. Returns the
+ *  full commit hash, or null when the statement is declined (non-fatal). */
 export async function commit(message: string): Promise<string | null> {
-  const r = await reddbHttp("POST", "/repo/commits", {
-    connection_id: 0,
-    message,
-    // reddb's /repo/commits wants author as an object {name,email}.
-    author: { name: COMMIT_AUTHOR, email: COMMIT_EMAIL },
-    allow_empty: false,
-  });
-  if (!r.ok) return null;
-  const hash = (r.json as { result?: { hash?: string } })?.result?.hash;
-  return typeof hash === "string" ? hash : null;
+  try {
+    const author = `${COMMIT_AUTHOR} <${COMMIT_EMAIL}>`;
+    const r = await rql(`CHECKPOINT '${esc(message)}' AUTHOR '${esc(author)}'`);
+    if (!r.ok) return null;
+    // CHECKPOINT yields a status message rather than a row, so read the new HEAD hash
+    // back from the commit log (newest = greatest height) over the same connection.
+    const head = await rql(
+      `SELECT hash FROM red.commits ORDER BY height DESC LIMIT 1`
+    );
+    const hash = head.ok ? head.records[0]?.hash : undefined;
+    return typeof hash === "string" ? hash : null;
+  } catch {
+    // Best-effort: the data is already persisted by the write; a failed checkpoint
+    // (e.g. sidecar mid-restart, after rql's retry budget) only costs a restore point.
+    return null;
+  }
 }
 
 let commitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1033,95 +1064,71 @@ export async function flushPendingCommit(): Promise<string | null> {
   return startCommit(pendingMessage);
 }
 
-/** Recent commits, newest first. */
+/** Recent commits, newest first. Reads the `red.commits` virtual table over RQL. */
 export async function listCommits(limit = 50): Promise<VcsCommit[]> {
-  const r = await reddbHttp("GET", `/repo/commits?limit=${limit}`);
+  const n = Math.max(1, Math.floor(limit));
+  const r = await rql(
+    `SELECT hash, message, author_name, timestamp_ms, parents, height ` +
+      `FROM red.commits ORDER BY height DESC LIMIT ${n}`
+  );
   if (!r.ok) return [];
-  // Accept either {result:{commits:[...]}} or {result:[...]} or a bare array.
-  const root = r.json as
-    | { result?: { commits?: unknown[] } | unknown[] }
-    | unknown[]
-    | null;
-  const raw = Array.isArray(root)
-    ? root
-    : Array.isArray((root as { result?: unknown[] })?.result)
-      ? ((root as { result: unknown[] }).result as unknown[])
-      : (((root as { result?: { commits?: unknown[] } })?.result?.commits ??
-          []) as unknown[]);
   const out: VcsCommit[] = [];
-  for (const c of raw) {
-    const o = c as Record<string, unknown>;
+  for (const o of r.records) {
     const hash = o.hash;
     if (typeof hash !== "string") continue;
-    const author = o.author as { name?: string } | string | undefined;
     out.push({
       hash,
       message: typeof o.message === "string" ? o.message : "",
-      author:
-        typeof author === "string" ? author : (author?.name ?? COMMIT_AUTHOR),
-      timestampMs:
-        typeof o.timestamp_ms === "number"
-          ? o.timestamp_ms
-          : typeof o.timestampMs === "number"
-            ? o.timestampMs
-            : 0,
-      parents: Array.isArray(o.parents)
-        ? (o.parents as unknown[]).filter(
-            (p): p is string => typeof p === "string"
-          )
-        : [],
-      height: typeof o.height === "number" ? o.height : 0,
+      author: typeof o.author_name === "string" ? o.author_name : COMMIT_AUTHOR,
+      timestampMs: coerceVcsNumber(o.timestamp_ms),
+      parents: coerceVcsStringArray(o.parents),
+      height: coerceVcsNumber(o.height),
     });
   }
   return out;
 }
 
+/** Summarise the diff between two commits via the `red.diff(a,b)` table-valued
+ *  function. The TVF emits one row per changed entity (`collection`, `entity_id`,
+ *  `change`); counts are aggregated client-side and an optional collection filter is
+ *  applied here (the TVF takes only the two commit-ish arguments). */
 export async function commitDiffSummary(
   from: string,
   to: string,
   collection?: string
 ): Promise<VcsDiffSummary | null> {
-  const query = new URLSearchParams({ summary: "true" });
-  if (collection) query.set("collection", collection);
-  const r = await reddbHttp(
-    "GET",
-    `/repo/commits/${encodeURIComponent(from)}/diff/${encodeURIComponent(to)}?${query}`
+  const r = await rql(
+    `SELECT collection, entity_id, change FROM red.diff('${esc(from)}', '${esc(to)}')`
   );
   if (!r.ok) return null;
-  const root = r.json as { result?: Record<string, unknown> } | null;
-  const result = root?.result;
-  if (!result) return null;
-  const entries = Array.isArray(result.entries) ? result.entries : [];
-  return {
-    from: typeof result.from === "string" ? result.from : from,
-    to: typeof result.to === "string" ? result.to : to,
-    added: typeof result.added === "number" ? result.added : 0,
-    removed: typeof result.removed === "number" ? result.removed : 0,
-    modified: typeof result.modified === "number" ? result.modified : 0,
-    entries: entries
-      .map((entry): VcsDiffEntry | null => {
-        const e = entry as Record<string, unknown>;
-        const collection = e.collection;
-        const entityId = e.entity_id;
-        const change = e.change;
-        if (
-          typeof collection !== "string" ||
-          typeof entityId !== "string" ||
-          (change !== "added" && change !== "removed" && change !== "modified")
-        )
-          return null;
-        return { collection, entityId, change };
-      })
-      .filter((entry): entry is VcsDiffEntry => entry !== null),
-  };
+  let added = 0;
+  let removed = 0;
+  let modified = 0;
+  const entries: VcsDiffEntry[] = [];
+  for (const e of r.records) {
+    const coll = e.collection;
+    const entityId = e.entity_id;
+    const change = e.change;
+    if (
+      typeof coll !== "string" ||
+      typeof entityId !== "string" ||
+      (change !== "added" && change !== "removed" && change !== "modified")
+    )
+      continue;
+    if (collection && coll !== collection) continue;
+    if (change === "added") added++;
+    else if (change === "removed") removed++;
+    else modified++;
+    entries.push({ collection: coll, entityId, change });
+  }
+  return { from, to, added, removed, modified, entries };
 }
 
 export async function resetProjectToCommit(commitHash: string): Promise<void> {
-  const r = await reddbHttp("POST", "/repo/sessions/0/reset", {
-    target: commitHash,
-    mode: "hard",
-  });
-  if (!r.ok) throw new Error(reddbError(r));
+  // RESET targets the current `red connect` connection (implicit connection id),
+  // which is the project's autocommit session — the same one writes/reads use.
+  const r = await rql(`RESET HARD TO '${esc(commitHash)}'`);
+  if (!r.ok) throw new Error(r.error ?? "RedDB RESET failed");
 }
 
 /** Time-travel read: the JSON value of a KV `key` as of `commitHash` (full 64-char

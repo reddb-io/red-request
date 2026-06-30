@@ -409,83 +409,93 @@ describe("runMigrations", () => {
 });
 
 describe("commit", () => {
-  it("posts to /repo/commits with a nested author object and returns the hash", async () => {
-    let seen: { path: string; body: unknown } | null = null;
+  it("issues CHECKPOINT with a `name <email>` author and returns the new HEAD hash", async () => {
+    const seen: string[] = [];
     ipc({
-      request: (method, path, body) => {
-        seen = { path, body: JSON.parse(body ?? "{}") };
-        expect(method).toBe("POST");
-        return reply(200, { ok: true, result: { hash: "a".repeat(64) } });
+      rql: (q) => {
+        seen.push(q);
+        if (q.startsWith("CHECKPOINT"))
+          return rqlOk([{ message: `checkpoint ${"a".repeat(64)}` }]);
+        if (q.includes("FROM red.commits"))
+          return rqlOk([{ hash: "a".repeat(64) }]);
+        return rqlOk();
       },
     });
 
     const hash = await db.commit("save request Foo");
 
     expect(hash).toBe("a".repeat(64));
-    expect(seen!.path).toBe("/repo/commits");
-    const sent = seen!.body as Record<string, unknown>;
-    expect(sent.connection_id).toBe(0);
-    expect(sent.message).toBe("save request Foo");
-    // reddb's parse_author reads author.name / author.email — must be an object.
-    expect(sent.author).toMatchObject({
-      name: expect.any(String),
-      email: expect.any(String),
-    });
+    const checkpoint = seen.find((q) => q.startsWith("CHECKPOINT"))!;
+    expect(checkpoint).toContain("save request Foo");
+    // author is a single quoted `name <email>` literal, not a nested object.
+    expect(checkpoint).toMatch(/AUTHOR '[^']+ <[^']+>'/);
+    // HEAD is read back from the red.commits virtual table.
+    expect(seen.some((q) => q.includes("FROM red.commits"))).toBe(true);
   });
 
-  it("returns null when the server declines (non-2xx)", async () => {
+  it("returns null when the statement is declined", async () => {
     ipc({
-      request: () => reply(409, { ok: false, error: "nothing to commit" }),
+      rql: (q) =>
+        q.startsWith("CHECKPOINT")
+          ? reply(200, { ok: false, error: "checkpoint failed" })
+          : rqlOk(),
     });
     expect(await db.commit("noop")).toBeNull();
-  });
-
-  it("returns null on a transport error", async () => {
-    mockIPC(() => {
-      throw new Error("sidecar down");
-    });
-    expect(await db.commit("x")).toBeNull();
   });
 });
 
 describe("listCommits", () => {
-  it("parses the {ok,result:[...]} shape with author objects and timestamp_ms", async () => {
+  it("selects red.commits and maps author_name/timestamp_ms/parents", async () => {
+    let sql = "";
     ipc({
-      request: (_m, path) => {
-        expect(path).toContain("/repo/commits");
-        return reply(200, {
-          ok: true,
-          result: [
-            {
-              hash: "h1",
-              message: "save request Foo",
-              author: { name: "red-request", email: "app@red-request.local" },
-              timestamp_ms: 1700000000000,
-            },
-            {
-              hash: "h2",
-              message: "delete request",
-              author: { name: "red-request" },
-              timestamp_ms: 1700000001000,
-            },
-          ],
-        });
+      rql: (q) => {
+        sql = q;
+        return rqlOk([
+          {
+            hash: "h1",
+            message: "save request Foo",
+            author_name: "red-request",
+            timestamp_ms: 1700000000000,
+            parents: ["p0"],
+            height: 1,
+          },
+          {
+            hash: "h2",
+            message: "delete request",
+            author_name: "red-request",
+            // numeric columns may serialise as strings over the conduit.
+            timestamp_ms: "1700000001000",
+            parents: '["h1"]',
+            height: "2",
+          },
+        ]);
       },
     });
 
     const commits = await db.listCommits(10);
+    expect(sql).toContain("FROM red.commits");
+    expect(sql).toContain("ORDER BY height DESC");
+    expect(sql).toContain("LIMIT 10");
     expect(commits).toHaveLength(2);
     expect(commits[0]).toMatchObject({
       hash: "h1",
       message: "save request Foo",
       author: "red-request",
       timestampMs: 1700000000000,
+      parents: ["p0"],
+      height: 1,
     });
-    expect(commits[1]!.hash).toBe("h2");
+    // string-encoded scalars are coerced.
+    expect(commits[1]).toMatchObject({
+      hash: "h2",
+      timestampMs: 1700000001000,
+      parents: ["h1"],
+      height: 2,
+    });
   });
 
   it("returns [] on failure", async () => {
-    ipc({ request: () => reply(500, "boom") });
+    ipc({ rql: () => reply(200, { ok: false, error: "boom" }) });
     expect(await db.listCommits()).toEqual([]);
   });
 });
@@ -546,44 +556,53 @@ describe("setVersioned", () => {
 });
 
 describe("commitSoon", () => {
+  // Each commit() makes two RQL calls — CHECKPOINT then a HEAD read — so the
+  // checkpoint count is what these debounce assertions track.
+  const checkpointCounter = (hash: string) => {
+    let checkpoints = 0;
+    return {
+      get count() {
+        return checkpoints;
+      },
+      rql: (q: string) => {
+        if (q.startsWith("CHECKPOINT")) {
+          checkpoints++;
+          return rqlOk([{ message: `checkpoint ${hash}` }]);
+        }
+        if (q.includes("FROM red.commits")) return rqlOk([{ hash }]);
+        return rqlOk();
+      },
+    };
+  };
+
   it("can flush a pending debounced commit immediately", async () => {
     vi.useFakeTimers();
-    let commits = 0;
-    ipc({
-      request: () => {
-        commits++;
-        return reply(200, { ok: true, result: { hash: "e".repeat(64) } });
-      },
-    });
+    const counter = checkpointCounter("e".repeat(64));
+    ipc({ rql: counter.rql });
 
     db.commitSoon("edit", 1500);
 
     await expect(db.flushPendingCommit()).resolves.toBe("e".repeat(64));
-    expect(commits).toBe(1);
+    expect(counter.count).toBe(1);
 
     await vi.advanceTimersByTimeAsync(1500);
-    expect(commits).toBe(1);
+    expect(counter.count).toBe(1);
 
     vi.useRealTimers();
   });
 
   it("debounces a burst of edits into a single commit", async () => {
     vi.useFakeTimers();
-    let commits = 0;
-    ipc({
-      request: () => {
-        commits++;
-        return reply(200, { ok: true, result: { hash: "d".repeat(64) } });
-      },
-    });
+    const counter = checkpointCounter("d".repeat(64));
+    ipc({ rql: counter.rql });
 
     db.commitSoon("edit", 1500);
     db.commitSoon("edit", 1500);
     db.commitSoon("edit", 1500);
-    expect(commits).toBe(0); // nothing fired yet
+    expect(counter.count).toBe(0); // nothing fired yet
 
     await vi.advanceTimersByTimeAsync(1500);
-    expect(commits).toBe(1); // one coalesced commit
+    expect(counter.count).toBe(1); // one coalesced commit
 
     vi.useRealTimers();
   });
@@ -593,12 +612,17 @@ describe("commitSoon", () => {
     let resolveCommit!: () => void;
     let commits = 0;
     ipc({
-      request: async () => {
-        commits++;
-        await new Promise<void>((resolve) => {
-          resolveCommit = resolve;
-        });
-        return reply(200, { ok: true, result: { hash: "f".repeat(64) } });
+      rql: async (q) => {
+        if (q.startsWith("CHECKPOINT")) {
+          commits++;
+          await new Promise<void>((resolve) => {
+            resolveCommit = resolve;
+          });
+          return rqlOk([{ message: `checkpoint ${"f".repeat(64)}` }]);
+        }
+        if (q.includes("FROM red.commits"))
+          return rqlOk([{ hash: "f".repeat(64) }]);
+        return rqlOk();
       },
     });
 
@@ -624,29 +648,23 @@ describe("commitSoon", () => {
 });
 
 describe("project VCS time travel", () => {
-  it("loads a commit diff summary", async () => {
-    let seen: { method: string; path: string; body: string | null } | null =
-      null;
+  it("summarises a diff from the red.diff(a,b) table-valued function", async () => {
+    let sql = "";
     ipc({
-      request: (method, path, body) => {
-        seen = { method, path, body };
-        return reply(200, {
-          ok: true,
-          result: {
-            from: "a".repeat(64),
-            to: "b".repeat(64),
-            added: 1,
-            removed: 0,
-            modified: 2,
-            entries: [
-              {
-                collection: "rr_requests",
-                entity_id: "col.req",
-                change: "modified",
-              },
-            ],
+      rql: (q) => {
+        sql = q;
+        return rqlOk([
+          {
+            collection: "rr_requests",
+            entity_id: "col.req",
+            change: "modified",
           },
-        });
+          {
+            collection: "rr_requests",
+            entity_id: "col.req2",
+            change: "added",
+          },
+        ]);
       },
     });
 
@@ -655,39 +673,52 @@ describe("project VCS time travel", () => {
     ).resolves.toMatchObject({
       added: 1,
       removed: 0,
-      modified: 2,
+      modified: 1,
       entries: [
-        {
-          collection: "rr_requests",
-          entityId: "col.req",
-          change: "modified",
-        },
+        { collection: "rr_requests", entityId: "col.req", change: "modified" },
+        { collection: "rr_requests", entityId: "col.req2", change: "added" },
       ],
     });
-    expect(seen).toEqual({
-      method: "GET",
-      path: `/repo/commits/${"a".repeat(64)}/diff/${"b".repeat(64)}?summary=true`,
-      body: null,
-    });
+    expect(sql).toContain(`red.diff('${"a".repeat(64)}', '${"b".repeat(64)}')`);
   });
 
-  it("restores the project by hard-resetting session 0 to a commit", async () => {
-    let seen: { method: string; path: string; body: string | null } | null =
-      null;
+  it("filters the diff client-side by collection", async () => {
     ipc({
-      request: (method, path, body) => {
-        seen = { method, path, body };
-        return reply(200, { ok: true, result: {} });
+      rql: () =>
+        rqlOk([
+          { collection: "rr_requests", entity_id: "a", change: "added" },
+          { collection: "rr_secrets", entity_id: "b", change: "added" },
+        ]),
+    });
+
+    const summary = await db.commitDiffSummary(
+      "a".repeat(64),
+      "b".repeat(64),
+      "rr_requests"
+    );
+    expect(summary!.added).toBe(1);
+    expect(summary!.entries).toEqual([
+      { collection: "rr_requests", entityId: "a", change: "added" },
+    ]);
+  });
+
+  it("restores the project with RESET HARD TO a commit", async () => {
+    let sql = "";
+    ipc({
+      rql: (q) => {
+        sql = q;
+        return rqlOk([{ message: "ok" }]);
       },
     });
 
     await expect(
       db.resetProjectToCommit("f".repeat(64))
     ).resolves.toBeUndefined();
-    expect(seen).toEqual({
-      method: "POST",
-      path: "/repo/sessions/0/reset",
-      body: JSON.stringify({ target: "f".repeat(64), mode: "hard" }),
-    });
+    expect(sql).toBe(`RESET HARD TO '${"f".repeat(64)}'`);
+  });
+
+  it("throws when RESET is declined", async () => {
+    ipc({ rql: () => reply(200, { ok: false, error: "no such commit" }) });
+    await expect(db.resetProjectToCommit("f".repeat(64))).rejects.toThrow();
   });
 });
