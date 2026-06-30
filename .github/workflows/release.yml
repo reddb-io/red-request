@@ -26,7 +26,10 @@ env:
   # links the build host's glibc and crash-loops on older distros, "GLIBC_2.39 not found",
   # → black/loading screen). Also persists collection contracts so KV collections survive a
   # server restart (reddb fix a8139467).
-  REDDB_VERSION: v1.18.0
+  # v1.19.0: native VCS is fully exposed through RQL (CHECKPOINT / red.commits /
+  # red.diff / RESET); the HTTP /repo/* transport was retired, so the app's VCS
+  # client requires this sidecar — do not pin below v1.19.0.
+  REDDB_VERSION: v1.19.0
   # Empty means release builds download RedDB's prebuilt `red-*` assets through
   # scripts/fetch-reddb.mjs. Set only for emergency validation against an
   # unpublished RedDB commit; source builds make Linux/Windows release legs slow.

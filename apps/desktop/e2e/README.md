@@ -3,7 +3,7 @@
 Drives the **real packaged app** through Tauri's WebDriver path: WebdriverIO →
 `tauri-driver` → `WebKitWebDriver` → the WebKitGTK webview → the Rust backend →
 the embedded reddb sidecar. This is the only layer that exercises the whole stack
-(including native VCS: `History` → `/repo/commits` + `SELECT … AS OF`).
+(including native VCS: `History` → `red.commits` / `red.diff` + `SELECT … AS OF`, all over RQL).
 
 > Tauri WebDriver supports **Linux and Windows only** (no macOS). This project is
 > Linux-first, so that's the target.

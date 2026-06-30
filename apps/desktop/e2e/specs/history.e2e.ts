@@ -5,8 +5,8 @@
 // request); fill those in for your environment, then remove `.skip`.
 //
 // This is the layer that smoke-tests the feature end to end: clicking History
-// triggers reddb_request(GET /repo/commits) + reddb_rql(SELECT ... AS OF) against
-// the real sidecar.
+// triggers reddb_rql (red.commits / red.diff + SELECT ... AS OF) against the real
+// sidecar — the native VCS surface is fully RQL since reddb 1.19 (no /repo/* HTTP).
 
 describe.skip("request history (native VCS)", () => {
   it("opens the History modal for a request and lists versions", async () => {

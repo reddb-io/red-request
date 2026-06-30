@@ -531,88 +531,59 @@ describe("Document-backed request storage", () => {
     const h2 = "2".repeat(64);
     const h1 = "1".repeat(64);
     const asOfQueries: string[] = [];
-    const diffPaths: string[] = [];
+    const diffQueries: string[] = [];
 
     ipc({
-      request: (method, path) => {
-        if (method === "GET" && path === "/repo/commits?limit=100") {
-          return reply(200, {
-            ok: true,
-            result: {
-              commits: [
-                {
-                  hash: h4,
-                  message: "update settings",
-                  author: { name: "red-request" },
-                  timestamp_ms: 4,
-                  parents: [h3],
-                  height: 4,
-                },
-                {
-                  hash: h3,
-                  message: "save request",
-                  author: { name: "red-request" },
-                  timestamp_ms: 3,
-                  parents: [h2],
-                  height: 3,
-                },
-                {
-                  hash: h2,
-                  message: "save env",
-                  author: { name: "red-request" },
-                  timestamp_ms: 2,
-                  parents: [h1],
-                  height: 2,
-                },
-                {
-                  hash: h1,
-                  message: "create request",
-                  author: { name: "red-request" },
-                  timestamp_ms: 1,
-                  parents: [],
-                  height: 1,
-                },
-              ],
-            },
-          });
-        }
-        if (method === "GET" && path.includes("/diff/")) {
-          diffPaths.push(path);
-          const touchedRequests = path.startsWith(
-            `/repo/commits/${h2}/diff/${h3}`
-          );
-          return reply(200, {
-            ok: true,
-            result: {
-              from: touchedRequests
-                ? h2
-                : path.includes(`${h3}/diff/${h4}`)
-                  ? h3
-                  : h1,
-              to: touchedRequests
-                ? h3
-                : path.includes(`${h3}/diff/${h4}`)
-                  ? h4
-                  : h2,
-              added: touchedRequests ? 0 : 0,
-              removed: 0,
-              modified: touchedRequests ? 1 : 0,
-              entries: touchedRequests
-                ? [
-                    {
-                      collection: REQ,
-                      entity_id: "42",
-                      change: "modified",
-                    },
-                  ]
-                : [],
-            },
-          });
-        }
-        return reply(404, { ok: false, error: path });
-      },
       rql: (query) => {
         if (query.includes(" AS OF COMMIT ")) asOfQueries.push(query);
+        if (query.includes("FROM red.commits")) {
+          // listCommits selects red.commits ordered by height DESC.
+          return rqlOk([
+            {
+              hash: h4,
+              message: "update settings",
+              author_name: "red-request",
+              timestamp_ms: 4,
+              parents: [h3],
+              height: 4,
+            },
+            {
+              hash: h3,
+              message: "save request",
+              author_name: "red-request",
+              timestamp_ms: 3,
+              parents: [h2],
+              height: 3,
+            },
+            {
+              hash: h2,
+              message: "save env",
+              author_name: "red-request",
+              timestamp_ms: 2,
+              parents: [h1],
+              height: 2,
+            },
+            {
+              hash: h1,
+              message: "create request",
+              author_name: "red-request",
+              timestamp_ms: 1,
+              parents: [],
+              height: 1,
+            },
+          ]);
+        }
+        const diff = query.match(/red\.diff\('([0-9a-f]+)',\s*'([0-9a-f]+)'\)/);
+        if (diff) {
+          diffQueries.push(query);
+          const [, from, to] = diff;
+          const touchedRequests = from === h2 && to === h3;
+          return rqlOk(
+            touchedRequests
+              ? [{ collection: REQ, entity_id: "42", change: "modified" }]
+              : []
+          );
+        }
         if (
           query ===
           `SELECT rid, body FROM rr_requests AS OF COMMIT '${h3}' WHERE app_key = 'c1.r1' LIMIT 1`
@@ -644,10 +615,10 @@ describe("Document-backed request storage", () => {
       }),
     ]);
 
-    expect(diffPaths).toEqual([
-      `/repo/commits/${h3}/diff/${h4}?summary=true&collection=rr_requests`,
-      `/repo/commits/${h2}/diff/${h3}?summary=true&collection=rr_requests`,
-      `/repo/commits/${h1}/diff/${h2}?summary=true&collection=rr_requests`,
+    expect(diffQueries).toEqual([
+      `SELECT collection, entity_id, change FROM red.diff('${h3}', '${h4}')`,
+      `SELECT collection, entity_id, change FROM red.diff('${h2}', '${h3}')`,
+      `SELECT collection, entity_id, change FROM red.diff('${h1}', '${h2}')`,
     ]);
     expect(asOfQueries).toEqual([
       `SELECT rid, body FROM rr_requests AS OF COMMIT '${h3}' WHERE app_key = 'c1.r1' LIMIT 1`,
