@@ -3293,15 +3293,17 @@ pub fn run() {
                 .level_for("reqwest", log::LevelFilter::Info)
                 .level_for("hyper", log::LevelFilter::Info)
                 .max_file_size(5_000_000)
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Stdout,
-                ))
-                .target(tauri_plugin_log::Target::new(
-                    tauri_plugin_log::TargetKind::Folder {
+                // Builder::new() seeds DEFAULT_LOG_TARGETS ([Stdout, LogDir]) and
+                // `.target()` APPENDS — so adding our own Stdout/Folder on top would
+                // leave two Stdout sinks (every line printed twice) plus a stray
+                // LogDir file. `.targets()` replaces the defaults outright.
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
                         path: app_log_dir(),
                         file_name: Some("red-request".into()),
-                    },
-                ))
+                    }),
+                ])
                 .build(),
         )
         .plugin(tauri_plugin_deep_link::init())
