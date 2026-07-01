@@ -863,11 +863,13 @@ async function saveRequestDocument(
     return;
   }
 
-  await db.documentPatch(
-    REQ,
-    existing.rid,
-    requestDocumentPatch(current, desired, existing.body)
-  );
+  const operations = requestDocumentPatch(current, desired, existing.body);
+  // Nothing changed — skip the redundant PATCH. requestDocumentBody() is fully
+  // deterministic, so an unchanged request yields zero ops; every PATCH on
+  // rr_requests is a reddb VCS commit, so writing an empty diff bloats request
+  // history and spams the log (autosave/hydration re-saving on load).
+  if (operations.length === 0) return;
+  await db.documentPatch(REQ, existing.rid, operations);
 }
 
 async function requestDocumentAsOf(
