@@ -107,12 +107,16 @@
           closeStarted = true;
           try {
             await waitForPaint();
+            // Let the flush actually finish before we tear down reddb — a large store's
+            // pending-save + checkpoint can take longer than a couple of seconds, and cutting
+            // it off here dropped the user's last edits. The cap is a generous ceiling (below
+            // the Rust close watchdog) so a genuinely wedged webview still can't trap the close.
             await Promise.race([
               (async () => {
                 await ws.flushSave();
                 await repo.flushPendingCommit();
               })(),
-              new Promise((r) => setTimeout(r, 2000)),
+              new Promise((r) => setTimeout(r, 12000)),
             ]);
           } catch {
             /* never block the close on a save error */

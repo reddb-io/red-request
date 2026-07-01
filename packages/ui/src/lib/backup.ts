@@ -36,8 +36,11 @@ import {
 import { appLog } from "./log";
 
 /** Every collection that holds the user's work. History is included for a faithful restore. */
-const COLLECTIONS = [COL, ENV, SETTINGS, OAUTH, HIST] as const;
-const DOCUMENT_COLLECTIONS = [REQ] as const;
+// rr_history is a DOCUMENT collection (migrated KV → document); snapshotting it via LIST KV
+// raised INVALID_OPERATION ("expected kv, got document") on every launch's auto-backup. It
+// belongs with the document-backed collections.
+const COLLECTIONS = [COL, ENV, SETTINGS, OAUTH] as const;
+const DOCUMENT_COLLECTIONS = [REQ, HIST] as const;
 
 export interface BackupFile {
   format: "red-request-backup";

@@ -561,6 +561,11 @@ async function insertMissingHistoryDocuments(
 }
 
 async function legacyHistoryEntries(): Promise<HistoryEntry[]> {
+  // rr_history migrates KV → document. Once it is a document collection there is no legacy
+  // KV payload to read, and `LIST KV` on a document model raises INVALID_OPERATION ("expected
+  // kv, got document") — logged on every launch. Skip the KV read entirely in that case.
+  const model = await db.collectionModel(HIST).catch(() => null);
+  if (model === "document") return [];
   const out: HistoryEntry[] = [];
   for (const { value } of await db.kvList<unknown>(HIST).catch(() => [])) {
     const parsed = historyEntrySchema.safeParse(value);
