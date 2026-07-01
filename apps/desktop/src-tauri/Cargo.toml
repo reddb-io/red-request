@@ -33,7 +33,7 @@ ctrlc = { version = "3", features = ["termination"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sysinfo = { version = "=0.31.4", default-features = false, features = ["system"] }
+sysinfo = { version = "=0.39.5", default-features = false, features = ["system"] }
 tokio = { version = "1", features = [
   "net",
   "io-util",
@@ -48,10 +48,10 @@ keyring = { version = "3", features = [
   "windows-native",
   "linux-native-sync-persistent",
 ] }
-aes-gcm = "0.10"
-rand = "0.9"
+aes-gcm = "0.11"
+rand = "0.10"
 base64 = "0.22"
-sha2 = "0.10"
+sha2 = "0.11"
 flate2 = "1"
 
 # SIGTERM the reddb sidecar (not SIGKILL) so it checkpoints the collection
