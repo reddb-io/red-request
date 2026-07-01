@@ -14,7 +14,10 @@ use tauri_plugin_shell::ShellExt;
 use tokio::sync::oneshot;
 
 const PERF_LOG_MIN_MS: u128 = 5;
-const CLOSE_WATCHDOG_MS: u64 = 2_500;
+// Backstop for a wedged webview whose JS close handler never runs. Must sit ABOVE the
+// frontend's flush cap (12s) so a real close gets to persist the last edits + checkpoint;
+// only a genuinely hung webview should be force-destroyed here.
+const CLOSE_WATCHDOG_MS: u64 = 15_000;
 
 fn perf_ms(start: Instant) -> u128 {
     start.elapsed().as_millis()
