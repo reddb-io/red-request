@@ -352,7 +352,7 @@
       <EnvBar />
     </div>
 
-    <div class="flex items-center gap-2 px-3 py-2">
+    <div class="flex min-w-0 items-center gap-2 px-3 py-2">
       <!-- request kind: compact pill -->
       <Select
         bind:value={ws.activeReq.kind}
@@ -364,7 +364,7 @@
       {#if ws.activeReq.kind === "http"}
         <!-- method + url joined as one bar, like Insomnia/Postman -->
         <div
-          class="flex h-7 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-brand)] focus-within:ring-1 focus-within:ring-[var(--color-brand)]"
+          class="flex h-7 min-w-0 flex-1 items-center rounded-md border border-border bg-[var(--color-bg-2)] focus-within:border-[var(--color-brand)] focus-within:ring-1 focus-within:ring-[var(--color-brand)]"
         >
           <!-- method stays borderless/transparent to preserve the joined-bar look -->
           <Select
@@ -668,8 +668,8 @@
       {:else if tab === "history"}
         <HistoryTimeline embedded />
       {:else}
-        <div class="flex flex-col gap-2">
-          <div class="flex items-center gap-2">
+        <div class="flex h-full min-h-0 flex-col gap-2">
+          <div class="flex shrink-0 items-center gap-2">
             <Select
               value={ws.activeReq.body.type}
               items={bodyTypes}
@@ -713,6 +713,7 @@
                 multiline
                 lineNumbers
                 wrap={bodyWrap}
+                fill
                 rows={13}
                 ariaLabel="GraphQL query"
                 placeholder={"query {\n  viewer { id name }\n}"}
@@ -729,6 +730,7 @@
                 multiline
                 lineNumbers
                 wrap={bodyWrap}
+                fill
                 rows={12}
                 ariaLabel="GraphQL variables"
                 placeholder={'{\n  "id": 1\n}'}
@@ -745,6 +747,7 @@
               multiline
               lineNumbers
               wrap={bodyWrap}
+              fill
               rows={12}
               ariaLabel="Request body"
               placeholder={"request body (vars via {{NAME}})"}

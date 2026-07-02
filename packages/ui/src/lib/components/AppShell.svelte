@@ -780,8 +780,8 @@
                       ? 'bg-[var(--color-brand)]'
                       : ''}"
                   ></div>
-                  <div bind:this={splitEl} class="flex flex-1 overflow-hidden">
-                    <div class="min-w-0 overflow-hidden" style="width: {reqPct}%">
+                  <div bind:this={splitEl} class="flex min-w-0 flex-1 overflow-hidden">
+                    <div class="min-h-0 min-w-0 overflow-hidden" style="width: {reqPct}%">
                       <svelte:boundary
                         failed={requestFailed}
                         onerror={(err) => appLog("error", `RequestPanel boundary caught: ${err instanceof Error ? err.stack : err}`)}
@@ -800,7 +800,7 @@
                         ? 'bg-[var(--color-brand)]'
                         : ''}"
                     ></div>
-                    <div class="min-w-0 flex-1 overflow-hidden">
+                    <div class="min-h-0 min-w-0 flex-1 overflow-hidden">
                       <svelte:boundary
                         failed={responseFailed}
                         onerror={(err) => appLog("error", `ResponsePanel boundary caught: ${err instanceof Error ? err.stack : err}`)}

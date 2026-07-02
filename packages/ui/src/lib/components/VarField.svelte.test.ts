@@ -1,8 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/svelte";
 import VarField from "./VarField.svelte";
 
 describe("VarField", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("keeps the line-number editor constrained to the textarea viewport", () => {
     const value = Array.from({ length: 80 }, (_, i) => `"line${i}": true`).join(
       "\n"
@@ -26,6 +36,29 @@ describe("VarField", () => {
     expect(pane?.className).toContain("h-full");
     expect(textarea.className).toContain("h-full");
     expect(textarea.className).toContain("overflow-auto");
+  });
+
+  it("lets the line-number editor fill the available parent height", () => {
+    const { container } = render(VarField, {
+      value: '{\n  "ok": true\n}',
+      multiline: true,
+      lineNumbers: true,
+      fill: true,
+      ariaLabel: "Request body",
+    });
+
+    const editor = container.querySelector<HTMLElement>(
+      '[data-slot="var-field"]'
+    );
+    const gutter = container.querySelector<HTMLElement>(
+      '[data-slot="var-field-gutter"]'
+    );
+    const textarea = screen.getByLabelText("Request body");
+
+    expect(editor?.className).toContain("flex-1");
+    expect(editor?.getAttribute("style") ?? "").not.toContain("height:");
+    expect(gutter?.style.height).toBe("100%");
+    expect(textarea.className).toContain("h-full");
   });
 
   it("opens a wide suggestions menu without overflowing the viewport", async () => {

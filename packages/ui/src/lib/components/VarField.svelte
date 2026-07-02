@@ -34,6 +34,8 @@
     wrap?: boolean;
     /** When provided, offer GraphQL field/argument autocomplete from this introspected schema. */
     gqlSchema?: GqlSchema | null;
+    /** Let multiline editor fill its parent instead of using the row-derived fixed height. */
+    fill?: boolean;
   };
   let {
     value = $bindable(""),
@@ -50,6 +52,7 @@
     lineNumbers = false,
     wrap = false,
     gqlSchema = null,
+    fill = false,
   }: Props = $props();
 
   let el = $state<HTMLInputElement | HTMLTextAreaElement | undefined>();
@@ -493,8 +496,8 @@
 
 <div
   data-slot="var-field"
-  class="relative {frame} {gutterMode ? 'flex' : ''}"
-  style={gutterMode ? `height:${editorHeight}px` : ""}
+  class="relative min-w-0 {frame} {gutterMode ? 'flex' : ''} {fill ? 'min-h-0 flex-1' : ''}"
+  style={gutterMode && !fill ? `height:${editorHeight}px` : ""}
 >
   {#if gutterMode}
     <div
@@ -502,7 +505,7 @@
       data-slot="var-field-gutter"
       aria-hidden="true"
       class="mono shrink-0 overflow-hidden border-r border-border px-2 text-right text-xs text-fg-faint select-none"
-      style="height:{editorHeight}px; padding-top:{padTop}px; padding-bottom:{padTop}px"
+      style="height:{fill ? '100%' : `${editorHeight}px`}; padding-top:{padTop}px; padding-bottom:{padTop}px"
     >
       {#each lines as i (i)}
         <div
