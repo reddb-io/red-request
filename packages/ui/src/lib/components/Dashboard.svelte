@@ -27,19 +27,13 @@
   const catalog = $derived.by(() => {
     const reqs = col?.requests ?? [];
     const byMethod: Record<string, number> = {};
-    let withAuth = 0;
-    let withScripts = 0;
     for (const r of reqs) {
       const key = r.kind === "http" ? r.method : r.kind.toUpperCase();
       byMethod[key] = (byMethod[key] ?? 0) + 1;
-      if (r.auth.type !== "none" && r.auth.type !== "inherit") withAuth++;
-      if (r.scripts.preRequest.trim() || r.scripts.postResponse.trim()) withScripts++;
     }
     return {
       total: reqs.length,
       byMethod,
-      withAuth,
-      withScripts,
       envs: col?.environments.length ?? 0,
     };
   });
@@ -70,15 +64,18 @@
     });
   });
 
-  const totals = $derived.by(() => ({
-    runs: history.length,
-    passed: history.reduce((s, h) => s + h.testsPassed, 0),
-    failed: history.reduce((s, h) => s + h.testsFailed, 0),
-  }));
-
   const networkRows = $derived(networkIdentityRows(history));
 
   type ChartBar = { label: string; value: number; tone?: string };
+  type NativeMetricChart = {
+    path: string;
+    title: string;
+    kind: string;
+    source: string | null;
+    value: number;
+    bars: ChartBar[];
+    emptyLabel: string;
+  };
   const methodBars = $derived.by<ChartBar[]>(() =>
     Object.entries(catalog.byMethod)
       .map(([label, value]) => ({ label, value, tone: "brand" }))
@@ -98,8 +95,12 @@
   const nativeSourceRows = $derived(
     nativeSources.filter((source) => source.name.startsWith("rr_"))
   );
+  const nativeMetricCharts = $derived.by<NativeMetricChart[]>(() =>
+    nativeMetricRows.map((metric) => nativeChart(metric))
+  );
 
   function barWidth(value: number, values: ChartBar[]): number {
+    if (value <= 0) return 0;
     const max = Math.max(...values.map((bar) => bar.value), 1);
     return Math.max(4, Math.round((value / max) * 100));
   }
@@ -108,6 +109,62 @@
     if (tone === "ok") return "bg-emerald-400";
     if (tone === "error") return "bg-red-400";
     return "bg-[var(--color-brand)]";
+  }
+
+  function nativeChart(metric: repo.NativeMetricDescriptor): NativeMetricChart {
+    if (metric.path === "rr.requests.total") {
+      return {
+        path: metric.path,
+        title: "Requests total",
+        kind: metric.kind,
+        source: metric.source,
+        value: catalog.total,
+        bars: [{ label: "requests", value: catalog.total, tone: "brand" }],
+        emptyLabel: "No requests",
+      };
+    }
+    if (metric.path === "rr.requests.by_method") {
+      return {
+        path: metric.path,
+        title: "Requests by method",
+        kind: metric.kind,
+        source: metric.source,
+        value: catalog.total,
+        bars: methodBars,
+        emptyLabel: "No requests",
+      };
+    }
+    if (metric.path === "rr.history.runs") {
+      return {
+        path: metric.path,
+        title: "Run outcomes",
+        kind: metric.kind,
+        source: metric.source,
+        value: history.length,
+        bars: runOutcomeBars,
+        emptyLabel: "No runs",
+      };
+    }
+    if (metric.path === "rr.environments.total") {
+      return {
+        path: metric.path,
+        title: "Environments total",
+        kind: metric.kind,
+        source: metric.source,
+        value: catalog.envs,
+        bars: [{ label: "envs", value: catalog.envs, tone: "brand" }],
+        emptyLabel: "No environments",
+      };
+    }
+    return {
+      path: metric.path,
+      title: metric.path,
+      kind: metric.kind,
+      source: metric.source,
+      value: 0,
+      bars: [],
+      emptyLabel: "No chart adapter",
+    };
   }
 
   function sparkline(values: number[], w = 90, h = 22): string {
@@ -128,21 +185,32 @@
   }
 </script>
 
-{#snippet metricBars(title: string, bars: ChartBar[], emptyLabel: string)}
-  <section class="panel p-3" data-slot="dashboard-metric-chart">
-    <div class="mb-2 flex items-center justify-between gap-3">
-      <h3 class="text-xs font-medium text-fg-subtle">{title}</h3>
-      <span class="mono text-xs text-fg-faint">{bars.reduce((sum, bar) => sum + bar.value, 0)}</span>
+{#snippet nativeMetricCard(chart: NativeMetricChart)}
+  <section class="panel flex min-h-36 flex-col p-3" data-slot="dashboard-native-metric-chart">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h3 class="text-xs font-medium text-fg-subtle">{chart.title}</h3>
+        <div class="mono mt-1 truncate text-[10px] text-fg-faint" title={chart.path}>
+          {chart.path}
+        </div>
+      </div>
+      <span class="mono text-lg font-semibold text-fg-strong">{chart.value}</span>
     </div>
-    {#if bars.length}
-      <div class="flex flex-col gap-2">
-        {#each bars as bar (bar.label)}
-          <div class="grid grid-cols-[4rem_1fr_2.5rem] items-center gap-2 text-xs">
+    <div class="mt-2 flex items-center gap-2 text-[10px] text-fg-faint">
+      <span>{chart.kind}</span>
+      {#if chart.source}
+        <span class="min-w-0 truncate" title={chart.source}>{chart.source}</span>
+      {/if}
+    </div>
+    {#if chart.bars.length}
+      <div class="mt-4 flex flex-1 flex-col justify-end gap-2">
+        {#each chart.bars as bar (bar.label)}
+          <div class="grid grid-cols-[5rem_1fr_2.5rem] items-center gap-2 text-xs">
             <span class="mono truncate text-fg-muted" title={bar.label}>{bar.label}</span>
             <div class="h-2 overflow-hidden rounded bg-[var(--color-bg-2)]">
               <div
                 class="h-full rounded {barColor(bar.tone)}"
-                style={`width:${barWidth(bar.value, bars)}%`}
+                style={`width:${barWidth(bar.value, chart.bars)}%`}
               ></div>
             </div>
             <span class="mono text-right text-fg">{bar.value}</span>
@@ -150,7 +218,7 @@
         {/each}
       </div>
     {:else}
-      <p class="text-xs text-fg-faint">{emptyLabel}</p>
+      <p class="mt-4 text-xs text-fg-faint">{chart.emptyLabel}</p>
     {/if}
   </section>
 {/snippet}
@@ -166,76 +234,25 @@
     >
   </div>
 
-  <!-- Catalog -->
-  <div class="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
-    <div class="panel p-3">
-      <div class="text-2xl font-bold text-fg-strong">{catalog.total}</div>
-      <div class="text-xs text-fg-subtle">requests</div>
-      <div class="mono mt-2 flex flex-wrap gap-1 text-xs text-fg-muted">
-        {#each Object.entries(catalog.byMethod) as [m, n] (m)}
-          <span class="rounded bg-[var(--color-bg-2)] px-1">{m} {n}</span>
-        {/each}
-      </div>
+  <h2 class="label mb-2">Native metrics</h2>
+  {#if nativeSourceRows.length}
+    <div class="mono mb-2 flex flex-wrap gap-2 text-[10px] text-fg-faint">
+      {#each nativeSourceRows as source (source.name)}
+        <span title={`${source.collection} ${source.timeField}/${source.eventField}/${source.actorField}`}>
+          {source.name}
+        </span>
+      {/each}
     </div>
-    <div class="panel p-3">
-      <div class="text-2xl font-bold text-fg-strong">{catalog.withAuth}</div>
-      <div class="text-xs text-fg-subtle">with auth</div>
+  {/if}
+  {#if nativeMetricCharts.length}
+    <div class="mb-5 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {#each nativeMetricCharts as chart (chart.path)}
+        {@render nativeMetricCard(chart)}
+      {/each}
     </div>
-    <div class="panel p-3">
-      <div class="text-2xl font-bold text-fg-strong">{catalog.withScripts}</div>
-      <div class="text-xs text-fg-subtle">with scripts</div>
-    </div>
-    <div class="panel p-3">
-      <div class="text-2xl font-bold text-fg-strong">{catalog.envs}</div>
-      <div class="text-xs text-fg-subtle">environments</div>
-    </div>
-  </div>
-
-  <!-- Tests aggregate -->
-  <div class="panel mb-5 flex gap-4 p-3 text-sm">
-    <span class="text-fg-muted">{totals.runs} runs recorded</span>
-    <span class="text-emerald-400">{totals.passed} tests passed</span>
-    <span class={totals.failed ? "text-red-400" : "text-fg-subtle"}>{totals.failed} failed</span>
-  </div>
-
-  <div class="mb-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(16rem,0.8fr)]">
-    {@render metricBars("Requests by method", methodBars, "No requests")}
-    {@render metricBars("Run outcomes", runOutcomeBars, "No runs")}
-    <section class="panel p-3" data-slot="dashboard-native-metrics">
-      <div class="mb-2 flex items-center justify-between gap-3">
-        <h3 class="text-xs font-medium text-fg-subtle">RedDB native metrics</h3>
-        <span class="mono text-xs text-fg-faint">{nativeMetricRows.length + nativeSourceRows.length}</span>
-      </div>
-      {#if nativeSourceRows.length}
-        <div class="mb-2 flex flex-col gap-1.5 border-b border-border pb-2">
-          {#each nativeSourceRows as source (source.name)}
-            <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
-              <span class="mono truncate text-fg" title={source.name}>{source.name}</span>
-              <span class="text-fg-faint">source</span>
-              <span class="mono col-span-2 truncate text-[10px] text-fg-faint" title={source.collection}>
-                {source.collection} · {source.timeField}/{source.eventField}/{source.actorField}
-              </span>
-            </div>
-          {/each}
-        </div>
-      {/if}
-      {#if nativeMetricRows.length}
-        <div class="flex flex-col gap-1.5">
-          {#each nativeMetricRows.slice(0, 5) as metric (metric.path)}
-            <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
-              <span class="mono truncate text-fg" title={metric.path}>{metric.path}</span>
-              <span class="text-fg-faint">{metric.kind}</span>
-              {#if metric.source}
-                <span class="mono col-span-2 truncate text-[10px] text-fg-faint" title={metric.source}>{metric.source}</span>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {:else if !nativeSourceRows.length}
-        <p class="text-xs text-fg-faint">No RedDB metric descriptors yet.</p>
-      {/if}
-    </section>
-  </div>
+  {:else}
+    <p class="hint mb-5">No RedDB metric descriptors yet.</p>
+  {/if}
 
   {#if networkRows.length}
     <h2 class="label mb-2">

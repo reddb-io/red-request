@@ -113,10 +113,22 @@ describe("Dashboard network identity metrics", () => {
         source: "rr_requests",
       },
       {
+        path: "rr.requests.by_method",
+        kind: "counter",
+        role: "operational",
+        source: "rr_requests",
+      },
+      {
         path: "rr.history.runs",
         kind: "counter",
         role: "operational",
         source: "rr_history",
+      },
+      {
+        path: "rr.environments.total",
+        kind: "gauge",
+        role: "operational",
+        source: "red_request",
       },
     ]);
     vi.mocked(repo.nativeAnalyticsSources).mockResolvedValueOnce([
@@ -129,7 +141,7 @@ describe("Dashboard network identity metrics", () => {
       },
     ]);
 
-    render(Dashboard);
+    const { container } = render(Dashboard);
 
     expect(
       await screen.findByText("Network identity performance")
@@ -143,9 +155,16 @@ describe("Dashboard network identity metrics", () => {
     expect(screen.getAllByText("175ms").length).toBeGreaterThan(0);
     expect(screen.getByText("proxy 115ms · origin 60ms")).toBeTruthy();
     expect(screen.getByText("Requests by method")).toBeTruthy();
-    expect(screen.getByText("Run outcomes")).toBeTruthy();
-    expect(screen.getByText("RedDB native metrics")).toBeTruthy();
     expect(screen.getByText("rr_history_source")).toBeTruthy();
     expect(screen.getByText("rr.requests.total")).toBeTruthy();
+    expect(screen.getByText("rr.requests.by_method")).toBeTruthy();
+    expect(screen.getByText("rr.history.runs")).toBeTruthy();
+    expect(screen.getByText("rr.environments.total")).toBeTruthy();
+    expect(
+      container.querySelectorAll('[data-slot="dashboard-native-metric-chart"]')
+    ).toHaveLength(4);
+    expect(
+      container.querySelector('[data-slot="dashboard-native-metrics"]')
+    ).toBeNull();
   });
 });
