@@ -37,6 +37,8 @@ vi.mock("./repo", () => ({
   loadEnvironments: vi.fn(async () => []),
   loadAll: vi.fn(async () => []),
   loadHistory: vi.fn(async () => []),
+  nativeMetricDescriptors: vi.fn(async () => []),
+  nativeAnalyticsSources: vi.fn(async () => []),
   loadGlobals: vi.fn(async () => null),
   setProjectSyncQueueEnabled: vi.fn(),
   syncConsumerName: vi.fn(async () => "rr_client"),

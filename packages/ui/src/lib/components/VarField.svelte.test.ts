@@ -61,6 +61,27 @@ describe("VarField", () => {
     expect(textarea.className).toContain("h-full");
   });
 
+  it("lets wrapped multiline editors fill the available parent height", () => {
+    const { container } = render(VarField, {
+      value: "wrapped body",
+      multiline: true,
+      lineNumbers: true,
+      wrap: true,
+      fill: true,
+      ariaLabel: "Request body",
+    });
+
+    const editor = container.querySelector<HTMLElement>(
+      '[data-slot="var-field"]'
+    );
+    const textarea = screen.getByLabelText("Request body");
+
+    expect(editor?.className).toContain("h-full");
+    expect(editor?.className).toContain("flex-1");
+    expect(textarea.className).toContain("h-full");
+    expect(textarea.className).toContain("overflow-auto");
+  });
+
   it("opens a wide suggestions menu without overflowing the viewport", async () => {
     Object.defineProperty(window, "innerWidth", {
       value: 800,

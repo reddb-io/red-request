@@ -36,4 +36,14 @@ export const MIGRATIONS: MigrationDef[] = [
       CREATE INDEX IF NOT EXISTS rr_history_run_ts ON rr_history (run_ts)
     `,
   },
+  {
+    name: "native_operational_metrics",
+    sql: `
+      CREATE ANALYTICS SOURCE rr_history_source ON rr_history TIME FIELD run_ts EVENT FIELD request_id ACTOR FIELD collection_id;
+      CREATE METRIC rr.requests.total TYPE counter ROLE operational SOURCE rr_requests;
+      CREATE METRIC rr.requests.by_method TYPE counter ROLE operational SOURCE rr_requests;
+      CREATE METRIC rr.history.runs TYPE counter ROLE operational SOURCE rr_history;
+      CREATE METRIC rr.environments.total TYPE gauge ROLE operational SOURCE red_request
+    `,
+  },
 ];

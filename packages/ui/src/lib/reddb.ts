@@ -739,6 +739,60 @@ export async function documentDelete(
     throw httpError("documentDelete", collection, r.status, r.json);
 }
 
+export interface MetricDescriptor {
+  path: string;
+  kind: string;
+  role: string;
+  source: string | null;
+}
+
+export interface AnalyticsSource {
+  name: string;
+  collection: string;
+  timeField: string;
+  eventField: string;
+  actorField: string;
+}
+
+function parseMetricDescriptor(row: Record<string, unknown>): MetricDescriptor {
+  return {
+    path: typeof row.path === "string" ? row.path : "",
+    kind: typeof row.kind === "string" ? row.kind : "",
+    role: typeof row.role === "string" ? row.role : "",
+    source: typeof row.source === "string" ? row.source : null,
+  };
+}
+
+function parseAnalyticsSource(row: Record<string, unknown>): AnalyticsSource {
+  return {
+    name: typeof row.name === "string" ? row.name : "",
+    collection: typeof row.collection === "string" ? row.collection : "",
+    timeField: typeof row.time_field === "string" ? row.time_field : "",
+    eventField: typeof row.event_field === "string" ? row.event_field : "",
+    actorField: typeof row.actor_field === "string" ? row.actor_field : "",
+  };
+}
+
+export async function metricDescriptors(): Promise<MetricDescriptor[]> {
+  const r = await rql(
+    "SELECT path, kind, role, source FROM red.analytics.metrics"
+  ).catch(() => null);
+  return r?.ok
+    ? r.records.map(parseMetricDescriptor).filter((m) => m.path)
+    : [];
+}
+
+export async function metricDescriptorCount(): Promise<number> {
+  return (await metricDescriptors()).length;
+}
+
+export async function analyticsSources(): Promise<AnalyticsSource[]> {
+  const r = await rql(
+    "SELECT name, collection, time_field, event_field, actor_field FROM red.analytics.sources"
+  ).catch(() => null);
+  return r?.ok ? r.records.map(parseAnalyticsSource).filter((s) => s.name) : [];
+}
+
 // --- RedDB-native SQL migrations -------------------------------------------
 // RedDB ships a migration system in the query engine: `CREATE MIGRATION`
 // registers SQL (status pending, stored in the `red_migrations` system collection),

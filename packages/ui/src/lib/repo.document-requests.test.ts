@@ -144,6 +144,18 @@ describe("Document-backed request storage", () => {
     ).toContain(
       "CREATE INDEX IF NOT EXISTS rr_history_request_id ON rr_history (request_id) USING HASH"
     );
+    const metrics = queries.find((query) =>
+      query.startsWith("CREATE MIGRATION native_operational_metrics AS")
+    );
+    expect(metrics).toContain(
+      "CREATE ANALYTICS SOURCE rr_history_source ON rr_history TIME FIELD run_ts EVENT FIELD request_id ACTOR FIELD collection_id"
+    );
+    expect(metrics).toContain(
+      "CREATE METRIC rr.requests.total TYPE counter ROLE operational SOURCE rr_requests"
+    );
+    expect(metrics).toContain(
+      "CREATE METRIC rr.history.runs TYPE counter ROLE operational SOURCE rr_history"
+    );
     expect(queries).toContain("APPLY MIGRATION *");
   });
 

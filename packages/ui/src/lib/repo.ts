@@ -45,6 +45,10 @@ import { invoke } from "@tauri-apps/api/core";
 export const runMigrations = () => db.runMigrations(MIGRATIONS);
 /** Applied/pending/failed migration counts for the Settings → Data summary. */
 export const migrationSummary = () => db.migrationSummary();
+export type NativeMetricDescriptor = db.MetricDescriptor;
+export type NativeAnalyticsSource = db.AnalyticsSource;
+export const nativeMetricDescriptors = () => db.metricDescriptors();
+export const nativeAnalyticsSources = () => db.analyticsSources();
 
 export const COL = "rr_collections";
 export const REQ = "rr_requests";
@@ -123,16 +127,21 @@ export async function recordCounts(): Promise<{
     { label: "collections", name: COL },
     { label: "oauth tokens", name: OAUTH },
   ];
-  const [kvCounts, requestCount, historyCount, envCount, settingsCount] =
-    await Promise.all([
-      Promise.all(kinds.map((k) => db.kvCount(k.name))),
-      countRequests(),
-      countRunHistory(),
-      db
-        .configList<unknown>(APP_CONFIG, ENV_CONFIG_PREFIX)
-        .then((r) => r.length),
-      db.configList<unknown>(APP_CONFIG, "settings_").then((r) => r.length),
-    ]);
+  const [
+    kvCounts,
+    requestCount,
+    historyCount,
+    envCount,
+    settingsCount,
+    metricCount,
+  ] = await Promise.all([
+    Promise.all(kinds.map((k) => db.kvCount(k.name))),
+    countRequests(),
+    countRunHistory(),
+    db.configList<unknown>(APP_CONFIG, ENV_CONFIG_PREFIX).then((r) => r.length),
+    db.configList<unknown>(APP_CONFIG, "settings_").then((r) => r.length),
+    db.metricDescriptorCount(),
+  ]);
   const kvByLabel = new Map(kinds.map((k, i) => [k.label, kvCounts[i] ?? 0]));
   const byKind = [
     { label: "collections", count: kvByLabel.get("collections") ?? 0 },
@@ -141,6 +150,7 @@ export async function recordCounts(): Promise<{
     { label: "history", count: historyCount },
     { label: "settings", count: settingsCount },
     { label: "oauth tokens", count: kvByLabel.get("oauth tokens") ?? 0 },
+    { label: "native metrics", count: metricCount },
   ];
   return {
     total:
