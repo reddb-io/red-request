@@ -1,6 +1,6 @@
 {
   "name": "@reddb-io/request-cli",
-  "version": "0.62.7",
+  "version": "0.62.8",
   "private": true,
   "type": "module",
   "description": "Headless collection runner — run a git-versioned Red Request YAML tree in CI.",
