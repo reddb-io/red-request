@@ -7,11 +7,17 @@
   import { Button } from "./ui/button/index.js";
 
   let history = $state<HistoryEntry[]>([]);
+  let nativeMetrics = $state<repo.NativeMetricDescriptor[]>([]);
+  let nativeSources = $state<repo.NativeAnalyticsSource[]>([]);
   let loading = $state(true);
 
   async function load() {
     loading = true;
-    history = await repo.loadHistory(ws.activeColId ?? undefined).catch(() => []);
+    [history, nativeMetrics, nativeSources] = await Promise.all([
+      repo.loadHistory(ws.activeColId ?? undefined).catch(() => []),
+      repo.nativeMetricDescriptors().catch(() => []),
+      repo.nativeAnalyticsSources().catch(() => []),
+    ]);
     loading = false;
   }
   onMount(load);
@@ -72,6 +78,38 @@
 
   const networkRows = $derived(networkIdentityRows(history));
 
+  type ChartBar = { label: string; value: number; tone?: string };
+  const methodBars = $derived.by<ChartBar[]>(() =>
+    Object.entries(catalog.byMethod)
+      .map(([label, value]) => ({ label, value, tone: "brand" }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label))
+  );
+  const runOutcomeBars = $derived.by<ChartBar[]>(() => {
+    const ok = history.filter((h) => h.ok).length;
+    const failed = history.length - ok;
+    return [
+      { label: "OK", value: ok, tone: "ok" },
+      { label: "Error", value: failed, tone: "error" },
+    ].filter((bar) => bar.value > 0 || history.length === 0);
+  });
+  const nativeMetricRows = $derived(
+    nativeMetrics.filter((metric) => metric.path.startsWith("rr."))
+  );
+  const nativeSourceRows = $derived(
+    nativeSources.filter((source) => source.name.startsWith("rr_"))
+  );
+
+  function barWidth(value: number, values: ChartBar[]): number {
+    const max = Math.max(...values.map((bar) => bar.value), 1);
+    return Math.max(4, Math.round((value / max) * 100));
+  }
+
+  function barColor(tone: string | undefined): string {
+    if (tone === "ok") return "bg-emerald-400";
+    if (tone === "error") return "bg-red-400";
+    return "bg-[var(--color-brand)]";
+  }
+
   function sparkline(values: number[], w = 90, h = 22): string {
     if (values.length < 2) return "";
     const max = Math.max(...values, 1);
@@ -90,6 +128,33 @@
   }
 </script>
 
+{#snippet metricBars(title: string, bars: ChartBar[], emptyLabel: string)}
+  <section class="panel p-3" data-slot="dashboard-metric-chart">
+    <div class="mb-2 flex items-center justify-between gap-3">
+      <h3 class="text-xs font-medium text-fg-subtle">{title}</h3>
+      <span class="mono text-xs text-fg-faint">{bars.reduce((sum, bar) => sum + bar.value, 0)}</span>
+    </div>
+    {#if bars.length}
+      <div class="flex flex-col gap-2">
+        {#each bars as bar (bar.label)}
+          <div class="grid grid-cols-[4rem_1fr_2.5rem] items-center gap-2 text-xs">
+            <span class="mono truncate text-fg-muted" title={bar.label}>{bar.label}</span>
+            <div class="h-2 overflow-hidden rounded bg-[var(--color-bg-2)]">
+              <div
+                class="h-full rounded {barColor(bar.tone)}"
+                style={`width:${barWidth(bar.value, bars)}%`}
+              ></div>
+            </div>
+            <span class="mono text-right text-fg">{bar.value}</span>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <p class="text-xs text-fg-faint">{emptyLabel}</p>
+    {/if}
+  </section>
+{/snippet}
+
 <section class="flex flex-col">
   <div class="mb-4 flex items-center justify-between">
     <h2 class="label">Dashboard{col ? ` · ${col.collection.name}` : ""}</h2>
@@ -102,7 +167,7 @@
   </div>
 
   <!-- Catalog -->
-  <div class="mb-5 grid grid-cols-4 gap-3">
+  <div class="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
     <div class="panel p-3">
       <div class="text-2xl font-bold text-fg-strong">{catalog.total}</div>
       <div class="text-xs text-fg-subtle">requests</div>
@@ -131,6 +196,45 @@
     <span class="text-fg-muted">{totals.runs} runs recorded</span>
     <span class="text-emerald-400">{totals.passed} tests passed</span>
     <span class={totals.failed ? "text-red-400" : "text-fg-subtle"}>{totals.failed} failed</span>
+  </div>
+
+  <div class="mb-5 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(16rem,0.8fr)]">
+    {@render metricBars("Requests by method", methodBars, "No requests")}
+    {@render metricBars("Run outcomes", runOutcomeBars, "No runs")}
+    <section class="panel p-3" data-slot="dashboard-native-metrics">
+      <div class="mb-2 flex items-center justify-between gap-3">
+        <h3 class="text-xs font-medium text-fg-subtle">RedDB native metrics</h3>
+        <span class="mono text-xs text-fg-faint">{nativeMetricRows.length + nativeSourceRows.length}</span>
+      </div>
+      {#if nativeSourceRows.length}
+        <div class="mb-2 flex flex-col gap-1.5 border-b border-border pb-2">
+          {#each nativeSourceRows as source (source.name)}
+            <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
+              <span class="mono truncate text-fg" title={source.name}>{source.name}</span>
+              <span class="text-fg-faint">source</span>
+              <span class="mono col-span-2 truncate text-[10px] text-fg-faint" title={source.collection}>
+                {source.collection} · {source.timeField}/{source.eventField}/{source.actorField}
+              </span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      {#if nativeMetricRows.length}
+        <div class="flex flex-col gap-1.5">
+          {#each nativeMetricRows.slice(0, 5) as metric (metric.path)}
+            <div class="grid grid-cols-[1fr_auto] gap-2 text-xs">
+              <span class="mono truncate text-fg" title={metric.path}>{metric.path}</span>
+              <span class="text-fg-faint">{metric.kind}</span>
+              {#if metric.source}
+                <span class="mono col-span-2 truncate text-[10px] text-fg-faint" title={metric.source}>{metric.source}</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {:else if !nativeSourceRows.length}
+        <p class="text-xs text-fg-faint">No RedDB metric descriptors yet.</p>
+      {/if}
+    </section>
   </div>
 
   {#if networkRows.length}

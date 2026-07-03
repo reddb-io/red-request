@@ -455,9 +455,9 @@
 
     <!-- Outer wrapper never scrolls, so the URL bar + tabs + env picker stay
      pinned while the user scrolls a long body / headers list / history.
-     The inner <div class="h-full overflow-auto p-3"> carries the scroll. -->
-<div class="min-h-0 flex-1 overflow-hidden">
-<div class="h-full overflow-auto p-3">
+     The inner flex scroller owns the available height for fill-mode editors. -->
+<div data-slot="request-tab-frame" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+<div data-slot="request-tab-scroll" class="flex min-h-0 flex-1 flex-col overflow-auto p-3">
       {#if tab === "params"}
         <div class="flex flex-col gap-5">
           <!-- Path params first: usually only 1–3 of them, anchored to the URL's
@@ -668,7 +668,7 @@
       {:else if tab === "history"}
         <HistoryTimeline embedded />
       {:else}
-        <div class="flex h-full min-h-0 flex-col gap-2">
+        <div data-slot="request-body-tab" class="flex min-h-0 flex-1 flex-col gap-2">
           <div class="flex shrink-0 items-center gap-2">
             <Select
               value={ws.activeReq.body.type}

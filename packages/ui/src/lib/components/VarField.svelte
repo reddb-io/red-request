@@ -414,7 +414,9 @@
       spellcheck="false"
       class="{shared} relative w-full {gutterMode
         ? 'h-full overflow-auto'
-        : ''} resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
+        : fill
+          ? 'h-full overflow-auto'
+          : ''} resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
       oninput={refreshMenu}
       onkeyup={onKeyup}
       onclick={refreshMenu}
@@ -496,7 +498,7 @@
 
 <div
   data-slot="var-field"
-  class="relative min-w-0 {frame} {gutterMode ? 'flex' : ''} {fill ? 'min-h-0 flex-1' : ''}"
+  class="relative min-w-0 {frame} {gutterMode ? 'flex' : ''} {fill ? 'h-full min-h-0 flex-1' : ''}"
   style={gutterMode && !fill ? `height:${editorHeight}px` : ""}
 >
   {#if gutterMode}

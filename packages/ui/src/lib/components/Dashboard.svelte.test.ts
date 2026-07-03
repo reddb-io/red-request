@@ -5,6 +5,8 @@ import { newRequest } from "@reddb-io/request-core";
 vi.mock("../repo", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../repo")>()),
   loadHistory: vi.fn(async () => []),
+  nativeMetricDescriptors: vi.fn(async () => []),
+  nativeAnalyticsSources: vi.fn(async () => []),
 }));
 
 import * as repo from "../repo";
@@ -103,6 +105,29 @@ describe("Dashboard network identity metrics", () => {
         dispatcherUser: "alice",
       },
     ]);
+    vi.mocked(repo.nativeMetricDescriptors).mockResolvedValueOnce([
+      {
+        path: "rr.requests.total",
+        kind: "counter",
+        role: "operational",
+        source: "rr_requests",
+      },
+      {
+        path: "rr.history.runs",
+        kind: "counter",
+        role: "operational",
+        source: "rr_history",
+      },
+    ]);
+    vi.mocked(repo.nativeAnalyticsSources).mockResolvedValueOnce([
+      {
+        name: "rr_history_source",
+        collection: "rr_history",
+        timeField: "run_ts",
+        eventField: "request_id",
+        actorField: "collection_id",
+      },
+    ]);
 
     render(Dashboard);
 
@@ -117,5 +142,10 @@ describe("Dashboard network identity metrics", () => {
     expect(screen.getByText("50% errors")).toBeTruthy();
     expect(screen.getAllByText("175ms").length).toBeGreaterThan(0);
     expect(screen.getByText("proxy 115ms · origin 60ms")).toBeTruthy();
+    expect(screen.getByText("Requests by method")).toBeTruthy();
+    expect(screen.getByText("Run outcomes")).toBeTruthy();
+    expect(screen.getByText("RedDB native metrics")).toBeTruthy();
+    expect(screen.getByText("rr_history_source")).toBeTruthy();
+    expect(screen.getByText("rr.requests.total")).toBeTruthy();
   });
 });
