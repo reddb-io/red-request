@@ -23,6 +23,11 @@ code, commits and ADRs.
   RedDB under its `colId`.
 - **Request** — a `RequestDefinition` (method, url, headers, query, body, auth) stored under
   `colId.reqId`.
+- **Saved body** — a named body payload attached to one Request (e.g. `payment.created`,
+  `refund`). Strictly per-request, stored inline on the `RequestDefinition` — not a
+  shared library across requests. Applying one **copies** it into the live body
+  (detached); changing a saved body is always an explicit update, never a side effect
+  of editing.
 - **Environment** — a `StoredEnvironment`: plain `vars` plus `secrets` (sealed values),
   keyed by name.
 - **Secret** — a sensitive value **sealed (AES-256-GCM) and stored in the `.rdb`**; the
