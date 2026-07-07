@@ -192,6 +192,33 @@
     if (gutter) gutter.scrollTop = el.scrollTop;
   }
 
+  // Caret movement (END/Home/arrows, typing at the end, programmatic focus) makes the
+  // browser auto-scroll the input to keep the caret visible, but single-line inputs don't
+  // reliably fire a `scroll` event for it — so the backdrop's offset goes stale. Mirror
+  // immediately (covers offsets already applied by the time the event fires) and again on
+  // the next frame (covers auto-scroll that lands after the event). Both are a single
+  // scrollLeft/scrollTop read/write, so there is no layout thrash beyond syncScroll itself.
+  let scrollSyncQueued = false;
+  function queueSyncScroll() {
+    syncScroll();
+    if (scrollSyncQueued || typeof requestAnimationFrame === "undefined") return;
+    scrollSyncQueued = true;
+    requestAnimationFrame(() => {
+      scrollSyncQueued = false;
+      syncScroll();
+    });
+  }
+
+  function onInput() {
+    refreshMenu();
+    queueSyncScroll();
+  }
+
+  function onClick() {
+    refreshMenu();
+    queueSyncScroll();
+  }
+
   // Hover tooltip: hit-test the token rects under the pointer (backdrop stays behind, so
   // the input keeps full editing/click behaviour).
   let tip = $state<{ text: string; x: number; y: number } | null>(null);
@@ -321,6 +348,7 @@
     await tick();
     el.setSelectionRange(pos, pos);
     el.focus();
+    queueSyncScroll();
   }
 
   const MENU_NAV_KEYS = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"];
@@ -346,6 +374,9 @@
   // keys, whose keydown already moved the selection. Refreshing on those rebuilt the
   // list and reset menuIndex to 0, which made ArrowDown snap back to the first item.
   function onKeyup(e: KeyboardEvent) {
+    // Keep the highlighted backdrop tracking any caret-driven auto-scroll, even for the
+    // menu-navigation keys whose refreshMenu path is skipped below.
+    queueSyncScroll();
     if (showMenu && MENU_NAV_KEYS.includes(e.key)) return;
     refreshMenu();
   }
@@ -417,9 +448,9 @@
         : fill
           ? 'h-full overflow-auto'
           : ''} resize-none bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
-      oninput={refreshMenu}
+      oninput={onInput}
       onkeyup={onKeyup}
-      onclick={refreshMenu}
+      onclick={onClick}
       onkeydown={onKeydown}
       onscroll={syncScroll}
       onmousemove={onMove}
@@ -438,9 +469,9 @@
       aria-label={ariaLabel}
       spellcheck="false"
       class="{shared} relative w-full bg-transparent text-transparent caret-[var(--color-brand)] outline-none placeholder:text-fg-faint"
-      oninput={refreshMenu}
+      oninput={onInput}
       onkeyup={onKeyup}
-      onclick={refreshMenu}
+      onclick={onClick}
       onkeydown={onKeydown}
       onscroll={syncScroll}
       onmousemove={onMove}
