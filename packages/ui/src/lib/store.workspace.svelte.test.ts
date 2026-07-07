@@ -1766,29 +1766,33 @@ describe("Workspace persistence coordination", () => {
 });
 
 describe("Workspace saved bodies", () => {
+  // Reading through `ws.activeReq` (not a captured ref): assigning a plain object
+  // to `$state` wraps it in a reactive proxy, so mutations land on the proxy — the
+  // same pattern every other Workspace test in this file follows.
   function activate(patch: Partial<RequestDefinition> = {}) {
     const req = request("r1", patch);
     ws.collections = [collection("c1", [req])];
     ws.activeColId = "c1";
     ws.activeReq = req;
-    return req;
   }
 
   it("saves the current live body under a name and persists it", async () => {
-    const req = activate({
+    activate({
       body: { type: "json", content: '{"a":1}', fields: [] },
     });
 
     await ws.saveBody("payment.created");
 
-    expect(req.savedBodies).toHaveLength(1);
-    expect(req.savedBodies[0].name).toBe("payment.created");
-    expect(req.savedBodies[0].body).toEqual({
+    expect(ws.activeReq!.savedBodies).toHaveLength(1);
+    expect(ws.activeReq!.savedBodies[0].name).toBe("payment.created");
+    expect(ws.activeReq!.savedBodies[0].body).toEqual({
       type: "json",
       content: '{"a":1}',
       fields: [],
     });
-    expect(req.activeSavedBodyId).toBe(req.savedBodies[0].id);
+    expect(ws.activeReq!.activeSavedBodyId).toBe(
+      ws.activeReq!.savedBodies[0].id
+    );
     expect(repo.saveRequest).toHaveBeenCalledWith(
       "c1",
       expect.objectContaining({ id: "r1" })
@@ -1796,7 +1800,7 @@ describe("Workspace saved bodies", () => {
   });
 
   it("applies a saved body into the live body and syncs the Content-Type header", async () => {
-    const req = activate({
+    activate({
       body: { type: "none", content: "", fields: [] },
       savedBodies: [
         {
@@ -1810,19 +1814,19 @@ describe("Workspace saved bodies", () => {
 
     ws.applyBody("sb-1");
 
-    expect(req.body).toEqual({
+    expect(ws.activeReq!.body).toEqual({
       type: "json",
       content: '{"hello":"world"}',
       fields: [],
     });
-    expect(req.activeSavedBodyId).toBe("sb-1");
+    expect(ws.activeReq!.activeSavedBodyId).toBe("sb-1");
     expect(
-      req.headers.find((h) => h.name === "Content-Type")?.value
+      ws.activeReq!.headers.find((h) => h.name === "Content-Type")?.value
     ).toBe("application/json");
   });
 
   it("does not mutate the saved body when the live body is edited after applying", async () => {
-    const req = activate({
+    activate({
       savedBodies: [
         {
           id: "sb-1",
@@ -1834,13 +1838,13 @@ describe("Workspace saved bodies", () => {
     });
 
     ws.applyBody("sb-1");
-    req.body.content = '{"n":999}';
+    ws.activeReq!.body.content = '{"n":999}';
 
-    expect(req.savedBodies[0].body.content).toBe('{"n":1}');
+    expect(ws.activeReq!.savedBodies[0].body.content).toBe('{"n":1}');
   });
 
   it("updates, renames and deletes saved bodies and persists each change", async () => {
-    const req = activate({
+    activate({
       body: { type: "json", content: "new content", fields: [] },
       savedBodies: [
         {
@@ -1854,14 +1858,14 @@ describe("Workspace saved bodies", () => {
     });
 
     await ws.updateBody("sb-1");
-    expect(req.savedBodies[0].body.content).toBe("new content");
+    expect(ws.activeReq!.savedBodies[0].body.content).toBe("new content");
 
     await ws.renameBody("sb-1", "renamed");
-    expect(req.savedBodies[0].name).toBe("renamed");
+    expect(ws.activeReq!.savedBodies[0].name).toBe("renamed");
 
     await ws.deleteBody("sb-1");
-    expect(req.savedBodies).toHaveLength(0);
-    expect(req.activeSavedBodyId).toBe("");
+    expect(ws.activeReq!.savedBodies).toHaveLength(0);
+    expect(ws.activeReq!.activeSavedBodyId).toBe("");
     expect(repo.saveRequest).toHaveBeenCalledTimes(3);
   });
 });
