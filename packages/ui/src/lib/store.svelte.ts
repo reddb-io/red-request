@@ -18,6 +18,8 @@ import {
   type RequestDefinition,
   type ResponseResult,
   type SavedExample,
+  type SavedBody,
+  type RequestBody,
   type GrpcService,
   type Proxy,
   type Profile,
@@ -1916,6 +1918,73 @@ class Workspace {
     if (!req) return;
     req.examples = (req.examples ?? []).filter((e) => e.id !== id);
     this.exampleView = null;
+    await this.save();
+  }
+
+  // --- saved bodies ---------------------------------------------------------
+  /** Detached snapshot of a body object (so saved bodies never share state with the live one). */
+  private snapshotBody(body: RequestBody): RequestBody {
+    return structuredClone($state.snapshot(body)) as RequestBody;
+  }
+
+  /** Save the current live body as a new named saved body on the active request. */
+  async saveBody(name: string): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    const sb: SavedBody = {
+      id: `sb-${Date.now().toString(36)}`,
+      name: name.trim() || `body ${(req.savedBodies?.length ?? 0) + 1}`,
+      body: this.snapshotBody(req.body),
+      savedAt: Date.now(),
+    };
+    req.savedBodies = [...(req.savedBodies ?? []), sb];
+    req.activeSavedBodyId = sb.id;
+    await this.save();
+  }
+
+  /**
+   * Apply a saved body: copy it into the live body (detached) and route through
+   * setBodyType so the Content-Type / Accept headers follow the applied body type,
+   * exactly as when the body type is changed manually.
+   */
+  applyBody(id: string): void {
+    const req = this.activeReq;
+    if (!req) return;
+    const sb = (req.savedBodies ?? []).find((b) => b.id === id);
+    if (!sb) return;
+    req.body = this.snapshotBody(sb.body);
+    req.activeSavedBodyId = sb.id;
+    this.setBodyType(req.body.type);
+    void this.save();
+  }
+
+  /** Overwrite an existing saved body with the current live body. */
+  async updateBody(id: string): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    const sb = (req.savedBodies ?? []).find((b) => b.id === id);
+    if (!sb) return;
+    sb.body = this.snapshotBody(req.body);
+    sb.savedAt = Date.now();
+    await this.save();
+  }
+
+  /** Rename a saved body (empty name keeps the current one). */
+  async renameBody(id: string, name: string): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    const sb = (req.savedBodies ?? []).find((b) => b.id === id);
+    if (!sb) return;
+    sb.name = name.trim() || sb.name;
+    await this.save();
+  }
+
+  /** Delete a saved body; clears the last-applied marker if it pointed here. */
+  async deleteBody(id: string): Promise<void> {
+    const req = this.activeReq;
+    if (!req) return;
+    req.savedBodies = (req.savedBodies ?? []).filter((b) => b.id !== id);
+    if (req.activeSavedBodyId === id) req.activeSavedBodyId = "";
     await this.save();
   }
 

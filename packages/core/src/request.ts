@@ -92,6 +92,18 @@ export const savedExampleSchema = z.object({
 });
 export type SavedExample = z.infer<typeof savedExampleSchema>;
 
+/** A named saved request body (a payload preset) attached to a request.
+ *  Captures the full body object so form/GraphQL bodies round-trip. Applying one
+ *  copies it into the live body (detached copy); editing the live body afterwards
+ *  never mutates the saved body. */
+export const savedBodySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  body: requestBodySchema,
+  savedAt: z.number().default(0),
+});
+export type SavedBody = z.infer<typeof savedBodySchema>;
+
 /** gRPC config (kind === "grpc"). The server address lives in `url` (host:port). */
 export const grpcConfigSchema = z.object({
   proto: z.string().default(""),
@@ -159,6 +171,10 @@ export const requestDefinitionSchema = z.object({
   }),
   /** Saved response snapshots (docs / mocking) — versioned with the request. */
   examples: z.array(savedExampleSchema).default([]),
+  /** Named saved request bodies (payload presets) — versioned with the request. */
+  savedBodies: z.array(savedBodySchema).default([]),
+  /** id of the last-applied saved body (informational marker; "" = none). */
+  activeSavedBodyId: z.string().default(""),
   /** Optional recker preset name (e.g. "github", "openai") applied as a base. */
   presetName: z.string().optional(),
 });
