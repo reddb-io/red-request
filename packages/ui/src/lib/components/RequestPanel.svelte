@@ -12,9 +12,11 @@
   import HistoryTimeline from "./HistoryTimeline.svelte";
   import VarField from "./VarField.svelte";
   import Select from "./ui/Select.svelte";
+  import Menu from "./ui/Menu.svelte";
   import Tooltip from "./ui/Tooltip.svelte";
   import { appLog } from "../log";
   import { Button } from "./ui/button/index.js";
+  import { Input } from "./ui/input/index.js";
   import { Textarea } from "./ui/textarea/index.js";
 
   let showRunner = $state(false);
@@ -213,6 +215,65 @@
     } catch {
       /* not valid JSON — leave the content untouched */
     }
+  }
+
+  // --- saved bodies (payload presets attached to the request) ---------------
+  const savedBodyItems = $derived(
+    (ws.activeReq?.savedBodies ?? []).map((b) => ({ value: b.id, label: b.name }))
+  );
+  const activeSavedBody = $derived(
+    (ws.activeReq?.savedBodies ?? []).find(
+      (b) => b.id === ws.activeReq?.activeSavedBodyId
+    ) ?? null
+  );
+  const savedBodyMenu = $derived([
+    { label: "Save current as…", onSelect: () => startSaveBody() },
+    ...(activeSavedBody
+      ? [
+          {
+            label: `Update “${activeSavedBody.name}”`,
+            onSelect: () => void ws.updateBody(activeSavedBody!.id),
+          },
+          {
+            label: "Rename…",
+            onSelect: () =>
+              startRenameBody(activeSavedBody!.id, activeSavedBody!.name),
+          },
+          {
+            label: "Delete",
+            destructive: true,
+            onSelect: () => void ws.deleteBody(activeSavedBody!.id),
+          },
+        ]
+      : []),
+  ]);
+
+  // Inline naming prompt for save-as / rename (webkit has no reliable window.prompt).
+  let bodyNameMode = $state<null | "save" | "rename">(null);
+  let bodyNameTarget = $state<string | null>(null);
+  let bodyNameInput = $state("");
+  function startSaveBody() {
+    bodyNameMode = "save";
+    bodyNameTarget = null;
+    bodyNameInput = "";
+  }
+  function startRenameBody(id: string, name: string) {
+    bodyNameMode = "rename";
+    bodyNameTarget = id;
+    bodyNameInput = name;
+  }
+  function cancelBodyName() {
+    bodyNameMode = null;
+    bodyNameTarget = null;
+    bodyNameInput = "";
+  }
+  async function confirmBodyName() {
+    const name = bodyNameInput.trim();
+    if (!name) return;
+    if (bodyNameMode === "save") await ws.saveBody(name);
+    else if (bodyNameMode === "rename" && bodyNameTarget)
+      await ws.renameBody(bodyNameTarget, name);
+    cancelBodyName();
   }
 
   // Path params auto-detected from `:name` segments in the URL.
@@ -682,6 +743,26 @@
                 >Prettify</Button
               >
             {/if}
+            {#if savedBodyItems.length}
+              <Select
+                value={ws.activeReq.activeSavedBodyId}
+                items={savedBodyItems}
+                onChange={(id) => ws.applyBody(id)}
+                placeholder="saved bodies"
+                ariaLabel="saved body"
+                class="w-auto"
+              />
+            {/if}
+            <Menu items={savedBodyMenu}>
+              {#snippet trigger(props)}
+                <Button
+                  {...props}
+                  variant="outline"
+                  size="xs"
+                  title="Saved request bodies (payload presets)">Bodies</Button
+                >
+              {/snippet}
+            </Menu>
             {#if ws.activeReq.body.type !== "none" && ws.activeReq.body.type !== "form" && ws.activeReq.body.type !== "multipart"}
               <label
                 class="ml-auto flex items-center gap-1.5 text-xs text-fg-muted"
@@ -691,6 +772,24 @@
               </label>
             {/if}
           </div>
+          {#if bodyNameMode}
+            <div class="flex shrink-0 items-center gap-2">
+              <Input
+                bind:value={bodyNameInput}
+                placeholder={bodyNameMode === "save"
+                  ? "name this body (e.g. payment.created)"
+                  : "new name"}
+                aria-label="saved body name"
+                class="h-7 flex-1"
+                onkeydown={(e: KeyboardEvent) => {
+                  if (e.key === "Enter") void confirmBodyName();
+                  else if (e.key === "Escape") cancelBodyName();
+                }}
+              />
+              <Button size="xs" onclick={() => void confirmBodyName()}>Save</Button>
+              <Button variant="outline" size="xs" onclick={cancelBodyName}>Cancel</Button>
+            </div>
+          {/if}
           {#if ws.activeReq.body.type === "form" || ws.activeReq.body.type === "multipart"}
             <KeyValueEditor bind:items={ws.activeReq.body.fields} placeholder="field" />
           {:else if ws.activeReq.body.type === "graphql"}
