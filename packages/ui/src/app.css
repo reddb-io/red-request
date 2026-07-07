@@ -151,6 +151,18 @@ body {
   }
 }
 
+/* VarField stacks a transparent <input>/<textarea> over a highlighted backdrop, so its real
+   glyphs are `text-transparent` (see the @layer base note above). Without this, the native
+   selection band paints an opaque highlight over those transparent input glyphs while the
+   coloured backdrop text sits behind it — reading as two stacked inputs. Keep the selected
+   glyphs transparent and use a translucent band so the backdrop's highlighted text shows
+   through and selection reads as a single coherent layer. */
+[data-slot="var-field-input"]::selection,
+[data-slot="var-field-textarea"]::selection {
+  color: transparent;
+  background: color-mix(in srgb, var(--color-brand) 32%, transparent);
+}
+
 ::-webkit-scrollbar {
   width: 11px;
   height: 11px;

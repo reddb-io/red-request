@@ -82,6 +82,52 @@ describe("VarField", () => {
     expect(textarea.className).toContain("overflow-auto");
   });
 
+  it("mirrors caret-driven input scroll onto the highlight backdrop", async () => {
+    const { container } = render(VarField, {
+      value:
+        "https://api.example.com/a/very/long/path/that/overflows/the/field",
+      known: [],
+      ariaLabel: "URL",
+    });
+    const input = screen.getByLabelText("URL") as HTMLInputElement;
+    const backdrop = container.querySelector<HTMLElement>(
+      '[data-slot="var-field-backdrop"]'
+    )!;
+    expect(backdrop).toBeTruthy();
+
+    // Simulate the browser auto-scrolling the input to keep the caret visible after END,
+    // which single-line inputs don't reliably emit a `scroll` event for.
+    input.scrollLeft = 240;
+    expect(backdrop.scrollLeft).toBe(0);
+
+    await fireEvent.keyUp(input, { key: "End" });
+    expect(backdrop.scrollLeft).toBe(240);
+
+    // Home returns to the start; typing at the end keeps the backdrop tracking.
+    input.scrollLeft = 0;
+    await fireEvent.keyUp(input, { key: "Home" });
+    expect(backdrop.scrollLeft).toBe(0);
+
+    input.scrollLeft = 260;
+    await fireEvent.input(input);
+    expect(backdrop.scrollLeft).toBe(260);
+  });
+
+  it("keeps the backdrop selectable-glyph coherent via a scoped ::selection", () => {
+    const { container } = render(VarField, {
+      value: "{{token}}",
+      known: ["token"],
+      ariaLabel: "URL",
+    });
+    const input = container.querySelector('[data-slot="var-field-input"]');
+    // The backdrop text stays opaque so a translucent ::selection band reads coherently.
+    expect(input?.className).toContain("text-transparent");
+    const backdrop = container.querySelector(
+      '[data-slot="var-field-backdrop"]'
+    );
+    expect(backdrop?.className).not.toContain("text-transparent");
+  });
+
   it("opens a wide suggestions menu without overflowing the viewport", async () => {
     Object.defineProperty(window, "innerWidth", {
       value: 800,
