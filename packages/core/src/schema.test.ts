@@ -13,6 +13,46 @@ describe("requestDefinitionSchema", () => {
     expect(def.headers).toEqual([]);
   });
 
+  it("defaults saved bodies to an empty collection with no active id", () => {
+    const def = requestDefinitionSchema.parse({ id: "abc" });
+    expect(def.savedBodies).toEqual([]);
+    expect(def.activeSavedBodyId).toBe("");
+  });
+
+  it("parses existing stored requests without a savedBodies field", () => {
+    // A request persisted before saved bodies existed must still load.
+    const legacy = { id: "old", name: "Legacy", url: "https://api.test" };
+    const def = requestDefinitionSchema.parse(legacy);
+    expect(def.savedBodies).toEqual([]);
+    expect(def.activeSavedBodyId).toBe("");
+  });
+
+  it("captures the full body object for each saved body", () => {
+    const def = requestDefinitionSchema.parse({
+      id: "abc",
+      savedBodies: [
+        {
+          id: "sb-1",
+          name: "payment.created",
+          body: { type: "json", content: '{"event":"payment.created"}' },
+          savedAt: 42,
+        },
+      ],
+      activeSavedBodyId: "sb-1",
+    });
+    expect(def.savedBodies[0]).toEqual({
+      id: "sb-1",
+      name: "payment.created",
+      body: {
+        type: "json",
+        content: '{"event":"payment.created"}',
+        fields: [],
+      },
+      savedAt: 42,
+    });
+    expect(def.activeSavedBodyId).toBe("sb-1");
+  });
+
   it("round-trips through JSON without loss", () => {
     const def = {
       ...newRequest("r1"),
