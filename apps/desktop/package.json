@@ -1,6 +1,6 @@
 {
   "name": "@reddb-io/request-desktop",
-  "version": "0.63.3",
+  "version": "0.63.4",
   "private": true,
   "type": "module",
   "scripts": {
