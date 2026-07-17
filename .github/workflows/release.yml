@@ -29,7 +29,17 @@ env:
   # v1.19.0: native VCS is fully exposed through RQL (CHECKPOINT / red.commits /
   # red.diff / RESET); the HTTP /repo/* transport was retired, so the app's VCS
   # client requires this sidecar — do not pin below v1.19.0.
-  REDDB_VERSION: v1.19.0
+  # v1.23.1 (current pin): verified compatible against every surface the app
+  # touches — HTTP REST (POST /collections/*/documents, PATCH/DELETE
+  # /collections/*/entities/*), document `/body/*` set-patches, PUT/GET CONFIG
+  # (KV), red.commits (hash/author_name/height/parents), CHECKPOINT ... AUTHOR,
+  # ALTER TABLE SET VERSIONED, and AS OF COMMIT time-travel. No on-disk format
+  # change since 1.4.0 (16KB pages), so 1.19 stores open unchanged. The 1.21/1.22
+  # document-DML RQL breaking changes don't apply (writes go through the REST
+  # endpoints, not hand-built VALUES literals). RESET HARD stays unimplemented
+  # (Phase 4) exactly as it already was at 1.19.0 — not a regression. 1.23 adds
+  # disk-resident H3 geo indexing plus a hot-path perf sweep.
+  REDDB_VERSION: v1.23.1
   # Empty means release builds download RedDB's prebuilt `red-*` assets through
   # scripts/fetch-reddb.mjs. Set only for emergency validation against an
   # unpublished RedDB commit; source builds make Linux/Windows release legs slow.
@@ -224,7 +234,7 @@ jobs:
           echo "$shim" >> "$GITHUB_PATH"
 
       - name: Build + publish bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

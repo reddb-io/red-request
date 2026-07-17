@@ -6,7 +6,7 @@ on:
       reddb_version:
         description: "Pinned RedDB release tag to smoke-package with"
         required: true
-        default: "v1.19.0"
+        default: "v1.23.1"
       reddb_source_ref:
         description: "Optional RedDB source commit/ref to build instead of downloading release assets"
         required: false
@@ -136,7 +136,7 @@ jobs:
           node scripts/check-appimage-reddb-sidecar.mjs "$appimage" "$REDDB_VERSION"
 
       - name: Upload deb artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: red-request-linux-x86_64-deb
           path: apps/desktop/src-tauri/target/release/bundle/deb/*.deb
