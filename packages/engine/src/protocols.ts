@@ -193,7 +193,7 @@ export function runTcp(
         Math.min(1000, timeoutMs)
       );
     });
-    sock.on("data", (d) => chunks.push(d));
+    sock.on("data", (d: Buffer) => chunks.push(d));
     // `on` (persistent) so a late error after finish can't go uncaught.
     sock.on("error", (e) => finish(fail(errMsg(e), performance.now() - t0)));
   });
@@ -313,7 +313,7 @@ export function runTls(
       );
     });
 
-    sock.on("data", (d) => chunks.push(d));
+    sock.on("data", (d: Buffer) => chunks.push(d));
     // `on` (persistent) so a late error after finish can't go uncaught.
     sock.on("error", (e) => finish(fail(errMsg(e), performance.now() - t0)));
   });

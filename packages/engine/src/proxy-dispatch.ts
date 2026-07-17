@@ -521,7 +521,7 @@ async function socksDispatch(
 
     raw = await new Promise<Buffer>((resolve) => {
       const chunks: Buffer[] = [];
-      sock.on("data", (c) => chunks.push(c));
+      sock.on("data", (c: Buffer) => chunks.push(c));
       sock.on("end", () => resolve(Buffer.concat(chunks)));
       sock.on("error", () => resolve(Buffer.concat(chunks)));
       sock.setTimeout(timeout, () => {
