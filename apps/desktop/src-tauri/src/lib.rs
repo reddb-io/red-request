@@ -361,7 +361,7 @@ fn reddb_vault_cert_path(db_path: &std::path::Path) -> Result<std::path::PathBuf
 }
 
 fn ensure_reddb_vault_certificate(db_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    use rand::TryRngCore;
+    use rand::TryRng;
 
     let cert_path = reddb_vault_cert_path(db_path)?;
     if cert_path.exists() {
@@ -382,7 +382,7 @@ fn ensure_reddb_vault_certificate(db_path: &std::path::Path) -> Result<std::path
             .map_err(|e| format!("create RedDB vault certificate dir: {e}"))?;
     }
     let mut cert = [0u8; 32];
-    rand::rngs::OsRng
+    rand::rngs::SysRng
         .try_fill_bytes(&mut cert)
         .map_err(|e| format!("generate RedDB vault certificate: {e}"))?;
     std::fs::write(&cert_path, hex_lower(&cert))
@@ -596,9 +596,9 @@ fn master_key() -> Result<[u8; 32], String> {
                 .map_err(|_| "master key has wrong length".to_string())
         }
         Err(keyring::Error::NoEntry) => {
-            use rand::TryRngCore;
+            use rand::TryRng;
             let mut key = [0u8; 32];
-            rand::rngs::OsRng
+            rand::rngs::SysRng
                 .try_fill_bytes(&mut key)
                 .map_err(|e| e.to_string())?;
             entry
@@ -613,10 +613,10 @@ fn master_key() -> Result<[u8; 32], String> {
 fn seal_with_key(key: &[u8; 32], plaintext: &str) -> Result<Sealed, String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Key, Nonce};
-    use rand::TryRngCore;
+    use rand::TryRng;
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let mut nb = [0u8; 12];
-    rand::rngs::OsRng
+    rand::rngs::SysRng
         .try_fill_bytes(&mut nb)
         .map_err(|e| e.to_string())?;
     let nonce = Nonce::from_slice(&nb);
@@ -1740,7 +1740,10 @@ fn process_snapshot() -> sysinfo::System {
     let mut system = sysinfo::System::new();
     system.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::All,
-        sysinfo::ProcessRefreshKind::new()
+        // sysinfo 0.39 added `remove_dead_processes`; `true` preserves the pre-0.31
+        // behaviour where a refresh dropped processes that no longer exist.
+        true,
+        sysinfo::ProcessRefreshKind::nothing()
             .with_cmd(sysinfo::UpdateKind::Always)
             .with_exe(sysinfo::UpdateKind::OnlyIfNotSet),
     );
@@ -3022,9 +3025,9 @@ struct OauthAuthorizeResult {
 }
 
 fn rand_b64url(n: usize) -> String {
-    use rand::TryRngCore;
+    use rand::TryRng;
     let mut bytes = vec![0u8; n];
-    rand::rngs::OsRng
+    rand::rngs::SysRng
         .try_fill_bytes(&mut bytes)
         .expect("OS RNG unavailable");
     URL_SAFE_NO_PAD.encode(bytes)
