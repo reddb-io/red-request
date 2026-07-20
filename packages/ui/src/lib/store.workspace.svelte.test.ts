@@ -1218,6 +1218,82 @@ describe("Workspace persistence coordination", () => {
     );
   });
 
+  it("persists a folder between two root requests", async () => {
+    ws.collections = [
+      collection(
+        "c1",
+        [request("r1"), request("r2")],
+        ["Folder A", "Folder B"]
+      ),
+    ];
+
+    await ws.reorderRootItem(
+      { kind: "folder", name: "Folder B" },
+      { kind: "request", id: "r2" },
+      "c1"
+    );
+
+    expect(ws.collections[0]?.collection.rootOrder).toEqual([
+      { kind: "request", id: "r1" },
+      { kind: "folder", name: "Folder B" },
+      { kind: "request", id: "r2" },
+      { kind: "folder", name: "Folder A" },
+    ]);
+    expect(repo.saveCollectionMeta).toHaveBeenCalledWith(
+      "c1",
+      expect.objectContaining({
+        rootOrder: [
+          { kind: "request", id: "r1" },
+          { kind: "folder", name: "Folder B" },
+          { kind: "request", id: "r2" },
+          { kind: "folder", name: "Folder A" },
+        ],
+      })
+    );
+  });
+
+  it("moves a request out of a folder at an exact root position", async () => {
+    ws.collections = [
+      collection(
+        "c1",
+        [request("r1"), request("nested", { folder: "Folder A" })],
+        ["Folder A"]
+      ),
+    ];
+
+    await ws.reorderRootRequest(
+      "nested",
+      { kind: "folder", name: "Folder A" },
+      "c1"
+    );
+
+    expect(ws.collections[0]?.requests[1]?.folder).toBe("");
+    expect(ws.collections[0]?.collection.rootOrder).toEqual([
+      { kind: "request", id: "r1" },
+      { kind: "request", id: "nested" },
+      { kind: "folder", name: "Folder A" },
+    ]);
+  });
+
+  it("removes and restores root entries when a request crosses a folder boundary", async () => {
+    ws.collections = [
+      collection("c1", [request("r1"), request("r2")], ["Folder A"]),
+    ];
+
+    await ws.reorderRequest("r1", "Folder A", null, "c1");
+    expect(ws.collections[0]?.collection.rootOrder).toEqual([
+      { kind: "request", id: "r2" },
+      { kind: "folder", name: "Folder A" },
+    ]);
+
+    await ws.reorderRequest("r1", "", null, "c1");
+    expect(ws.collections[0]?.collection.rootOrder).toEqual([
+      { kind: "request", id: "r2" },
+      { kind: "folder", name: "Folder A" },
+      { kind: "request", id: "r1" },
+    ]);
+  });
+
   it("persists environment tab order through the native config order key", async () => {
     ws.environments = ["dev", "staging", "prod"].map((name) =>
       storedEnvironmentSchema.parse({ name, vars: {}, secrets: {} })

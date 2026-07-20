@@ -1,5 +1,6 @@
 import {
   mergeScopes,
+  resolveCollectionRootOrder,
   storedEnvironmentSchema,
   INTROSPECTION_QUERY,
   parseSchema,
@@ -15,6 +16,7 @@ import {
   type BodyType,
   type ImportedCollection,
   type LoadedCollection,
+  type CollectionRootItem,
   type RequestDefinition,
   type ResponseResult,
   type SavedExample,
@@ -82,6 +84,25 @@ const LOAD_STEP_TIMEOUT_MS = 15_000;
 const PENDING_SAVE_TIMEOUT_MS = 5_000;
 const SYNC_QUEUE_WAIT_MS = 15_000;
 const SYNC_RELOAD_DELAY_MS = 250;
+
+const rootItemKey = (item: CollectionRootItem): string =>
+  item.kind === "request" ? `request:${item.id}` : `folder:${item.name}`;
+
+function placeRootItem(
+  order: CollectionRootItem[],
+  item: CollectionRootItem,
+  before: CollectionRootItem | null
+): CollectionRootItem[] {
+  const itemKey = rootItemKey(item);
+  const next = order.filter((candidate) => rootItemKey(candidate) !== itemKey);
+  const beforeKey = before ? rootItemKey(before) : null;
+  const beforeIndex = beforeKey
+    ? next.findIndex((candidate) => rootItemKey(candidate) === beforeKey)
+    : -1;
+  if (beforeIndex >= 0) next.splice(beforeIndex, 0, item);
+  else next.push(item);
+  return next;
+}
 export type AppView = "home" | "requests" | "settings" | "database";
 export type SettingsSection =
   | "general"
@@ -2335,6 +2356,64 @@ class Workspace {
 
   // --- collection structure (requests + folders) --------------------------
 
+  private rootOrder(col: LoadedCollection): CollectionRootItem[] {
+    return resolveCollectionRootOrder(col.collection, col.requests);
+  }
+
+  private applyRootOrder(
+    col: LoadedCollection,
+    order: CollectionRootItem[]
+  ): void {
+    col.collection.rootOrder = order;
+    // Keep the legacy folder list ordered for older exports and clients.
+    col.collection.folders = order.flatMap((item) =>
+      item.kind === "folder" ? [item.name] : []
+    );
+  }
+
+  /** Reposition one root request/folder relative to another root sibling. */
+  async reorderRootItem(
+    item: CollectionRootItem,
+    before: CollectionRootItem | null,
+    colId?: string
+  ): Promise<void> {
+    if (before && rootItemKey(item) === rootItemKey(before)) return;
+    const targetColId = colId ?? this.activeColId;
+    const col = this.collections.find(
+      (candidate) => candidate.id === targetColId
+    );
+    if (!col || !targetColId) return;
+    const current = this.rootOrder(col);
+    if (
+      !current.some((candidate) => rootItemKey(candidate) === rootItemKey(item))
+    )
+      return;
+    this.applyRootOrder(col, placeRootItem(current, item, before));
+    await repo.saveCollectionMeta(
+      targetColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+  }
+
+  /** Move a request to the collection root at an exact mixed-tree position. */
+  async reorderRootRequest(
+    requestId: string,
+    before: CollectionRootItem | null,
+    targetColId?: string
+  ): Promise<void> {
+    const beforeRequestId = before?.kind === "request" ? before.id : null;
+    await this.reorderRequest(requestId, "", beforeRequestId, targetColId);
+    const col = this.collections.find((candidate) =>
+      candidate.requests.some((request) => request.id === requestId)
+    );
+    if (!col) return;
+    await this.reorderRootItem(
+      { kind: "request", id: requestId },
+      before,
+      col.id
+    );
+  }
+
   /** Create a new, empty collection and make it active. Returns its id (so the UI
    *  can drop straight into an inline rename). */
   async addCollection(name = "New Collection"): Promise<string | null> {
@@ -2441,9 +2520,19 @@ class Workspace {
       folder,
       url: "https://",
     };
+    const rootOrder = this.rootOrder(col);
     await repo.saveRequest(targetColId, req);
     col.requests.push(req);
     col.collection.order.push(id);
+    if (!folder)
+      this.applyRootOrder(col, [
+        ...rootOrder,
+        { kind: "request" as const, id },
+      ]);
+    await repo.saveCollectionMeta(
+      targetColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
     this.selectRequest(targetColId, id);
     return id;
   }
@@ -2457,9 +2546,15 @@ class Workspace {
     ).toString(36)}`;
     const { curlToRequest } = await import("@reddb-io/request-core/importers");
     const req = curlToRequest(text, id);
+    const rootOrder = this.rootOrder(col);
     await repo.saveRequest(this.activeColId, req);
     col.requests.push(req);
     col.collection.order.push(id);
+    this.applyRootOrder(col, [...rootOrder, { kind: "request" as const, id }]);
+    await repo.saveCollectionMeta(
+      this.activeColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
     this.selectRequest(this.activeColId, id);
   }
 
@@ -2558,6 +2653,15 @@ class Workspace {
         baseUrl: imported.baseUrl || undefined,
         folders: imported.folders,
         order: imported.requests.map((r) => r.id),
+        rootOrder: [
+          ...imported.requests
+            .filter((request) => !request.folder)
+            .map((request) => ({ kind: "request" as const, id: request.id })),
+          ...imported.folders.map((name) => ({
+            kind: "folder" as const,
+            name,
+          })),
+        ],
       })
     );
     for (const r of imported.requests) await repo.saveRequest(colId, r);
@@ -2636,9 +2740,19 @@ class Workspace {
       id,
       name: `${src.name} (copy)`,
     };
+    const rootOrder = this.rootOrder(col);
     await repo.saveRequest(col.id, copy);
     col.requests.push(copy);
     col.collection.order.push(id);
+    if (!copy.folder)
+      this.applyRootOrder(col, [
+        ...rootOrder,
+        { kind: "request" as const, id },
+      ]);
+    await repo.saveCollectionMeta(
+      col.id,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
     this.selectRequest(col.id, id);
   }
 
@@ -2647,7 +2761,9 @@ class Workspace {
     const col = this.collections.find((c) => c.id === targetColId);
     if (!col || !targetColId || !name.trim()) return;
     if (col.collection.folders.includes(name)) return;
+    const rootOrder = this.rootOrder(col);
     col.collection.folders.push(name);
+    this.applyRootOrder(col, [...rootOrder, { kind: "folder", name }]);
     await repo.saveCollectionMeta(
       targetColId,
       $state.snapshot(col.collection) as typeof col.collection
@@ -2659,8 +2775,20 @@ class Workspace {
     const targetColId = colId ?? this.activeColId;
     const col = this.collections.find((c) => c.id === targetColId);
     if (!col || !targetColId) return;
+    const rootOrder = this.rootOrder(col);
+    const movedRequests = col.requests.filter(
+      (request) => request.folder === name
+    );
+    const nextRootOrder = rootOrder.flatMap((item) =>
+      item.kind === "folder" && item.name === name
+        ? movedRequests.map((request) => ({
+            kind: "request" as const,
+            id: request.id,
+          }))
+        : [item]
+    );
     col.collection.folders = col.collection.folders.filter((f) => f !== name);
-    for (const r of col.requests) {
+    for (const r of movedRequests) {
       if (r.folder === name) {
         r.folder = "";
         await repo.saveRequest(
@@ -2669,6 +2797,7 @@ class Workspace {
         );
       }
     }
+    this.applyRootOrder(col, nextRootOrder);
     await repo.saveCollectionMeta(
       targetColId,
       $state.snapshot(col.collection) as typeof col.collection
@@ -2684,19 +2813,10 @@ class Workspace {
     const targetColId = colId ?? this.activeColId;
     const col = this.collections.find((c) => c.id === targetColId);
     if (!col || !targetColId) return;
-    const current = col.collection.folders.includes(name)
-      ? col.collection.folders
-      : [...col.collection.folders, name];
-    const next = current.filter((folder) => folder !== name);
-    const beforeIndex = beforeName
-      ? next.findIndex((folder) => folder === beforeName)
-      : -1;
-    if (beforeIndex >= 0) next.splice(beforeIndex, 0, name);
-    else next.push(name);
-    col.collection.folders = next;
-    await repo.saveCollectionMeta(
-      targetColId,
-      $state.snapshot(col.collection) as typeof col.collection
+    await this.reorderRootItem(
+      { kind: "folder", name },
+      beforeName ? { kind: "folder", name: beforeName } : null,
+      targetColId
     );
   }
 
@@ -2736,6 +2856,9 @@ class Workspace {
     const dest = targetColId
       ? (this.collections.find((c) => c.id === targetColId) ?? src)
       : src;
+    const srcRootOrder = this.rootOrder(src);
+    const destRootOrder =
+      dest.id === src.id ? srcRootOrder : this.rootOrder(dest);
 
     // Place dragId inside `dest`'s order array, before `beforeId` or at the end of `folder`.
     const placeInOrder = (orderIn: string[]): string[] => {
@@ -2767,6 +2890,18 @@ class Workspace {
 
       const order = placeInOrder(src.collection.order);
       src.collection.order = order;
+      this.applyRootOrder(
+        src,
+        folder
+          ? srcRootOrder.filter(
+              (item) => item.kind !== "request" || item.id !== dragId
+            )
+          : placeRootItem(
+              srcRootOrder,
+              { kind: "request", id: dragId },
+              beforeId ? { kind: "request", id: beforeId } : null
+            )
+      );
       src.requests = [...src.requests].sort(
         (a, b) => order.indexOf(a.id) - order.indexOf(b.id)
       );
@@ -2792,9 +2927,25 @@ class Workspace {
 
     src.requests = src.requests.filter((r) => r.id !== dragId);
     src.collection.order = src.collection.order.filter((id) => id !== dragId);
+    this.applyRootOrder(
+      src,
+      srcRootOrder.filter(
+        (item) => item.kind !== "request" || item.id !== dragId
+      )
+    );
     dest.requests.push(req);
     const order = placeInOrder(dest.collection.order);
     dest.collection.order = order;
+    this.applyRootOrder(
+      dest,
+      folder
+        ? destRootOrder
+        : placeRootItem(
+            destRootOrder,
+            { kind: "request", id: dragId },
+            beforeId ? { kind: "request", id: beforeId } : null
+          )
+    );
     dest.requests = [...dest.requests].sort(
       (a, b) => order.indexOf(a.id) - order.indexOf(b.id)
     );
@@ -2832,9 +2983,14 @@ class Workspace {
       c.requests.some((r) => r.id === reqId)
     );
     if (!col) return;
+    const rootOrder = this.rootOrder(col);
     await repo.deleteRequest(col.id, reqId);
     col.requests = col.requests.filter((r) => r.id !== reqId);
     col.collection.order = col.collection.order.filter((id) => id !== reqId);
+    this.applyRootOrder(
+      col,
+      rootOrder.filter((item) => item.kind !== "request" || item.id !== reqId)
+    );
     await repo.saveCollectionMeta(
       col.id,
       $state.snapshot(col.collection) as typeof col.collection
