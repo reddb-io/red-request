@@ -11,6 +11,12 @@ import { newRequest } from "@reddb-io/request-core";
 import { ws } from "../store.svelte";
 import SidebarHarness from "../test/SidebarHarness.svelte";
 
+vi.mock("../repo", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../repo")>()),
+  saveCollectionMeta: vi.fn().mockResolvedValue(undefined),
+  saveRequest: vi.fn().mockResolvedValue(undefined),
+}));
+
 describe("Sidebar inline rename gestures", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -28,6 +34,7 @@ describe("Sidebar inline rename gestures", () => {
           name: "Team API",
           order: ["req-1"],
           folders: [],
+          rootOrder: [],
           vars: {},
           auth: { type: "none" },
           cookieJar: false,
@@ -76,5 +83,144 @@ describe("Sidebar inline rename gestures", () => {
     await waitFor(() => {
       expect(renameCollection).toHaveBeenCalledWith("col-1", "Platform API");
     });
+  });
+});
+
+describe("Sidebar root drag-and-drop", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    const rootOne = {
+      ...newRequest("root-1"),
+      name: "Root one",
+    };
+    const rootTwo = {
+      ...newRequest("root-2"),
+      name: "Root two",
+    };
+    ws.project = null;
+    ws.collections = [
+      {
+        id: "col-1",
+        collection: {
+          name: "Mixed tree",
+          order: ["root-1", "root-2"],
+          folders: ["Folder A", "Folder B"],
+          rootOrder: [],
+          vars: {},
+          auth: { type: "none" },
+          cookieJar: false,
+          defaultProfileId: "",
+        },
+        requests: [rootOne, rootTwo],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "col-1";
+    ws.activeReq = rootOne;
+    ws.network = { proxies: [], profiles: [] };
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function button(label: string): HTMLButtonElement {
+    const element = screen.getByText(label).closest("button");
+    if (!(element instanceof HTMLButtonElement))
+      throw new Error(`button not found for ${label}`);
+    return element;
+  }
+
+  function requestRow(label: string): HTMLElement {
+    const row = button(label).parentElement;
+    if (!row) throw new Error(`request row not found for ${label}`);
+    return row;
+  }
+
+  function appearsBefore(left: string, right: string): boolean {
+    return !!(
+      screen.getByText(left).compareDocumentPosition(screen.getByText(right)) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+  }
+
+  async function dragFolderOntoRequest(
+    folder: string,
+    request: string,
+    clientY: number
+  ): Promise<void> {
+    const target = requestRow(request);
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 20,
+      width: 100,
+      height: 20,
+      toJSON: () => ({}),
+    });
+    const dataTransfer = {
+      setData: vi.fn(),
+      effectAllowed: "none",
+      dropEffect: "none",
+    };
+    const dragEvent = (type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        clientY: { value: clientY },
+        dataTransfer: { value: dataTransfer },
+      });
+      return event;
+    };
+
+    await fireEvent(button(folder), dragEvent("dragstart"));
+    await fireEvent(target, dragEvent("dragover"));
+    await fireEvent(target, dragEvent("drop"));
+  }
+
+  it("renders a persisted folder between root requests", () => {
+    ws.collections[0]!.collection.rootOrder = [
+      { kind: "request", id: "root-1" },
+      { kind: "folder", name: "Folder B" },
+      { kind: "request", id: "root-2" },
+      { kind: "folder", name: "Folder A" },
+    ];
+    render(SidebarHarness);
+
+    expect(appearsBefore("Root one", "Folder B")).toBe(true);
+    expect(appearsBefore("Folder B", "Root two")).toBe(true);
+  });
+
+  it("targets the position before a root request when a folder is dropped on its top half", async () => {
+    const reorderRootItem = vi
+      .spyOn(ws, "reorderRootItem")
+      .mockResolvedValue(undefined);
+    render(SidebarHarness);
+
+    await dragFolderOntoRequest("Folder B", "Root one", 1);
+
+    expect(reorderRootItem).toHaveBeenCalledWith(
+      { kind: "folder", name: "Folder B" },
+      { kind: "request", id: "root-1" },
+      "col-1"
+    );
+  });
+
+  it("targets the next root sibling when a folder is dropped on a request's bottom half", async () => {
+    const reorderRootItem = vi
+      .spyOn(ws, "reorderRootItem")
+      .mockResolvedValue(undefined);
+    render(SidebarHarness);
+
+    await dragFolderOntoRequest("Folder B", "Root one", 19);
+
+    expect(reorderRootItem).toHaveBeenCalledWith(
+      { kind: "folder", name: "Folder B" },
+      { kind: "request", id: "root-2" },
+      "col-1"
+    );
+    expect(ws.collections[0]?.requests[0]?.folder).toBe("");
   });
 });

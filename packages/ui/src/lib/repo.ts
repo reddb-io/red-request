@@ -1346,6 +1346,7 @@ export const saveCollectionMeta = async (colId: string, c: CollectionFile) => {
       name: c.name,
       order: c.order,
       folders: c.folders,
+      rootOrder: c.rootOrder,
     }
   );
   db.commitSoon(`save collection ${c.name ?? colId}`);

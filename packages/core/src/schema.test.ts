@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { requestDefinitionSchema, newRequest } from "./request.js";
-import { collectionFileSchema } from "./collection.js";
+import {
+  collectionFileSchema,
+  resolveCollectionRootOrder,
+} from "./collection.js";
 import { environmentFileSchema } from "./collection.js";
 import { authConfigSchema } from "./auth.js";
 
@@ -101,5 +104,52 @@ describe("collectionFileSchema", () => {
     const c = collectionFileSchema.parse({ name: "My API" });
     expect(c.auth).toEqual({ type: "none" });
     expect(c.order).toEqual([]);
+    expect(c.rootOrder).toEqual([]);
+  });
+
+  it("derives the legacy root layout before persisting a mixed order", () => {
+    const collection = collectionFileSchema.parse({
+      name: "My API",
+      order: ["root-b", "nested", "root-a"],
+      folders: ["Users", "Admin"],
+    });
+    const rootA = { ...newRequest("root-a"), folder: "" };
+    const rootB = { ...newRequest("root-b"), folder: "" };
+    const nested = { ...newRequest("nested"), folder: "Users" };
+
+    expect(
+      resolveCollectionRootOrder(collection, [rootA, rootB, nested])
+    ).toEqual([
+      { kind: "request", id: "root-b" },
+      { kind: "request", id: "root-a" },
+      { kind: "folder", name: "Users" },
+      { kind: "folder", name: "Admin" },
+    ]);
+  });
+
+  it("keeps a persisted mixed root order and repairs stale entries", () => {
+    const collection = collectionFileSchema.parse({
+      name: "My API",
+      order: ["root-a", "root-b"],
+      folders: ["Users", "Admin"],
+      rootOrder: [
+        { kind: "folder", name: "Users" },
+        { kind: "request", id: "root-a" },
+        { kind: "folder", name: "missing" },
+        { kind: "folder", name: "Users" },
+      ],
+    });
+
+    expect(
+      resolveCollectionRootOrder(collection, [
+        newRequest("root-a"),
+        newRequest("root-b"),
+      ])
+    ).toEqual([
+      { kind: "folder", name: "Users" },
+      { kind: "request", id: "root-a" },
+      { kind: "request", id: "root-b" },
+      { kind: "folder", name: "Admin" },
+    ]);
   });
 });

@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { authConfigSchema } from "./auth.js";
-import { requestDefinitionSchema } from "./request.js";
+import { requestDefinitionSchema, type RequestDefinition } from "./request.js";
 import { timingsSchema } from "./response.js";
+
+export const collectionRootItemSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("request"), id: z.string() }),
+  z.object({ kind: z.literal("folder"), name: z.string() }),
+]);
+export type CollectionRootItem = z.infer<typeof collectionRootItemSchema>;
 
 /**
  * `collection.yaml` at the root of a collection folder. Variables and auth defined here
@@ -17,12 +23,58 @@ export const collectionFileSchema = z.object({
   order: z.array(z.string()).default([]),
   /** Folder names for grouping requests (incl. empty folders). */
   folders: z.array(z.string()).default([]),
+  /** Mixed order of root requests and folders. Empty means legacy order: requests, then folders. */
+  rootOrder: z.array(collectionRootItemSchema).default([]),
   /** Persist Set-Cookie across this collection's requests (browser-like session). */
   cookieJar: z.boolean().default(false),
   /** Default project profile applied to requests that don't pick one (empty = none). */
   defaultProfileId: z.string().default(""),
 });
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
+
+const rootItemKey = (item: CollectionRootItem): string =>
+  item.kind === "request" ? `request:${item.id}` : `folder:${item.name}`;
+
+/**
+ * Return a complete, de-duplicated root tree order. Older collections do not have
+ * `rootOrder`; they retain the historical layout (root requests followed by folders)
+ * until the first structural edit persists the explicit mixed order.
+ */
+export function resolveCollectionRootOrder(
+  collection: CollectionFile,
+  requests: RequestDefinition[]
+): CollectionRootItem[] {
+  const rootRequestIds = new Set(
+    requests.filter((request) => !request.folder).map((request) => request.id)
+  );
+  const extraFolderNames = requests
+    .map((request) => request.folder)
+    .filter(
+      (name): name is string => !!name && !collection.folders.includes(name)
+    )
+    .sort((left, right) => left.localeCompare(right));
+  const folderNames = new Set([...collection.folders, ...extraFolderNames]);
+  const resolved: CollectionRootItem[] = [];
+  const seen = new Set<string>();
+
+  const append = (item: CollectionRootItem) => {
+    const valid =
+      item.kind === "request"
+        ? rootRequestIds.has(item.id)
+        : folderNames.has(item.name);
+    const key = rootItemKey(item);
+    if (!valid || seen.has(key)) return;
+    seen.add(key);
+    resolved.push(item);
+  };
+
+  for (const item of collection.rootOrder) append(item);
+  for (const id of collection.order) append({ kind: "request", id });
+  for (const request of requests) append({ kind: "request", id: request.id });
+  for (const name of collection.folders) append({ kind: "folder", name });
+  for (const name of extraFolderNames) append({ kind: "folder", name });
+  return resolved;
+}
 
 /**
  * YAML export shape of an environment (the git artifact). Plain `vars` are written;

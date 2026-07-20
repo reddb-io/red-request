@@ -23,6 +23,7 @@ describe("Dashboard network identity metrics", () => {
           name: "Team API",
           order: ["req-1"],
           folders: [],
+          rootOrder: [],
           vars: {},
           auth: { type: "none" },
           cookieJar: false,
