@@ -1986,6 +1986,60 @@ describe("Workspace persistence coordination", () => {
     ]);
   });
 
+  it("omits disabled inherited headers only for the active request", async () => {
+    const headers = [
+      { name: "X-Team", value: "folder", enabled: true },
+      { name: "X-Trace", value: "collection", enabled: true },
+    ];
+    ws.collections = [
+      {
+        ...collection("c1", [
+          request("r1", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            folder: "Admin",
+            disabledInheritedHeaders: ["x-team"],
+          }),
+          request("r2", {
+            method: "GET",
+            url: "https://api.example.test/projects",
+            folder: "Admin",
+          }),
+        ]),
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          order: ["r1", "r2"],
+          defaultHeaders: [headers[1]!],
+          folders: [{ name: "Admin", headers: [headers[0]!] }],
+        }),
+      },
+    ];
+    vi.mocked(rpc.httpSend)
+      .mockResolvedValueOnce({
+        response: response(200),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/users",
+      })
+      .mockResolvedValueOnce({
+        response: response(200),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/projects",
+      });
+
+    ws.selectRequest("c1", "r1");
+    await ws.send();
+    ws.selectRequest("c1", "r2");
+    await ws.send();
+
+    expect(vi.mocked(rpc.httpSend).mock.calls[0]?.[0].request.headers).toEqual([
+      { name: "X-Trace", value: "collection", enabled: true },
+    ]);
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request.headers).toEqual([
+      headers[1],
+      headers[0],
+    ]);
+  });
+
   it("uses the active profile cookie jar before the collection cookie jar", async () => {
     ws.network = {
       proxies: [],
