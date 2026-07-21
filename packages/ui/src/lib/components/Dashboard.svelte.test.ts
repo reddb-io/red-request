@@ -28,6 +28,7 @@ describe("Dashboard network identity metrics", () => {
           auth: { type: "none" },
           cookieJar: false,
           defaultProfileId: "",
+          defaultHeaders: [],
         },
         requests: [
           {
