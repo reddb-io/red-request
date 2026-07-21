@@ -143,6 +143,8 @@ export const requestDefinitionSchema = z.object({
     sni: "",
   }),
   headers: z.array(kvSchema).default([]),
+  /** Inherited folder/collection header names disabled for this request. */
+  disabledInheritedHeaders: z.array(z.string()).default([]),
   /** Request-local variables, highest precedence in the runtime scope cascade. */
   vars: z.record(z.string(), z.string()).default({}),
   query: z.array(kvSchema).default([]),
