@@ -17,6 +17,7 @@ describe("requestDefinitionSchema", () => {
     expect(def.auth).toEqual({ type: "inherit" });
     expect(def.body.type).toBe("none");
     expect(def.headers).toEqual([]);
+    expect(def.disabledInheritedHeaders).toEqual([]);
   });
 
   it("defaults saved bodies to an empty collection with no active id", () => {
@@ -305,6 +306,33 @@ describe("resolveScopedRequest", () => {
       auth: { type: "bearer", token: "folder-token" },
       headers: [{ name: "X-Team", value: "folder", enabled: true }],
     });
+  });
+
+  it("omits disabled inherited headers while keeping request-local headers", () => {
+    const collection = collectionFileSchema.parse({
+      name: "Scoped API",
+      defaultHeaders: [
+        { name: "X-Trace", value: "collection", enabled: true },
+        { name: "X-Team", value: "collection", enabled: true },
+      ],
+      folders: [
+        {
+          name: "Admin",
+          headers: [{ name: "X-Team", value: "folder", enabled: true }],
+        },
+      ],
+    });
+    const req = {
+      ...newRequest("r1"),
+      folder: "Admin",
+      disabledInheritedHeaders: ["x-team"],
+      headers: [{ name: "X-Req", value: "1", enabled: true }],
+    };
+
+    expect(resolveScopedRequest(collection, req).headers).toEqual([
+      { name: "X-Trace", value: "collection", enabled: true },
+      { name: "X-Req", value: "1", enabled: true },
+    ]);
   });
 });
 
