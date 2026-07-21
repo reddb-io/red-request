@@ -1,5 +1,6 @@
 import {
   mergeScopes,
+  mergeCollectionDefaultHeaders,
   resolveCollectionRootOrder,
   storedEnvironmentSchema,
   INTROSPECTION_QUERY,
@@ -1373,7 +1374,11 @@ class Workspace {
       const variables = await this.buildVariables();
       const request = await this.applyOAuth2(
         this.applyProfile(
-          structuredClone($state.snapshot(this.activeReq)) as RequestDefinition
+          this.applyCollectionDefaultHeaders(
+            structuredClone(
+              $state.snapshot(this.activeReq)
+            ) as RequestDefinition
+          )
         )
       );
       this.renderedRequest = this.redactRendered(request, variables);
@@ -1516,7 +1521,9 @@ class Workspace {
     try {
       const variables = await this.buildVariables();
       const snap = (r: RequestDefinition) =>
-        structuredClone($state.snapshot(r)) as RequestDefinition;
+        this.applyCollectionDefaultHeaders(
+          structuredClone($state.snapshot(r)) as RequestDefinition
+        );
       let params: RunnerParams;
       if (opts.mode === "repeat") {
         params = {
@@ -1632,6 +1639,15 @@ class Workspace {
       ? this.network.proxies.find((p) => p.id === profile.proxyId)
       : undefined;
     if (proxy?.host.trim() && proxy.port.trim()) snap.proxy = proxyToUrl(proxy);
+    return snap;
+  }
+
+  private applyCollectionDefaultHeaders(
+    snap: RequestDefinition
+  ): RequestDefinition {
+    const defaults = this.activeCollection?.collection.defaultHeaders ?? [];
+    if (defaults.length === 0) return snap;
+    snap.headers = mergeCollectionDefaultHeaders(defaults, snap.headers);
     return snap;
   }
 
