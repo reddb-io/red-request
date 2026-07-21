@@ -143,6 +143,8 @@ export const requestDefinitionSchema = z.object({
     sni: "",
   }),
   headers: z.array(kvSchema).default([]),
+  /** Request-local variables, highest precedence in the runtime scope cascade. */
+  vars: z.record(z.string(), z.string()).default({}),
   query: z.array(kvSchema).default([]),
   /** Positional path params (`:name` segments in the URL). */
   pathParams: z.array(kvSchema).default([]),

@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { requestDefinitionSchema, newRequest } from "./request.js";
 import {
   collectionFileSchema,
+  resolveScopedRequest,
+  resolveScopedVariables,
   mergeCollectionDefaultHeaders,
   resolveCollectionRootOrder,
 } from "./collection.js";
@@ -120,6 +122,31 @@ describe("collectionFileSchema", () => {
     expect(c.defaultHeaders).toEqual([]);
   });
 
+  it("accepts legacy string folders and object folders with scope config", () => {
+    const c = collectionFileSchema.parse({
+      name: "Scoped API",
+      folders: [
+        "Legacy",
+        {
+          name: "Admin",
+          auth: { type: "bearer", token: "folder-token" },
+          headers: [{ name: "X-Team", value: "folder", enabled: true }],
+          vars: { tenant: "folder" },
+        },
+      ],
+    });
+
+    expect(c.folders).toEqual([
+      { name: "Legacy", auth: { type: "inherit" }, headers: [], vars: {} },
+      {
+        name: "Admin",
+        auth: { type: "bearer", token: "folder-token" },
+        headers: [{ name: "X-Team", value: "folder", enabled: true }],
+        vars: { tenant: "folder" },
+      },
+    ]);
+  });
+
   it("derives the legacy root layout before persisting a mixed order", () => {
     const collection = collectionFileSchema.parse({
       name: "My API",
@@ -206,5 +233,104 @@ describe("mergeCollectionDefaultHeaders", () => {
         [{ name: "x-team", value: "", enabled: false }]
       )
     ).toEqual([{ name: "x-team", value: "", enabled: false }]);
+  });
+});
+
+describe("resolveScopedRequest", () => {
+  it("walks request folder collection auth and preserves request header overrides", () => {
+    const collection = collectionFileSchema.parse({
+      name: "Scoped API",
+      auth: { type: "bearer", token: "collection-token" },
+      defaultHeaders: [
+        { name: "Authorization", value: "Bearer default", enabled: true },
+        { name: "X-Team", value: "collection", enabled: true },
+      ],
+      folders: [
+        {
+          name: "Admin",
+          auth: { type: "inherit" },
+          headers: [
+            { name: "Authorization", value: "Bearer folder", enabled: true },
+            { name: "X-Team", value: "folder", enabled: true },
+          ],
+        },
+      ],
+    });
+    const req = {
+      ...newRequest("r1"),
+      folder: "Admin",
+      auth: { type: "inherit" as const },
+      headers: [
+        { name: "authorization", value: "Bearer request", enabled: true },
+        { name: "X-Req", value: "1", enabled: true },
+      ],
+    };
+
+    expect(resolveScopedRequest(collection, req)).toMatchObject({
+      auth: { type: "none" },
+      headers: [
+        { name: "X-Team", value: "folder", enabled: true },
+        { name: "authorization", value: "Bearer request", enabled: true },
+        { name: "X-Req", value: "1", enabled: true },
+      ],
+    });
+  });
+
+  it("lets auth-generated headers override same-named defaults from any scope", () => {
+    const collection = collectionFileSchema.parse({
+      name: "Scoped API",
+      auth: { type: "bearer", token: "collection-token" },
+      defaultHeaders: [
+        { name: "Authorization", value: "Bearer default", enabled: true },
+        { name: "X-Team", value: "collection", enabled: true },
+      ],
+      folders: [
+        {
+          name: "Admin",
+          auth: { type: "bearer", token: "folder-token" },
+          headers: [
+            { name: "Authorization", value: "Bearer folder", enabled: true },
+            { name: "X-Team", value: "folder", enabled: true },
+          ],
+        },
+      ],
+    });
+    const req = {
+      ...newRequest("r1"),
+      folder: "Admin",
+      auth: { type: "inherit" as const },
+    };
+
+    expect(resolveScopedRequest(collection, req)).toMatchObject({
+      auth: { type: "bearer", token: "folder-token" },
+      headers: [{ name: "X-Team", value: "folder", enabled: true }],
+    });
+  });
+});
+
+describe("resolveScopedVariables", () => {
+  it("honors request folder collection environment secret precedence", () => {
+    const collection = collectionFileSchema.parse({
+      name: "Scoped API",
+      vars: { host: "collection", tenant: "collection" },
+      folders: [{ name: "Admin", vars: { tenant: "folder", page: "folder" } }],
+    });
+    const req = {
+      ...newRequest("r1"),
+      folder: "Admin",
+      vars: { page: "request" },
+    };
+
+    expect(
+      resolveScopedVariables(collection, req, {
+        environment: { host: "environment", secret: "environment" },
+        secrets: { host: "secret", tenant: "secret", secret: "secret" },
+      })
+    ).toEqual({
+      host: "collection",
+      tenant: "folder",
+      page: "request",
+      secret: "environment",
+    });
   });
 });

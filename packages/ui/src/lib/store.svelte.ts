@@ -1,7 +1,10 @@
 import {
   mergeScopes,
-  mergeCollectionDefaultHeaders,
   resolveCollectionRootOrder,
+  resolveEffectiveAuth,
+  resolveScopedRequest,
+  resolveScopedVariables,
+  folderName,
   storedEnvironmentSchema,
   INTROSPECTION_QUERY,
   parseSchema,
@@ -1251,13 +1254,18 @@ class Workspace {
       open(this.globals),
     ]);
     this.secretDecryptFailures = [...new Set(failures)];
-    // Precedence (earlier wins): env secret > env var > global secret > global var.
-    return mergeScopes([
-      envSecrets,
-      env?.vars ?? {},
-      globalSecrets,
-      this.globals.vars,
-    ]);
+    const environment = mergeScopes([env?.vars ?? {}, this.globals.vars]);
+    const secrets = mergeScopes([envSecrets, globalSecrets]);
+    if (!this.activeCollection || !this.activeReq)
+      return { ...secrets, ...environment };
+    return resolveScopedVariables(
+      this.activeCollection.collection,
+      this.activeReq,
+      {
+        environment,
+        secrets,
+      }
+    );
   }
 
   /** Full resolved variable scope (vars + DECRYPTED secrets) for the current env. Used by
@@ -1373,8 +1381,8 @@ class Workspace {
     try {
       const variables = await this.buildVariables();
       const request = await this.applyOAuth2(
-        this.applyProfile(
-          this.applyCollectionDefaultHeaders(
+        this.applyScopedRequest(
+          this.applyProfile(
             structuredClone(
               $state.snapshot(this.activeReq)
             ) as RequestDefinition
@@ -1521,8 +1529,10 @@ class Workspace {
     try {
       const variables = await this.buildVariables();
       const snap = (r: RequestDefinition) =>
-        this.applyCollectionDefaultHeaders(
-          structuredClone($state.snapshot(r)) as RequestDefinition
+        this.applyScopedRequest(
+          this.applyProfile(
+            structuredClone($state.snapshot(r)) as RequestDefinition
+          )
         );
       let params: RunnerParams;
       if (opts.mode === "repeat") {
@@ -1642,13 +1652,9 @@ class Workspace {
     return snap;
   }
 
-  private applyCollectionDefaultHeaders(
-    snap: RequestDefinition
-  ): RequestDefinition {
-    const defaults = this.activeCollection?.collection.defaultHeaders ?? [];
-    if (defaults.length === 0) return snap;
-    snap.headers = mergeCollectionDefaultHeaders(defaults, snap.headers);
-    return snap;
+  private applyScopedRequest(snap: RequestDefinition): RequestDefinition {
+    const collection = this.activeCollection?.collection;
+    return collection ? resolveScopedRequest(collection, snap) : snap;
   }
 
   /**
@@ -2447,8 +2453,20 @@ class Workspace {
   ): void {
     col.collection.rootOrder = order;
     // Keep the legacy folder list ordered for older exports and clients.
+    const byName = new Map(
+      col.collection.folders.map((folder) => [folderName(folder), folder])
+    );
     col.collection.folders = order.flatMap((item) =>
-      item.kind === "folder" ? [item.name] : []
+      item.kind === "folder"
+        ? [
+            byName.get(item.name) ?? {
+              name: item.name,
+              auth: { type: "inherit" },
+              headers: [],
+              vars: {},
+            },
+          ]
+        : []
     );
   }
 
@@ -2841,9 +2859,15 @@ class Workspace {
     const targetColId = colId ?? this.activeColId;
     const col = this.collections.find((c) => c.id === targetColId);
     if (!col || !targetColId || !name.trim()) return;
-    if (col.collection.folders.includes(name)) return;
+    if (col.collection.folders.some((folder) => folderName(folder) === name))
+      return;
     const rootOrder = this.rootOrder(col);
-    col.collection.folders.push(name);
+    col.collection.folders.push({
+      name,
+      auth: { type: "inherit" },
+      headers: [],
+      vars: {},
+    });
     this.applyRootOrder(col, [...rootOrder, { kind: "folder", name }]);
     await repo.saveCollectionMeta(
       targetColId,
@@ -2868,7 +2892,9 @@ class Workspace {
           }))
         : [item]
     );
-    col.collection.folders = col.collection.folders.filter((f) => f !== name);
+    col.collection.folders = col.collection.folders.filter(
+      (folder) => folderName(folder) !== name
+    );
     for (const r of movedRequests) {
       if (r.folder === name) {
         r.folder = "";
@@ -3399,11 +3425,9 @@ class Workspace {
   private effectiveOauth(
     req: RequestDefinition
   ): Extract<AuthConfig, { type: "oauth2" }> | null {
-    if (req.auth?.type === "oauth2") return req.auth;
-    if (req.auth?.type === "inherit") {
-      const colAuth = this.activeCollection?.collection.auth;
-      if (colAuth?.type === "oauth2") return colAuth;
-    }
+    const collection = this.activeCollection?.collection;
+    const auth = collection ? resolveEffectiveAuth(collection, req) : req.auth;
+    if (auth?.type === "oauth2") return auth;
     return null;
   }
 

@@ -6,7 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/svelte";
-import { newRequest } from "@reddb-io/request-core";
+import { collectionFileSchema, newRequest } from "@reddb-io/request-core";
 
 import { ws } from "../store.svelte";
 import SidebarHarness from "../test/SidebarHarness.svelte";
@@ -102,7 +102,7 @@ describe("Sidebar root drag-and-drop", () => {
     ws.collections = [
       {
         id: "col-1",
-        collection: {
+        collection: collectionFileSchema.parse({
           name: "Mixed tree",
           order: ["root-1", "root-2"],
           folders: ["Folder A", "Folder B"],
@@ -112,7 +112,7 @@ describe("Sidebar root drag-and-drop", () => {
           cookieJar: false,
           defaultProfileId: "",
           defaultHeaders: [],
-        },
+        }),
         requests: [rootOne, rootTwo],
         environments: [],
       },

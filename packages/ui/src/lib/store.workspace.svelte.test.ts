@@ -188,6 +188,94 @@ function resetWorkspace() {
 beforeEach(resetWorkspace);
 
 describe("Workspace per-request response cache", () => {
+  it("sends with folder scoped auth headers and variables", async () => {
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200),
+      unresolved: [],
+      effectiveUrl: "https://folder.example.test/request",
+    });
+    ws.globals = storedEnvironmentSchema.parse({
+      name: "Globals",
+      vars: { host: "global", secretOnly: "global" },
+      secrets: {},
+    });
+    ws.environments = [
+      storedEnvironmentSchema.parse({
+        name: "dev",
+        vars: { host: "environment", token: "environment" },
+        secrets: {},
+      }),
+    ];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-scoped",
+        collection: collectionFileSchema.parse({
+          name: "c-scoped",
+          vars: { host: "collection", tenant: "collection" },
+          auth: { type: "bearer", token: "collection-token" },
+          defaultHeaders: [
+            { name: "Authorization", value: "Bearer default", enabled: true },
+            { name: "X-Team", value: "collection", enabled: true },
+          ],
+          folders: [
+            {
+              name: "Admin",
+              auth: { type: "bearer", token: "folder-token" },
+              headers: [
+                {
+                  name: "Authorization",
+                  value: "Bearer folder",
+                  enabled: true,
+                },
+                { name: "X-Team", value: "folder", enabled: true },
+              ],
+              vars: { tenant: "folder", page: "folder" },
+            },
+          ],
+          order: ["r1"],
+        }),
+        requests: [
+          request("r1", {
+            folder: "Admin",
+            url: "https://{{host}}.example.test/{{page}}",
+            vars: { page: "request" },
+            auth: { type: "inherit" },
+            headers: [{ name: "X-Req", value: "{{tenant}}", enabled: true }],
+          }),
+        ],
+        environments: [],
+      },
+    ];
+
+    ws.selectRequest("c-scoped", "r1");
+    await ws.send();
+
+    expect(rpc.httpSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variables: expect.objectContaining({
+          host: "collection",
+          tenant: "folder",
+          page: "request",
+          token: "environment",
+          secretOnly: "global",
+        }),
+        request: expect.objectContaining({
+          auth: { type: "bearer", token: "folder-token" },
+          headers: [
+            { name: "X-Team", value: "folder", enabled: true },
+            { name: "X-Req", value: "{{tenant}}", enabled: true },
+          ],
+        }),
+      })
+    );
+    expect(ws.renderedRequest?.headers).toContainEqual({
+      name: "Authorization",
+      value: "Bearer ••••••",
+      enabled: true,
+    });
+  });
+
   it("restores the last response when switching away from and back to a request", async () => {
     const test: ScriptTest = { name: "contract", passed: true };
     const renderedPatch = {
@@ -1433,15 +1521,17 @@ describe("Workspace persistence coordination", () => {
 
     await ws.reorderFolder("gamma", "alpha", "c2");
 
-    expect(ws.collections[1]?.collection.folders).toEqual([
-      "gamma",
-      "alpha",
-      "beta",
-    ]);
+    expect(
+      ws.collections[1]?.collection.folders.map((folder) => folder.name)
+    ).toEqual(["gamma", "alpha", "beta"]);
     expect(repo.saveCollectionMeta).toHaveBeenCalledWith(
       "c2",
       expect.objectContaining({
-        folders: ["gamma", "alpha", "beta"],
+        folders: [
+          expect.objectContaining({ name: "gamma" }),
+          expect.objectContaining({ name: "alpha" }),
+          expect.objectContaining({ name: "beta" }),
+        ],
       })
     );
   });
@@ -1852,7 +1942,11 @@ describe("Workspace persistence coordination", () => {
           order: ["r1"],
           folders: [],
           defaultHeaders: [
-            { name: "Authorization", value: "Bearer collection", enabled: true },
+            {
+              name: "Authorization",
+              value: "Bearer collection",
+              enabled: true,
+            },
             { name: "X-Team", value: "red", enabled: true },
           ],
         }),

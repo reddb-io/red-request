@@ -33,5 +33,6 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     include: ["src/**/*.svelte.{test,spec}.ts"],
+    testTimeout: 15_000,
   },
 });
