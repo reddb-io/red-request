@@ -66,6 +66,15 @@ const rootItemKey = (item: CollectionRootItem): string =>
 export const folderName = (folder: FolderConfig | string): string =>
   typeof folder === "string" ? folder : folder.name;
 
+export type InheritedHeaderSource = "collection" | "folder";
+export type InheritedHeaderRow = Kv & {
+  source: InheritedHeaderSource;
+  disabled: boolean;
+};
+
+export const headerIdentity = (name: string): string =>
+  name.trim().toLowerCase();
+
 export function findFolderConfig(
   collection: CollectionFile,
   name: string
@@ -173,16 +182,49 @@ export function mergeScopedDefaultHeaders(
   collection: CollectionFile,
   request: RequestDefinition
 ): Kv[] {
+  return [
+    ...inheritedHeadersForRequest(collection, request)
+      .filter((header) => !header.disabled)
+      .map(({ source, disabled, ...header }) => header),
+    ...request.headers.map((header) => ({ ...header })),
+  ];
+}
+
+export function inheritedHeadersForRequest(
+  collection: CollectionFile,
+  request: RequestDefinition
+): InheritedHeaderRow[] {
   const folder = request.folder
     ? findFolderConfig(collection, request.folder)
     : undefined;
-  return mergeCollectionDefaultHeaders(
-    mergeCollectionDefaultHeaders(
-      collection.defaultHeaders,
-      folder?.headers ?? []
-    ),
-    request.headers
+  const disabled = new Set(
+    (request.disabledInheritedHeaders ?? []).map(headerIdentity).filter(Boolean)
   );
+  const requestNames = new Set(
+    request.headers.map((header) => headerIdentity(header.name)).filter(Boolean)
+  );
+  const folderNames = new Set(
+    (folder?.headers ?? [])
+      .map((header) => headerIdentity(header.name))
+      .filter(Boolean)
+  );
+
+  const rows: InheritedHeaderRow[] = [];
+  for (const header of collection.defaultHeaders) {
+    const name = headerIdentity(header.name);
+    if (!name || folderNames.has(name) || requestNames.has(name)) continue;
+    rows.push({
+      ...header,
+      source: "collection",
+      disabled: disabled.has(name),
+    });
+  }
+  for (const header of folder?.headers ?? []) {
+    const name = headerIdentity(header.name);
+    if (!name || requestNames.has(name)) continue;
+    rows.push({ ...header, source: "folder", disabled: disabled.has(name) });
+  }
+  return rows;
 }
 
 export function resolveScopedRequest(
