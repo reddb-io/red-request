@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { requestDefinitionSchema, newRequest } from "./request.js";
 import {
   collectionFileSchema,
+  mergeCollectionDefaultHeaders,
   resolveCollectionRootOrder,
 } from "./collection.js";
 import { environmentFileSchema } from "./collection.js";
@@ -105,6 +106,18 @@ describe("collectionFileSchema", () => {
     expect(c.auth).toEqual({ type: "none" });
     expect(c.order).toEqual([]);
     expect(c.rootOrder).toEqual([]);
+    expect(c.defaultHeaders).toEqual([]);
+  });
+
+  it("parses existing collection files without default headers", () => {
+    const legacy = {
+      name: "Legacy API",
+      vars: { baseUrl: "https://api.example.test" },
+    };
+
+    const c = collectionFileSchema.parse(legacy);
+
+    expect(c.defaultHeaders).toEqual([]);
   });
 
   it("derives the legacy root layout before persisting a mixed order", () => {
@@ -151,5 +164,47 @@ describe("collectionFileSchema", () => {
       { kind: "request", id: "root-b" },
       { kind: "folder", name: "Admin" },
     ]);
+  });
+});
+
+describe("mergeCollectionDefaultHeaders", () => {
+  it("adds collection default headers that are absent from the request", () => {
+    expect(
+      mergeCollectionDefaultHeaders(
+        [{ name: "X-Team", value: "red", enabled: true }],
+        [{ name: "Accept", value: "application/json", enabled: true }]
+      )
+    ).toEqual([
+      { name: "X-Team", value: "red", enabled: true },
+      { name: "Accept", value: "application/json", enabled: true },
+    ]);
+  });
+
+  it("lets request headers override collection defaults by case-insensitive name", () => {
+    expect(
+      mergeCollectionDefaultHeaders(
+        [
+          { name: "Authorization", value: "Bearer collection", enabled: true },
+          { name: "X-Team", value: "red", enabled: true },
+        ],
+        [
+          { name: "authorization", value: "Bearer request", enabled: true },
+          { name: "Accept", value: "application/json", enabled: true },
+        ]
+      )
+    ).toEqual([
+      { name: "X-Team", value: "red", enabled: true },
+      { name: "authorization", value: "Bearer request", enabled: true },
+      { name: "Accept", value: "application/json", enabled: true },
+    ]);
+  });
+
+  it("treats a disabled request header as the nearer override", () => {
+    expect(
+      mergeCollectionDefaultHeaders(
+        [{ name: "X-Team", value: "red", enabled: true }],
+        [{ name: "x-team", value: "", enabled: false }]
+      )
+    ).toEqual([{ name: "x-team", value: "", enabled: false }]);
   });
 });

@@ -1831,6 +1831,67 @@ describe("Workspace persistence coordination", () => {
     expect(ws.renderedRequest?.proxy).toBe("socks5h://proxy.internal:1080");
   });
 
+  it("dispatches collection default headers with request-level overrides", async () => {
+    ws.collections = [
+      {
+        ...collection("c1", [
+          request("r1", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            headers: [
+              {
+                name: "authorization",
+                value: "Bearer request",
+                enabled: true,
+              },
+            ],
+          }),
+        ]),
+        collection: collectionFileSchema.parse({
+          name: "c1",
+          order: ["r1"],
+          folders: [],
+          defaultHeaders: [
+            { name: "Authorization", value: "Bearer collection", enabled: true },
+            { name: "X-Team", value: "red", enabled: true },
+          ],
+        }),
+      },
+    ];
+    ws.selectRequest("c1", "r1");
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: {
+        status: 200,
+        statusText: "OK",
+        ok: true,
+        url: "https://api.example.test/users",
+        headers: {},
+        bodyText: "",
+        size: 0,
+        durationMs: 12,
+      },
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/users",
+    });
+
+    await ws.send();
+
+    expect(rpc.httpSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          headers: [
+            { name: "X-Team", value: "red", enabled: true },
+            { name: "authorization", value: "Bearer request", enabled: true },
+          ],
+        }),
+      })
+    );
+    expect(ws.renderedRequest?.headers).toEqual([
+      { name: "X-Team", value: "red", enabled: true },
+      { name: "authorization", value: "••••••", enabled: true },
+    ]);
+  });
+
   it("uses the active profile cookie jar before the collection cookie jar", async () => {
     ws.network = {
       proxies: [],
