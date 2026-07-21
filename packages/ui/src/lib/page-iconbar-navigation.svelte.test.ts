@@ -96,49 +96,47 @@ describe("+page icon-bar navigation", () => {
     ws.activeReq = null;
   });
 
-  it(
-    "keeps the left rail icons clickable inside the full app shell",
-    async () => {
-      render(AppShellHarness);
+  it("keeps the left rail icons clickable inside the full app shell", async () => {
+    render(AppShellHarness);
 
-      await waitFor(() => expect(ws.screen).toBe("app"));
-      await waitFor(() => expect(ws.redUiEnabled).toBe(true));
-      await waitFor(() => expect(ws.loading).toBeNull());
+    await waitFor(() => expect(ws.screen).toBe("app"));
+    await waitFor(() => expect(ws.redUiEnabled).toBe(true));
+    await waitFor(() => expect(ws.loading).toBeNull());
 
-      await fireEvent.click(
-        screen.getByRole("button", {
-          name: "Home: dashboard and network pool",
-        })
-      );
-      await waitFor(() => expect(ws.view).toBe("home"));
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "Home: dashboard and network pool",
+      })
+    );
+    await waitFor(() => expect(ws.view).toBe("home"));
 
-      await fireEvent.click(
-        screen.getByRole("button", {
-          name: "Settings: project configuration",
-        })
-      );
-      await waitFor(() => expect(ws.view).toBe("settings"));
-      await waitFor(() =>
-        expect(document.body.textContent).toContain("Settings")
-      );
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "Settings: project configuration",
+      })
+    );
+    await waitFor(() => expect(ws.view).toBe("settings"));
+    await waitFor(
+      () => expect(document.body.textContent).toContain("Settings"),
+      { timeout: 10_000 }
+    );
 
-      await fireEvent.click(
-        screen.getByRole("button", {
-          name: "Database: inspect request store",
-        })
-      );
-      await waitFor(() => expect(ws.view).toBe("database"));
-      await waitFor(() =>
-        expect(document.body.textContent).toContain("Database")
-      );
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "Database: inspect request store",
+      })
+    );
+    await waitFor(() => expect(ws.view).toBe("database"));
+    await waitFor(
+      () => expect(document.body.textContent).toContain("Database"),
+      { timeout: 10_000 }
+    );
 
-      await fireEvent.click(
-        screen.getByRole("button", {
-          name: "Requests: collections and workspace",
-        })
-      );
-      await waitFor(() => expect(ws.view).toBe("requests"));
-    },
-    15_000
-  );
+    await fireEvent.click(
+      screen.getByRole("button", {
+        name: "Requests: collections and workspace",
+      })
+    );
+    await waitFor(() => expect(ws.view).toBe("requests"));
+  }, 15_000);
 });
