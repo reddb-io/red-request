@@ -1203,16 +1203,20 @@ class Workspace {
     this.scriptError = cached.scriptError;
   }
 
+  private cloneStateValue<T>(value: T): T {
+    return structuredClone($state.snapshot(value)) as T;
+  }
+
   private cacheLiveResponse(reqId: string): void {
     if (!this.response) return;
     this.responseCache.set(reqId, {
-      response: structuredClone(this.response) as ResponseResult,
+      response: this.cloneStateValue(this.response),
       renderedRequest: this.renderedRequest
-        ? (structuredClone(this.renderedRequest) as RequestDefinition)
+        ? this.cloneStateValue(this.renderedRequest)
         : null,
       unresolved: [...this.unresolved],
       effectiveUrl: this.effectiveUrl,
-      tests: structuredClone(this.tests) as ScriptTest[],
+      tests: this.cloneStateValue(this.tests),
       logs: [...this.logs],
       scriptError: this.scriptError,
     });
