@@ -103,4 +103,34 @@ describe("YAML collection export/import", () => {
       expect.objectContaining<Partial<RequestDefinition>>({ id: "r1" })
     );
   });
+
+  it("round-trips request disabled inherited headers", async () => {
+    const request = newRequest("r1");
+    request.url = "https://api.example.test/users";
+    request.disabledInheritedHeaders = ["x-team"];
+    const collection = collectionFileSchema.parse({
+      name: "Team API",
+      order: ["r1"],
+      defaultHeaders: [{ name: "X-Team", value: "red", enabled: true }],
+    });
+
+    await exportAll([
+      {
+        id: "team-api",
+        collection,
+        requests: [request],
+        environments: [],
+      },
+    ]);
+    const imported = await importAll();
+
+    expect(imported).toBe(1);
+    expect(repo.saveRequest).toHaveBeenCalledWith(
+      "team-api",
+      expect.objectContaining<Partial<RequestDefinition>>({
+        id: "r1",
+        disabledInheritedHeaders: ["x-team"],
+      })
+    );
+  });
 });

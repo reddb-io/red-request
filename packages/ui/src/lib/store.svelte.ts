@@ -2,6 +2,8 @@ import {
   mergeScopes,
   resolveCollectionRootOrder,
   resolveEffectiveAuth,
+  inheritedHeadersForRequest,
+  headerIdentity,
   resolveScopedRequest,
   resolveScopedVariables,
   folderName,
@@ -19,6 +21,7 @@ import {
   type Oauth2TokenResult,
   type BodyType,
   type ImportedCollection,
+  type InheritedHeaderRow,
   type LoadedCollection,
   type CollectionRootItem,
   type RequestDefinition,
@@ -304,6 +307,14 @@ class Workspace {
     const profile = this.activeProfile;
     if (profile?.cookieJar) return profile.name || "profile";
     return this.activeCollection?.collection.name || "collection";
+  }
+
+  get activeInheritedHeaders(): InheritedHeaderRow[] {
+    const collection = this.activeCollection?.collection;
+    const request = this.activeReq;
+    return collection && request
+      ? inheritedHeadersForRequest(collection, request)
+      : [];
   }
 
   /** Project-level named environments (var/secret sets), shared by all collections. */
@@ -1655,6 +1666,28 @@ class Workspace {
   private applyScopedRequest(snap: RequestDefinition): RequestDefinition {
     const collection = this.activeCollection?.collection;
     return collection ? resolveScopedRequest(collection, snap) : snap;
+  }
+
+  async setInheritedHeaderEnabled(
+    headerName: string,
+    enabled: boolean
+  ): Promise<void> {
+    const req = this.activeReq;
+    if (!req || !this.activeColId) return;
+    const key = headerIdentity(headerName);
+    if (!key) return;
+    const disabled = new Set(
+      (req.disabledInheritedHeaders ?? []).map(headerIdentity).filter(Boolean)
+    );
+    if (enabled) disabled.delete(key);
+    else disabled.add(key);
+    req.disabledInheritedHeaders = [...disabled].sort((a, b) =>
+      a.localeCompare(b)
+    );
+    await this.saveRequestSnapshot(
+      this.activeColId,
+      $state.snapshot(req) as RequestDefinition
+    );
   }
 
   /**
