@@ -81,8 +81,10 @@ plugins:
         # red-rust-fmt.sh self-guards (exits 0 when cargo is absent / no src-tauri),
         # so JS-only iterations are never blocked; it mirrors CI's rust-fmt job so
         # AFK edits to the Tauri Rust crate can't merge unformatted.
-        pre_merge:
-          - bash .red/hooks/pre_merge/red-rust-fmt.sh
+        # NOTE: bare-string form required — the 2.77.1 bundle's config loader
+        # flattens a YAML list into `pre_merge.0` and rejects it as an unknown
+        # hook name, killing every AFK worker at boot.
+        pre_merge: bash .red/hooks/pre_merge/red-rust-fmt.sh
         # defaults:                   # built-in isolation hooks (separate from the lists above)
         #   cargo: true               # ship cargo isolation on Rust projects
         #   gradle: true              # ship gradle isolation when GRADLE_USER_HOME_BASE is set
