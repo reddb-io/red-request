@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { authConfigSchema } from "./auth.js";
+import { authConfigSchema, type AuthConfig } from "./auth.js";
 import {
   kvSchema,
   requestDefinitionSchema,
@@ -14,6 +14,27 @@ export const collectionRootItemSchema = z.discriminatedUnion("kind", [
 ]);
 export type CollectionRootItem = z.infer<typeof collectionRootItemSchema>;
 
+const folderConfigObjectSchema = z.object({
+  name: z.string(),
+  auth: authConfigSchema.default({ type: "inherit" }),
+  headers: z.array(kvSchema).default([]),
+  vars: z.record(z.string(), z.string()).default({}),
+});
+
+export const folderConfigSchema = z.preprocess(
+  (value) =>
+    typeof value === "string"
+      ? {
+          name: value,
+          auth: { type: "inherit" },
+          headers: [],
+          vars: {},
+        }
+      : value,
+  folderConfigObjectSchema
+);
+export type FolderConfig = z.infer<typeof folderConfigSchema>;
+
 /**
  * `collection.yaml` at the root of a collection folder. Variables and auth defined here
  * are inherited by every request unless the request overrides them.
@@ -26,8 +47,8 @@ export const collectionFileSchema = z.object({
   auth: authConfigSchema.default({ type: "none" }),
   /** Ordered request ids (file slugs) for stable sidebar ordering. */
   order: z.array(z.string()).default([]),
-  /** Folder names for grouping requests (incl. empty folders). */
-  folders: z.array(z.string()).default([]),
+  /** Folders for grouping requests (incl. empty folders) and folder-level scope config. */
+  folders: z.array(folderConfigSchema).default([]),
   /** Mixed order of root requests and folders. Empty means legacy order: requests, then folders. */
   rootOrder: z.array(collectionRootItemSchema).default([]),
   /** Persist Set-Cookie across this collection's requests (browser-like session). */
@@ -41,6 +62,16 @@ export type CollectionFile = z.infer<typeof collectionFileSchema>;
 
 const rootItemKey = (item: CollectionRootItem): string =>
   item.kind === "request" ? `request:${item.id}` : `folder:${item.name}`;
+
+export const folderName = (folder: FolderConfig | string): string =>
+  typeof folder === "string" ? folder : folder.name;
+
+export function findFolderConfig(
+  collection: CollectionFile,
+  name: string
+): FolderConfig | undefined {
+  return collection.folders.find((folder) => folderName(folder) === name);
+}
 
 /**
  * Return a complete, de-duplicated root tree order. Older collections do not have
@@ -57,10 +88,15 @@ export function resolveCollectionRootOrder(
   const extraFolderNames = requests
     .map((request) => request.folder)
     .filter(
-      (name): name is string => !!name && !collection.folders.includes(name)
+      (name): name is string =>
+        !!name &&
+        !collection.folders.some((folder) => folderName(folder) === name)
     )
     .sort((left, right) => left.localeCompare(right));
-  const folderNames = new Set([...collection.folders, ...extraFolderNames]);
+  const folderNames = new Set([
+    ...collection.folders.map(folderName),
+    ...extraFolderNames,
+  ]);
   const resolved: CollectionRootItem[] = [];
   const seen = new Set<string>();
 
@@ -78,7 +114,8 @@ export function resolveCollectionRootOrder(
   for (const item of collection.rootOrder) append(item);
   for (const id of collection.order) append({ kind: "request", id });
   for (const request of requests) append({ kind: "request", id: request.id });
-  for (const name of collection.folders) append({ kind: "folder", name });
+  for (const folder of collection.folders)
+    append({ kind: "folder", name: folderName(folder) });
   for (const name of extraFolderNames) append({ kind: "folder", name });
   return resolved;
 }
@@ -100,6 +137,100 @@ export function mergeCollectionDefaultHeaders(
     ...inherited.map((header) => ({ ...header })),
     ...requestHeaders.map((header) => ({ ...header })),
   ];
+}
+
+const authHeaderNames = (auth: AuthConfig): string[] => {
+  switch (auth.type) {
+    case "basic":
+    case "bearer":
+    case "digest":
+    case "oauth2":
+    case "awsSigV4":
+      return ["authorization"];
+    case "apiKey":
+      return auth.in === "header" && auth.key.trim()
+        ? [auth.key.trim().toLowerCase()]
+        : [];
+    default:
+      return [];
+  }
+};
+
+export function resolveEffectiveAuth(
+  collection: CollectionFile,
+  request: RequestDefinition
+): AuthConfig {
+  if (request.auth.type !== "inherit") return { ...request.auth };
+  const folder = request.folder
+    ? findFolderConfig(collection, request.folder)
+    : undefined;
+  if (folder?.auth.type && folder.auth.type !== "inherit")
+    return { ...folder.auth };
+  return { ...collection.auth };
+}
+
+export function mergeScopedDefaultHeaders(
+  collection: CollectionFile,
+  request: RequestDefinition
+): Kv[] {
+  const folder = request.folder
+    ? findFolderConfig(collection, request.folder)
+    : undefined;
+  return mergeCollectionDefaultHeaders(
+    mergeCollectionDefaultHeaders(
+      collection.defaultHeaders,
+      folder?.headers ?? []
+    ),
+    request.headers
+  );
+}
+
+export function resolveScopedRequest(
+  collection: CollectionFile,
+  request: RequestDefinition
+): RequestDefinition {
+  const auth = resolveEffectiveAuth(collection, request);
+  const requestHeaderNames = new Set(
+    request.headers
+      .map((header) => header.name.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const authNames = new Set(authHeaderNames(auth));
+  const headers = mergeScopedDefaultHeaders(collection, request).filter(
+    (header) => {
+      const name = header.name.trim().toLowerCase();
+      return !name || requestHeaderNames.has(name) || !authNames.has(name);
+    }
+  );
+  return {
+    ...request,
+    auth: [...authNames].some((name) => requestHeaderNames.has(name))
+      ? { type: "none" }
+      : auth,
+    headers,
+  };
+}
+
+export function resolveScopedVariables(
+  collection: CollectionFile,
+  request: RequestDefinition,
+  lowerScopes: {
+    environment?: Record<string, string>;
+    secrets?: Record<string, string>;
+  } = {}
+): Record<string, string> {
+  const folder = request.folder
+    ? findFolderConfig(collection, request.folder)
+    : undefined;
+  const requestVars = request.vars ?? {};
+  return Object.assign(
+    {},
+    lowerScopes.secrets ?? {},
+    lowerScopes.environment ?? {},
+    collection.vars,
+    folder?.vars ?? {},
+    requestVars
+  );
 }
 
 /**
