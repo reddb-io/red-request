@@ -6,6 +6,7 @@
   import DeveloperConsole from "$lib/components/DeveloperConsole.svelte";
   import IconBar from "$lib/components/IconBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
+  import ScopeConfigPage from "$lib/components/ScopeConfigPage.svelte";
   import RequestPanel from "$lib/components/RequestPanel.svelte";
   import ResponsePanel from "$lib/components/ResponsePanel.svelte";
   import HomeView from "$lib/components/HomeView.svelte";
@@ -790,7 +791,11 @@
                         failed={requestFailed}
                         onerror={(err) => appLog("error", `RequestPanel boundary caught: ${err instanceof Error ? err.stack : err}`)}
                       >
-                        <RequestPanel />
+                        {#if ws.view === "scopeConfig"}
+                          <ScopeConfigPage />
+                        {:else}
+                          <RequestPanel />
+                        {/if}
                       </svelte:boundary>
                     </div>
                     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
