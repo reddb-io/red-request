@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import { ws } from "../store.svelte";
-  import { proxyToUrl } from "@reddb-io/request-core";
+  import { folderName, proxyToUrl } from "@reddb-io/request-core";
   import { HTTP_METHODS, REQUEST_KINDS } from "@reddb-io/request-core/constants";
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import AuthEditor from "./AuthEditor.svelte";
@@ -347,7 +347,7 @@
           items={[
             { value: "", label: "(no folder)" },
             ...(ws.activeCollection?.collection.folders ?? []).map((f) => ({
-              value: f,
+              value: folderName(f),
             })),
           ]}
           onChange={(v) => ws.moveRequest(ws.activeReq!.id, v)}
