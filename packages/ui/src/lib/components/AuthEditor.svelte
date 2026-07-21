@@ -10,7 +10,10 @@
   import KeyValueEditor from "./KeyValueEditor.svelte";
   import { Button } from "./ui/button/index.js";
 
-  let { auth = $bindable() }: { auth: AuthConfig } = $props();
+  let {
+    auth = $bindable(),
+    includeInherit = false,
+  }: { auth: AuthConfig; includeInherit?: boolean } = $props();
 
   const defaults: Record<AuthType, AuthConfig> = {
     none: { type: "none" },
@@ -47,6 +50,12 @@
   function setType(t: AuthType) {
     auth = structuredClone(defaults[t]);
   }
+
+  const authTypes = $derived(
+    includeInherit
+      ? (["inherit", ...SELECTABLE_AUTH_TYPES] as AuthType[])
+      : SELECTABLE_AUTH_TYPES
+  );
 
   // --- OAuth2 token status + actions ---------------------------------------
   type Status = { state: "none" | "valid" | "expired"; expiresAt: number; scope?: string };
@@ -107,7 +116,7 @@
     <span class="w-24 text-fg-muted">Type</span>
     <Select
       value={auth.type}
-      items={SELECTABLE_AUTH_TYPES}
+      items={authTypes}
       onChange={setType}
       ariaLabel="auth type"
       class="flex-1"
@@ -185,6 +194,8 @@
     <VarField bind:value={auth.secretAccessKey} known={ws.knownVars} values={ws.varTitles} dense placeholder="secret access key" />
     <VarField bind:value={auth.region} known={ws.knownVars} values={ws.varTitles} dense placeholder="region" />
     <VarField bind:value={auth.service} known={ws.knownVars} values={ws.varTitles} dense placeholder="service (e.g. s3)" />
+  {:else if auth.type === "inherit"}
+    <p class="text-sm text-fg-subtle">Inherited from the parent scope.</p>
   {:else}
     <p class="text-sm text-fg-subtle">No authentication.</p>
   {/if}
