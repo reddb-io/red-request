@@ -34,7 +34,7 @@ jobs:
         with:
           fetch-depth: 0 # full history + tags so the bump can diff against the last tag
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
