@@ -12,6 +12,7 @@
   let collectionPendingDelete = $state<LoadedCollection | null>(null);
   import { projectLabel } from "../project";
   import {
+    folderName as collectionFolderName,
     resolveCollectionRootOrder,
     type CollectionRootItem,
     type LoadedCollection,
@@ -261,7 +262,7 @@
   }
 
   function grouped(col: LoadedCollection) {
-    const ordered = [...col.collection.folders];
+    const ordered = col.collection.folders.map(collectionFolderName);
     const extra = col.requests
       .map((r) => r.folder)
       .filter((name): name is string => !!name && !ordered.includes(name))
@@ -430,8 +431,8 @@
             children: [
               { label: "(root)", onSelect: () => ws.moveRequest(req.id, "") },
               ...col.collection.folders.map((f) => ({
-                label: f,
-                onSelect: () => ws.moveRequest(req.id, f),
+                label: f.name,
+                onSelect: () => ws.moveRequest(req.id, f.name),
               })),
             ],
           },
