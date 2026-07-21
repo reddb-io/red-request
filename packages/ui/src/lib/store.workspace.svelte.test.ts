@@ -5,6 +5,8 @@ import {
   storedEnvironmentSchema,
   type LoadedCollection,
   type RequestDefinition,
+  type ResponseResult,
+  type ScriptTest,
 } from "@reddb-io/request-core";
 
 vi.mock("./repo", () => ({
@@ -120,6 +122,25 @@ function collection(
   };
 }
 
+function response(
+  status: number,
+  patch: Partial<ResponseResult> = {}
+): ResponseResult {
+  return {
+    status,
+    statusText: status === 200 ? "OK" : "Accepted",
+    ok: status >= 200 && status < 400,
+    url: `https://example.test/${status}`,
+    headers: { "content-type": "application/json" },
+    bodyText: JSON.stringify({ status }),
+    contentType: "application/json",
+    size: JSON.stringify({ status }).length,
+    durationMs: status,
+    timings: { dns: 1, tcp: 2, firstByte: 3, total: status },
+    ...patch,
+  };
+}
+
 function resetWorkspace() {
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -138,6 +159,17 @@ function resetWorkspace() {
   ws.creatingCollection = false;
   ws.deletingCollectionIds = {};
   ws.deletingProjectData = false;
+  ws.sending = false;
+  ws.response = null;
+  ws.renderedRequest = null;
+  ws.exampleView = null;
+  ws.unresolved = [];
+  ws.effectiveUrl = "";
+  ws.errorMsg = null;
+  ws.tests = [];
+  ws.logs = [];
+  ws.scriptError = null;
+  ws.reqHistory = [];
   ws.network = { proxies: [], profiles: [] };
   ws.activeColId = null;
   ws.activeReq = null;
@@ -154,6 +186,202 @@ function resetWorkspace() {
 }
 
 beforeEach(resetWorkspace);
+
+describe("Workspace per-request response cache", () => {
+  it("restores the last response when switching away from and back to a request", async () => {
+    const test: ScriptTest = { name: "contract", passed: true };
+    const renderedPatch = {
+      url: "https://api.example.test/rendered",
+      headers: [{ name: "X-Run", value: "1", enabled: true }],
+    };
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200, {
+        bodyText: '{"ok":true}',
+        size: 11,
+        durationMs: 42,
+        timings: { dns: 2, tcp: 5, tls: 8, firstByte: 20, total: 42 },
+      }),
+      unresolved: ["missing_token"],
+      effectiveUrl: "https://api.example.test/rendered",
+      scriptResult: {
+        tests: [test],
+        logs: ["ran contract"],
+        varChanges: {},
+        error: "script warning",
+      },
+    });
+
+    ws.collections = [
+      collection("c-cache-restore", [
+        request("r-cache-a", renderedPatch),
+        request("r-cache-b", { url: "https://api.example.test/b" }),
+      ]),
+    ];
+
+    ws.selectRequest("c-cache-restore", "r-cache-a");
+    await ws.send();
+    ws.selectRequest("c-cache-restore", "r-cache-b");
+
+    expect(ws.response).toBeNull();
+    expect(ws.renderedRequest).toBeNull();
+    expect(ws.tests).toEqual([]);
+
+    ws.selectRequest("c-cache-restore", "r-cache-a");
+
+    expect(ws.response).toMatchObject({
+      status: 200,
+      bodyText: '{"ok":true}',
+      durationMs: 42,
+      size: 11,
+      timings: { total: 42 },
+    });
+    expect(ws.effectiveUrl).toBe("https://api.example.test/rendered");
+    expect(ws.unresolved).toEqual(["missing_token"]);
+    expect(ws.renderedRequest).toMatchObject(renderedPatch);
+    expect(ws.tests).toEqual([test]);
+    expect(ws.logs).toEqual(["ran contract"]);
+    expect(ws.scriptError).toBe("script warning");
+    const historyEntry = vi.mocked(repo.saveHistory).mock.calls[0]?.[0] as
+      Record<string, unknown> | undefined;
+    expect(historyEntry).not.toHaveProperty("bodyText");
+    expect(historyEntry).not.toHaveProperty("response");
+  });
+
+  it("replaces the cached entry for only the request that is sent again", async () => {
+    vi.mocked(rpc.httpSend)
+      .mockResolvedValueOnce({
+        response: response(200, { bodyText: "first-a" }),
+        unresolved: [],
+        effectiveUrl: "https://example.test/a/first",
+      })
+      .mockResolvedValueOnce({
+        response: response(202, { bodyText: "only-b" }),
+        unresolved: ["b_var"],
+        effectiveUrl: "https://example.test/b",
+      })
+      .mockResolvedValueOnce({
+        response: response(200, { bodyText: "second-a", durationMs: 7 }),
+        unresolved: ["a_var"],
+        effectiveUrl: "https://example.test/a/second",
+      });
+
+    ws.collections = [
+      collection("c-cache-replace", [
+        request("r-cache-replace-a", { url: "https://example.test/a" }),
+        request("r-cache-replace-b", { url: "https://example.test/b" }),
+      ]),
+    ];
+
+    ws.selectRequest("c-cache-replace", "r-cache-replace-a");
+    await ws.send();
+    ws.selectRequest("c-cache-replace", "r-cache-replace-b");
+    await ws.send();
+    ws.selectRequest("c-cache-replace", "r-cache-replace-a");
+    await ws.send();
+
+    expect(ws.response?.bodyText).toBe("second-a");
+    expect(ws.effectiveUrl).toBe("https://example.test/a/second");
+    expect(ws.unresolved).toEqual(["a_var"]);
+
+    ws.selectRequest("c-cache-replace", "r-cache-replace-b");
+    expect(ws.response?.bodyText).toBe("only-b");
+    expect(ws.effectiveUrl).toBe("https://example.test/b");
+    expect(ws.unresolved).toEqual(["b_var"]);
+  });
+
+  it("shows the normal empty state for a request that has not been sent this session", async () => {
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200, { bodyText: "sent-a" }),
+      unresolved: [],
+      effectiveUrl: "https://example.test/a",
+    });
+    ws.collections = [
+      collection("c-cache-empty", [
+        request("r-cache-empty-a", { url: "https://example.test/a" }),
+        request("r-cache-empty-b", { url: "https://example.test/b" }),
+      ]),
+    ];
+
+    ws.selectRequest("c-cache-empty", "r-cache-empty-a");
+    await ws.send();
+    ws.selectRequest("c-cache-empty", "r-cache-empty-b");
+
+    expect(ws.response).toBeNull();
+    expect(ws.renderedRequest).toBeNull();
+    expect(ws.effectiveUrl).toBe("");
+    expect(ws.unresolved).toEqual([]);
+    expect(ws.tests).toEqual([]);
+    expect(ws.logs).toEqual([]);
+    expect(ws.scriptError).toBeNull();
+  });
+
+  it("drops the cached response when a request is deleted", async () => {
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200, { bodyText: "deleted" }),
+      unresolved: [],
+      effectiveUrl: "https://example.test/delete-me",
+    });
+    ws.collections = [
+      collection("c-cache-delete", [
+        request("r-cache-delete-a", { url: "https://example.test/delete-me" }),
+        request("r-cache-delete-b", { url: "https://example.test/next" }),
+      ]),
+    ];
+
+    ws.selectRequest("c-cache-delete", "r-cache-delete-a");
+    await ws.send();
+    await ws.deleteRequest("r-cache-delete-a");
+
+    expect(ws.activeReq?.id).toBe("r-cache-delete-b");
+
+    ws.collections[0]!.requests.unshift(
+      request("r-cache-delete-a", { url: "https://example.test/delete-me" })
+    );
+    ws.selectRequest("c-cache-delete", "r-cache-delete-a");
+
+    expect(ws.response).toBeNull();
+    expect(ws.effectiveUrl).toBe("");
+  });
+
+  it("keeps a saved example visible over a retained live response", async () => {
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200, { bodyText: "live" }),
+      unresolved: [],
+      effectiveUrl: "https://example.test/live",
+    });
+    const savedExample = {
+      id: "ex-cache",
+      name: "Saved 418",
+      status: 418,
+      statusText: "I'm a Teapot",
+      contentType: "text/plain",
+      bodyText: "saved example",
+      savedAt: 1,
+    };
+    ws.collections = [
+      collection("c-cache-example", [
+        request("r-cache-example-a", {
+          url: "https://example.test/live",
+          examples: [savedExample],
+        }),
+        request("r-cache-example-b", { url: "https://example.test/b" }),
+      ]),
+    ];
+
+    ws.selectRequest("c-cache-example", "r-cache-example-a");
+    await ws.send();
+    ws.viewExample(savedExample);
+    ws.selectRequest("c-cache-example", "r-cache-example-b");
+    ws.selectRequest("c-cache-example", "r-cache-example-a");
+    ws.viewExample(savedExample);
+
+    expect(ws.response?.bodyText).toBe("live");
+    expect(ws.exampleView).toMatchObject({
+      status: 418,
+      bodyText: "saved example",
+    });
+  });
+});
 
 describe("Workspace persistence coordination", () => {
   it("does not list run history when selecting a request", async () => {
