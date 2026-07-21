@@ -7,6 +7,7 @@
   import { Button } from "./ui/button/index.js";
   import { Input } from "./ui/input/index.js";
   import { Badge } from "./ui/badge/index.js";
+  import { Settings } from "@lucide/svelte";
 
   let showImport = $state(false);
   let collectionPendingDelete = $state<LoadedCollection | null>(null);
@@ -318,6 +319,14 @@
     await ws.deleteCollection(collectionPendingDelete.id);
     collectionPendingDelete = null;
   }
+
+  function openCollectionConfig(col: LoadedCollection) {
+    ws.openScopeConfig({ kind: "collection", colId: col.id });
+  }
+
+  function openFolderConfig(col: LoadedCollection, name: string) {
+    ws.openScopeConfig({ kind: "folder", colId: col.id, folder: name });
+  }
 </script>
 
 <aside
@@ -541,8 +550,20 @@
                 >
               {/snippet}
             </Tooltip>
+            <Tooltip text="Configure collection">
+              {#snippet children(p)}
+                <Button
+                  {...p}
+                  onclick={() => openCollectionConfig(col)}
+                  aria-label={`configure ${col.collection.name}`}
+                  variant="ghost"
+                  size="icon-xs"><Settings class="size-3" /></Button
+                >
+              {/snippet}
+            </Tooltip>
             <Menu
               items={[
+                { label: "Configure", onSelect: () => openCollectionConfig(col) },
                 { label: "Rename", onSelect: () => startRenameCol(col) },
                 { label: "Import…", onSelect: () => (showImport = true) },
                 {
@@ -635,6 +656,17 @@
               <span class="text-xs text-fg-faint">{item.requests.length}</span>
             </button>
             <span class="absolute right-1 flex gap-1 text-fg-faint opacity-0 group-hover/folder:opacity-100">
+              <Tooltip text="Configure folder">
+                {#snippet children(p)}
+                  <Button
+                    {...p}
+                    onclick={() => openFolderConfig(col, item.name)}
+                    aria-label={`configure ${item.name}`}
+                    variant="ghost"
+                    size="icon-xs"><Settings class="size-3" /></Button
+                  >
+                {/snippet}
+              </Tooltip>
               <Tooltip text="New request here">
                 {#snippet children(p)}
                   <Button {...p} onclick={() => addAndRename(item.name, col.id)} variant="ghost" size="icon-xs">＋</Button>
@@ -645,6 +677,22 @@
                   <Button {...p} onclick={() => ws.deleteFolder(item.name, col.id)} variant="ghost" size="icon-xs" class="hover:text-red-400">✕</Button>
                 {/snippet}
               </Tooltip>
+              <Menu
+                items={[
+                  { label: "Configure", onSelect: () => openFolderConfig(col, item.name) },
+                  {
+                    label: "Delete folder",
+                    onSelect: () => ws.deleteFolder(item.name, col.id),
+                    destructive: true,
+                  },
+                ]}
+              >
+                {#snippet trigger(p)}
+                  <Button {...p} aria-label={`${item.name} actions`} variant="ghost" size="icon-xs"
+                    >⋯</Button
+                  >
+                {/snippet}
+              </Menu>
             </span>
           </div>
           {#if !collapsed.has(key)}
