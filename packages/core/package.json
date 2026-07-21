@@ -1,6 +1,6 @@
 {
   "name": "@reddb-io/request-core",
-  "version": "0.64.2",
+  "version": "0.64.3",
   "type": "module",
   "description": "Shared schemas (Zod) and variable resolver — the contract between the UI and the recker engine.",
   "license": "MIT",
