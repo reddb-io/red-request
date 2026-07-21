@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { authConfigSchema } from "./auth.js";
-import { requestDefinitionSchema, type RequestDefinition } from "./request.js";
+import {
+  kvSchema,
+  requestDefinitionSchema,
+  type Kv,
+  type RequestDefinition,
+} from "./request.js";
 import { timingsSchema } from "./response.js";
 
 export const collectionRootItemSchema = z.discriminatedUnion("kind", [
@@ -29,6 +34,8 @@ export const collectionFileSchema = z.object({
   cookieJar: z.boolean().default(false),
   /** Default project profile applied to requests that don't pick one (empty = none). */
   defaultProfileId: z.string().default(""),
+  /** Header rows inherited by every request in the collection unless the request overrides them. */
+  defaultHeaders: z.array(kvSchema).default([]),
 });
 export type CollectionFile = z.infer<typeof collectionFileSchema>;
 
@@ -74,6 +81,25 @@ export function resolveCollectionRootOrder(
   for (const name of collection.folders) append({ kind: "folder", name });
   for (const name of extraFolderNames) append({ kind: "folder", name });
   return resolved;
+}
+
+export function mergeCollectionDefaultHeaders(
+  collectionHeaders: Kv[],
+  requestHeaders: Kv[]
+): Kv[] {
+  const requestNames = new Set(
+    requestHeaders
+      .map((header) => header.name.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const inherited = collectionHeaders.filter((header) => {
+    const name = header.name.trim().toLowerCase();
+    return name && !requestNames.has(name);
+  });
+  return [
+    ...inherited.map((header) => ({ ...header })),
+    ...requestHeaders.map((header) => ({ ...header })),
+  ];
 }
 
 /**
