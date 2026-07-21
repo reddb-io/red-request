@@ -116,6 +116,15 @@ export type SettingsIntent = "global-variable" | "global-secret" | null;
 type OpeningTarget =
   | { kind: "local"; dir: string | null }
   | { kind: "connection"; connection: string };
+type RequestResponseCacheEntry = {
+  response: ResponseResult;
+  renderedRequest: RequestDefinition | null;
+  unresolved: string[];
+  effectiveUrl: string;
+  tests: ScriptTest[];
+  logs: string[];
+  scriptError: string | null;
+};
 
 const emptyGlobals = (): StoredEnvironment =>
   storedEnvironmentSchema.parse({ name: GLOBALS_ENV, vars: {}, secrets: {} });
@@ -204,6 +213,7 @@ class Workspace {
   private syncLoopGeneration = 0;
   private syncLoopRunning = false;
   private syncReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private responseCache = new Map<string, RequestResponseCacheEntry>();
 
   /** History for the active request (newest first) — powers the Timings panel. */
   reqHistory = $state<HistoryEntry[]>([]);
@@ -368,6 +378,7 @@ class Workspace {
 
   private enterOpeningShell(target: OpeningTarget, step: string): void {
     this.captureActiveRequestForSave();
+    this.responseCache.clear();
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.openingTarget = target;
@@ -609,6 +620,7 @@ class Workspace {
     this.projectOpenGeneration++;
     this.loadStoreGeneration++;
     this.stopSyncLoop();
+    this.responseCache.clear();
     this.transitioning = false;
     this.transitionPhase = "idle";
     this.openingTarget = null;
@@ -1142,10 +1154,9 @@ class Workspace {
     this.activeReq = structuredClone($state.snapshot(req)) as RequestDefinition;
     this.activeEnvName =
       this.activeEnvName ?? this.environments[0]?.name ?? null;
-    this.response = null;
     this.exampleView = null;
     this.errorMsg = null;
-    this.unresolved = [];
+    this.restoreCachedResponse(reqId);
     // Sync profile → headers so the user sees profile-injected headers in the
     // Headers tab (with a brand-tinted "from profile" badge), not just at send
     // time. Same merge applyProfile() does in send(), but as a real edit so
@@ -1163,6 +1174,48 @@ class Workspace {
     this.wsMessages = [];
     this.grpcServices = [];
     this.reqHistory = [];
+  }
+
+  private clearLiveResponse(): void {
+    this.response = null;
+    this.renderedRequest = null;
+    this.unresolved = [];
+    this.effectiveUrl = "";
+    this.tests = [];
+    this.logs = [];
+    this.scriptError = null;
+  }
+
+  private restoreCachedResponse(reqId: string): void {
+    const cached = this.responseCache.get(reqId);
+    if (!cached) {
+      this.clearLiveResponse();
+      return;
+    }
+    this.response = structuredClone(cached.response) as ResponseResult;
+    this.renderedRequest = cached.renderedRequest
+      ? (structuredClone(cached.renderedRequest) as RequestDefinition)
+      : null;
+    this.unresolved = [...cached.unresolved];
+    this.effectiveUrl = cached.effectiveUrl;
+    this.tests = structuredClone(cached.tests) as ScriptTest[];
+    this.logs = [...cached.logs];
+    this.scriptError = cached.scriptError;
+  }
+
+  private cacheLiveResponse(reqId: string): void {
+    if (!this.response) return;
+    this.responseCache.set(reqId, {
+      response: structuredClone(this.response) as ResponseResult,
+      renderedRequest: this.renderedRequest
+        ? (structuredClone(this.renderedRequest) as RequestDefinition)
+        : null,
+      unresolved: [...this.unresolved],
+      effectiveUrl: this.effectiveUrl,
+      tests: structuredClone(this.tests) as ScriptTest[],
+      logs: [...this.logs],
+      scriptError: this.scriptError,
+    });
   }
 
   /** Secrets that failed to open through RedDB's native vault/config layer on the
@@ -1294,6 +1347,7 @@ class Workspace {
 
   async send(): Promise<void> {
     if (!this.activeReq || this.sending) return;
+    const sentReqId = this.activeReq.id;
     this.sending = true;
     this.exampleView = null;
     this.errorMsg = null;
@@ -1334,6 +1388,7 @@ class Workspace {
         this.scriptError = sr.error ?? null;
         await this.applyVarChanges(sr.varChanges);
       }
+      this.cacheLiveResponse(sentReqId);
       await this.recordEntry(
         this.activeReq.id,
         this.activeReq.name,
@@ -1882,6 +1937,12 @@ class Workspace {
       });
       this.response = result.response;
       this.effectiveUrl = result.effectiveUrl;
+      this.renderedRequest = $state.snapshot(req) as RequestDefinition;
+      this.unresolved = [];
+      this.tests = [];
+      this.logs = [];
+      this.scriptError = null;
+      this.cacheLiveResponse(req.id);
       await this.recordEntry(
         req.id,
         req.name,
@@ -2984,6 +3045,7 @@ class Workspace {
     );
     if (!col) return;
     const rootOrder = this.rootOrder(col);
+    this.responseCache.delete(reqId);
     await repo.deleteRequest(col.id, reqId);
     col.requests = col.requests.filter((r) => r.id !== reqId);
     col.collection.order = col.collection.order.filter((id) => id !== reqId);
