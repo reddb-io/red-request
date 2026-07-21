@@ -570,7 +570,55 @@
              see syncProfileHeaders() in the store + the "profile" badge
              that KeyValueEditor renders for fromProfile rows. No preview
              banner needed; the user can edit/disable/delete like any other row. -->
-        <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
+        <div class="flex flex-col gap-4">
+          {#if ws.activeInheritedHeaders.length}
+            <section class="flex flex-col gap-1">
+              <h4 class="label">Inherited</h4>
+              {#each ws.activeInheritedHeaders as item (`${item.source}:${item.name.toLowerCase()}`)}
+                <div
+                  class="flex items-center gap-2 rounded bg-[var(--color-bg-2)] px-1.5 py-1 ring-1 ring-border {item.disabled
+                    ? 'opacity-55'
+                    : ''}"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!item.disabled}
+                    class="accent-[var(--color-brand)]"
+                    aria-label={`inherit ${item.name}`}
+                    onchange={(e) =>
+                      void ws.setInheritedHeaderEnabled(
+                        item.name,
+                        e.currentTarget.checked
+                      )}
+                  />
+                  <input
+                    readonly
+                    value={item.name}
+                    class="mono h-7 min-w-0 flex-1 rounded border border-border bg-[var(--color-bg-1)] px-2 text-sm text-fg-muted outline-none"
+                    aria-label={`inherited header ${item.name}`}
+                  />
+                  <input
+                    readonly
+                    value={item.value}
+                    class="mono h-7 min-w-0 flex-1 rounded border border-border bg-[var(--color-bg-1)] px-2 text-sm text-fg-muted outline-none"
+                    aria-label={`inherited value ${item.name}`}
+                  />
+                  <span
+                    class="rounded bg-[var(--color-bg-3)] px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-fg-muted uppercase"
+                    aria-label={`source ${item.source}`}
+                    >{item.source}</span
+                  >
+                </div>
+              {/each}
+            </section>
+          {/if}
+          <section class="flex flex-col gap-1">
+            {#if ws.activeInheritedHeaders.length}
+              <h4 class="label">Request</h4>
+            {/if}
+            <KeyValueEditor bind:items={ws.activeReq.headers} placeholder="header" />
+          </section>
+        </div>
       {:else if tab === "auth"}
         <AuthEditor bind:auth={ws.activeReq.auth} />
       {:else if tab === "scripts"}
