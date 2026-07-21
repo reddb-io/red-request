@@ -110,7 +110,15 @@ function placeRootItem(
   else next.push(item);
   return next;
 }
-export type AppView = "home" | "requests" | "settings" | "database";
+export type AppView =
+  | "home"
+  | "requests"
+  | "settings"
+  | "database"
+  | "scopeConfig";
+export type ScopeConfigTarget =
+  | { kind: "collection"; colId: string }
+  | { kind: "folder"; colId: string; folder: string };
 export type SettingsSection =
   | "general"
   | "environments"
@@ -191,6 +199,7 @@ class Workspace {
    *  management; Requests is the workspace (collections + active request); Settings holds
    *  project-level config. The Sidebar's old segmented [requests|dashboard] is gone. */
   view = $state<AppView>("requests");
+  scopeConfigTarget = $state<ScopeConfigTarget | null>(null);
   /** Settings > Data opt-in for the embedded red-ui database inspector. */
   redUiEnabled = $state(false);
   settingsSection = $state<SettingsSection>("general");
@@ -276,6 +285,12 @@ class Workspace {
 
   get activeCollection(): LoadedCollection | null {
     return this.collections.find((c) => c.id === this.activeColId) ?? null;
+  }
+
+  get scopeConfigCollection(): LoadedCollection | null {
+    const target = this.scopeConfigTarget;
+    if (!target) return null;
+    return this.collections.find((c) => c.id === target.colId) ?? null;
   }
 
   get activeProfile(): Profile | null {
@@ -2571,6 +2586,29 @@ class Workspace {
     if (!col || !this.activeColId) return;
     await repo.saveCollectionMeta(
       this.activeColId,
+      $state.snapshot(col.collection) as typeof col.collection
+    );
+  }
+
+  openScopeConfig(target: ScopeConfigTarget): void {
+    const col = this.collections.find((candidate) => candidate.id === target.colId);
+    if (!col) return;
+    if (
+      target.kind === "folder" &&
+      !col.collection.folders.some((folder) => folderName(folder) === target.folder)
+    )
+      return;
+    this.scopeConfigTarget = { ...target };
+    this.activeColId = target.colId;
+    this.view = "scopeConfig";
+  }
+
+  async persistScopeConfig(): Promise<void> {
+    const col = this.scopeConfigCollection;
+    const target = this.scopeConfigTarget;
+    if (!col || !target) return;
+    await repo.saveCollectionMeta(
+      target.colId,
       $state.snapshot(col.collection) as typeof col.collection
     );
   }
