@@ -69,6 +69,17 @@ export const authConfigSchema = z.discriminatedUnion("type", [
       .default([]),
   }),
   z.object({
+    type: z.literal("tokenRequest"),
+    requestId: z.string().default(""),
+    accessTokenPath: z.string().default("access_token"),
+    refreshTokenPath: z.string().default("refresh_token"),
+    accessTokenSecretName: z.string().default("access_token"),
+    refreshTokenSecretName: z.string().default("refresh_token"),
+    expiryResponsePath: z.string().default(""),
+    manualTtlSeconds: z.number().int().nonnegative().default(0),
+    renewalMarginSeconds: z.number().int().nonnegative().default(30),
+  }),
+  z.object({
     type: z.literal("awsSigV4"),
     accessKeyId: z.string().default(""),
     secretAccessKey: z.string().default(""),
@@ -89,5 +100,6 @@ export const SELECTABLE_AUTH_TYPES: AuthType[] = [
   "apiKey",
   "digest",
   "oauth2",
+  "tokenRequest",
   "awsSigV4",
 ];
