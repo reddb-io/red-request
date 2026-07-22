@@ -48,6 +48,8 @@ describe("Sidebar inline rename gestures", () => {
     ws.activeColId = "col-1";
     ws.activeReq = req;
     ws.network = { proxies: [], profiles: [] };
+    ws.view = "requests";
+    ws.scopeConfigTarget = null;
   });
 
   afterEach(() => {
@@ -85,6 +87,71 @@ describe("Sidebar inline rename gestures", () => {
       expect(renameCollection).toHaveBeenCalledWith("col-1", "Platform API");
     });
   });
+
+  it("opens collection and folder config from sidebar actions", async () => {
+    const folderReq = {
+      ...newRequest("req-2"),
+      name: "Folder request",
+      folder: "Admin",
+    };
+    ws.collections[0]!.collection = collectionFileSchema.parse({
+      ...ws.collections[0]!.collection,
+      folders: ["Admin"],
+      order: ["req-1", "req-2"],
+      rootOrder: [
+        { kind: "request", id: "req-1" },
+        { kind: "folder", name: "Admin" },
+      ],
+    });
+    ws.collections[0]!.requests.push(folderReq);
+    const openScopeConfig = vi
+      .spyOn(ws, "openScopeConfig")
+      .mockImplementation(() => {});
+
+    render(SidebarHarness);
+
+    await fireEvent.click(screen.getByLabelText("configure Team API"));
+    expect(openScopeConfig).toHaveBeenCalledWith({
+      kind: "collection",
+      colId: "col-1",
+    });
+
+    await fireEvent.click(screen.getByLabelText("configure Admin"));
+    expect(openScopeConfig).toHaveBeenCalledWith({
+      kind: "folder",
+      colId: "col-1",
+      folder: "Admin",
+    });
+  });
+
+  it("keeps collection and folder name clicks as expand/collapse toggles", async () => {
+    const folderReq = {
+      ...newRequest("req-2"),
+      name: "Folder request",
+      folder: "Admin",
+    };
+    ws.collections[0]!.collection = collectionFileSchema.parse({
+      ...ws.collections[0]!.collection,
+      folders: ["Admin"],
+      order: ["req-1", "req-2"],
+      rootOrder: [
+        { kind: "request", id: "req-1" },
+        { kind: "folder", name: "Admin" },
+      ],
+    });
+    ws.collections[0]!.requests.push(folderReq);
+    const openScopeConfig = vi.spyOn(ws, "openScopeConfig");
+
+    render(SidebarHarness);
+
+    await fireEvent.click(screen.getByText("Admin"));
+    expect(screen.queryByText("Folder request")).toBeNull();
+    expect(openScopeConfig).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByText("Team API"));
+    expect(screen.queryByText("List users")).toBeNull();
+    expect(openScopeConfig).not.toHaveBeenCalled();
+  });
 });
 
 describe("Sidebar root drag-and-drop", () => {
@@ -120,6 +187,8 @@ describe("Sidebar root drag-and-drop", () => {
     ws.activeColId = "col-1";
     ws.activeReq = rootOne;
     ws.network = { proxies: [], profiles: [] };
+    ws.view = "requests";
+    ws.scopeConfigTarget = null;
   });
 
   afterEach(() => {
