@@ -232,8 +232,7 @@ export function resolveFunction(name: string): string | undefined {
 export type FnArg = number | string;
 
 export type ParsedArgs =
-  | { ok: true; args: FnArg[] }
-  | { ok: false; error: string };
+  { ok: true; args: FnArg[] } | { ok: false; error: string };
 
 const NUMERIC = /^[+-]?(\d+\.?\d*|\.\d+)$/;
 const WS = /\s/;
@@ -654,6 +653,16 @@ function resolveAuth(
         scope: auth.scope ? t(auth.scope) : auth.scope,
         username: auth.username ? t(auth.username) : auth.username,
         password: auth.password ? t(auth.password) : auth.password,
+      };
+    case "tokenRequest":
+      return {
+        ...auth,
+        requestId: t(auth.requestId),
+        accessTokenPath: t(auth.accessTokenPath),
+        refreshTokenPath: t(auth.refreshTokenPath),
+        accessTokenSecretName: t(auth.accessTokenSecretName),
+        refreshTokenSecretName: t(auth.refreshTokenSecretName),
+        expiryResponsePath: t(auth.expiryResponsePath),
       };
     case "awsSigV4":
       return {

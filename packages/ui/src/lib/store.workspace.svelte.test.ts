@@ -16,7 +16,15 @@ vi.mock("./repo", () => ({
   saveEnvironmentOrder: vi.fn(async () => {}),
   renameEnvironment: vi.fn(async () => {}),
   deleteEnvironment: vi.fn(async () => {}),
-  saveEnvironmentSecret: vi.fn(async () => {}),
+  resolveEnvironmentSecret: vi.fn(async (env, name) => {
+    const secret = (env.secrets as Record<string, { value?: unknown }>)[name];
+    return secret && "value" in secret ? String(secret.value) : null;
+  }),
+  saveEnvironmentSecret: vi.fn(async (env, name, value) => {
+    (env.secrets as unknown as Record<string, { value: string }>)[name] = {
+      value,
+    };
+  }),
   removeEnvironmentSecret: vi.fn(async () => {}),
   deleteRequest: vi.fn(async () => {}),
   deleteCollection: vi.fn(async () => {}),
@@ -33,6 +41,9 @@ vi.mock("./repo", () => ({
   loadEnvironments: vi.fn(async () => []),
   loadAll: vi.fn(async () => []),
   loadGlobals: vi.fn(async () => null),
+  loadOauthToken: vi.fn(async () => null),
+  saveOauthToken: vi.fn(async () => {}),
+  deleteOauthToken: vi.fn(async () => {}),
   setProjectSyncQueueEnabled: vi.fn(),
   syncConsumerName: vi.fn(async () => "rr_client"),
   currentSyncClientId: vi.fn(async () => "client-1"),
@@ -183,11 +194,209 @@ function resetWorkspace() {
   vi.mocked(repo.readSyncEvents).mockImplementation(
     () => new Promise<never>(() => {})
   );
+  vi.mocked(repo.resolveEnvironmentSecret).mockImplementation(
+    async (env, name) => {
+      const secret = (env.secrets as Record<string, { value?: unknown }>)[name];
+      return secret && "value" in secret ? String(secret.value) : null;
+    }
+  );
+  vi.mocked(repo.saveEnvironmentSecret).mockImplementation(
+    async (env, name, value) => {
+      (env.secrets as unknown as Record<string, { value: string }>)[name] = {
+        value,
+      };
+    }
+  );
 }
 
 beforeEach(resetWorkspace);
 
 describe("Workspace per-request response cache", () => {
+  it("runs the token request login before dispatch and saves extracted tokens as active environment secrets", async () => {
+    vi.mocked(rpc.httpSend)
+      .mockResolvedValueOnce({
+        response: response(200, {
+          bodyText: JSON.stringify({
+            access_token: "access-1",
+            refresh_token: "refresh-1",
+          }),
+        }),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/login",
+      })
+      .mockResolvedValueOnce({
+        response: response(200),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/users",
+      });
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {},
+    });
+    ws.environments = [env];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-token",
+        collection: collectionFileSchema.parse({
+          name: "c-token",
+          auth: {
+            type: "tokenRequest",
+            requestId: "login",
+            accessTokenSecretName: "auth.access",
+            refreshTokenSecretName: "auth.refresh",
+          },
+          order: ["login", "users"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("users", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+
+    ws.selectRequest("c-token", "users");
+    await ws.send();
+
+    expect(ws.errorMsg).toBeNull();
+    expect(rpc.httpSend).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(rpc.httpSend).mock.calls[0]?.[0].request).toMatchObject({
+      id: "login",
+      auth: { type: "none" },
+    });
+    expect(
+      vi
+        .mocked(repo.saveEnvironmentSecret)
+        .mock.calls.map((call) => [call[1], call[2]])
+    ).toEqual([
+      ["auth.access", "access-1"],
+      ["auth.refresh", "refresh-1"],
+    ]);
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "access-1",
+    });
+    expect(ws.renderedRequest?.headers).toContainEqual({
+      name: "Authorization",
+      value: "Bearer ••••••",
+      enabled: true,
+    });
+  });
+
+  it("inherits token request auth from folder scope and does not renew unknown-expiry tokens", async () => {
+    vi.mocked(repo.resolveEnvironmentSecret).mockResolvedValue("cached-1");
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(200),
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/admin",
+    });
+    ws.environments = [
+      storedEnvironmentSchema.parse({
+        name: "dev",
+        vars: {},
+        secrets: {
+          access_token: {
+            ref: "red_request_secrets.e_dev.s_access",
+            vault: "red_request_secrets",
+            configKey: "secret_dev_access",
+          },
+        },
+      }),
+    ];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-folder-token",
+        collection: collectionFileSchema.parse({
+          name: "c-folder-token",
+          folders: [
+            {
+              name: "Admin",
+              auth: {
+                type: "tokenRequest",
+                requestId: "login",
+              },
+            },
+          ],
+          order: ["login", "admin"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("admin", {
+            folder: "Admin",
+            method: "GET",
+            url: "https://api.example.test/admin",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+
+    ws.selectRequest("c-folder-token", "admin");
+    await ws.send();
+
+    expect(ws.errorMsg).toBeNull();
+    expect(rpc.httpSend).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(rpc.httpSend).mock.calls[0]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "cached-1",
+    });
+  });
+
+  it("surfaces failed token request login as a flow error without dispatching the target request", async () => {
+    vi.mocked(rpc.httpSend).mockResolvedValueOnce({
+      response: response(401, { ok: false, statusText: "Unauthorized" }),
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/login",
+    });
+    ws.collections = [
+      {
+        id: "c-token-fail",
+        collection: collectionFileSchema.parse({
+          name: "c-token-fail",
+          auth: { type: "tokenRequest", requestId: "login" },
+          order: ["login", "users"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("users", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+
+    ws.selectRequest("c-token-fail", "users");
+    await ws.send();
+
+    expect(rpc.httpSend).toHaveBeenCalledTimes(1);
+    expect(ws.errorMsg).toBe(
+      "Token request auth: login request failed with status 401"
+    );
+  });
+
   it("sends with folder scoped auth headers and variables", async () => {
     vi.mocked(rpc.httpSend).mockResolvedValueOnce({
       response: response(200),
