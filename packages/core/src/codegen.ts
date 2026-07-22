@@ -4,13 +4,7 @@ import type { RequestDefinition, Kv } from "./request.js";
 import type { AuthConfig } from "./auth.js";
 
 export type SnippetLang =
-  | "curl"
-  | "httpie"
-  | "fetch"
-  | "axios"
-  | "python"
-  | "go"
-  | "recker";
+  "curl" | "httpie" | "fetch" | "axios" | "python" | "go" | "recker";
 
 export const SNIPPET_LANGS: { id: SnippetLang; label: string }[] = [
   { id: "curl", label: "cURL" },
@@ -60,6 +54,7 @@ function applyAuth(
       break;
     case "digest":
     case "oauth2":
+    case "tokenRequest":
     case "awsSigV4":
       headers.push({
         name: "X-RR-Auth",
