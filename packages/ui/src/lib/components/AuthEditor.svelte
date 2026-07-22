@@ -38,6 +38,17 @@
       password: "",
       extraParams: [],
     },
+    tokenRequest: {
+      type: "tokenRequest",
+      requestId: "",
+      accessTokenPath: "access_token",
+      refreshTokenPath: "refresh_token",
+      accessTokenSecretName: "access_token",
+      refreshTokenSecretName: "refresh_token",
+      expiryResponsePath: "",
+      manualTtlSeconds: 0,
+      renewalMarginSeconds: 30,
+    },
     awsSigV4: {
       type: "awsSigV4",
       accessKeyId: "",
@@ -189,6 +200,49 @@
     {#if oauthError}
       <div class="text-xs text-red-400">{oauthError}</div>
     {/if}
+  {:else if auth.type === "tokenRequest"}
+    <VarField
+      bind:value={auth.requestId}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="login request id"
+    />
+    <VarField
+      bind:value={auth.accessTokenPath}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="access token path"
+    />
+    <VarField
+      bind:value={auth.refreshTokenPath}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="refresh token path"
+    />
+    <VarField
+      bind:value={auth.accessTokenSecretName}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="access token secret name"
+    />
+    <VarField
+      bind:value={auth.refreshTokenSecretName}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="refresh token secret name"
+    />
+    <VarField
+      bind:value={auth.expiryResponsePath}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="expires-in path"
+    />
   {:else if auth.type === "awsSigV4"}
     <VarField bind:value={auth.accessKeyId} known={ws.knownVars} values={ws.varTitles} dense placeholder="access key id" />
     <VarField bind:value={auth.secretAccessKey} known={ws.knownVars} values={ws.varTitles} dense placeholder="secret access key" />
