@@ -6,6 +6,9 @@ import {
   headerIdentity,
   resolveScopedRequest,
   resolveScopedVariables,
+  extractTokenRequestAuth,
+  shouldRenewTokenRequestAuth,
+  TokenRequestAuthFlowError,
   folderName,
   storedEnvironmentSchema,
   INTROSPECTION_QUERY,
@@ -18,6 +21,7 @@ import {
   resolveTemplate,
   resolveRequest,
   type AuthConfig,
+  type TokenRequestAuthConfig,
   type Oauth2TokenResult,
   type BodyType,
   type ImportedCollection,
@@ -111,11 +115,7 @@ function placeRootItem(
   return next;
 }
 export type AppView =
-  | "home"
-  | "requests"
-  | "settings"
-  | "database"
-  | "scopeConfig";
+  "home" | "requests" | "settings" | "database" | "scopeConfig";
 export type ScopeConfigTarget =
   | { kind: "collection"; colId: string }
   | { kind: "folder"; colId: string; folder: string };
@@ -1405,8 +1405,8 @@ class Workspace {
       }
     }
     try {
-      const variables = await this.buildVariables();
-      const request = await this.applyOAuth2(
+      let variables = await this.buildVariables();
+      let request = await this.applyOAuth2(
         this.applyScopedRequest(
           this.applyProfile(
             structuredClone(
@@ -1415,6 +1415,9 @@ class Workspace {
           )
         )
       );
+      request = await this.applyTokenRequestAuth(request, variables);
+      if (request.auth.type === "bearer")
+        variables = await this.buildVariables();
       this.renderedRequest = this.redactRendered(request, variables);
       const result = await httpSend({
         request,
@@ -2591,11 +2594,15 @@ class Workspace {
   }
 
   openScopeConfig(target: ScopeConfigTarget): void {
-    const col = this.collections.find((candidate) => candidate.id === target.colId);
+    const col = this.collections.find(
+      (candidate) => candidate.id === target.colId
+    );
     if (!col) return;
     if (
       target.kind === "folder" &&
-      !col.collection.folders.some((folder) => folderName(folder) === target.folder)
+      !col.collection.folders.some(
+        (folder) => folderName(folder) === target.folder
+      )
     )
       return;
     this.scopeConfigTarget = { ...target };
@@ -3284,6 +3291,104 @@ class Workspace {
 
   async removeSecret(env: StoredEnvironment, name: string): Promise<void> {
     await repo.removeEnvironmentSecret(env, name);
+  }
+
+  private tokenRequestEnvironment(): StoredEnvironment {
+    return this.activeEnv ?? this.globals;
+  }
+
+  private tokenRequestExpiryVar(name: string): string {
+    return `${name}.expires_at`;
+  }
+
+  private async storedTokenRequestAccess(
+    env: StoredEnvironment,
+    auth: TokenRequestAuthConfig
+  ): Promise<string | null> {
+    const token = await repo.resolveEnvironmentSecret(
+      env,
+      auth.accessTokenSecretName
+    );
+    if (!token) return null;
+    const rawExpires =
+      env.vars[this.tokenRequestExpiryVar(auth.accessTokenSecretName)];
+    const expiresAt = rawExpires ? Number(rawExpires) : null;
+    const marginMs = auth.renewalMarginSeconds * 1000;
+    if (shouldRenewTokenRequestAuth(expiresAt, Date.now(), marginMs))
+      return null;
+    return token;
+  }
+
+  private loginRequestFor(auth: TokenRequestAuthConfig): RequestDefinition {
+    const login = this.activeCollection?.requests.find(
+      (request) => request.id === auth.requestId
+    );
+    if (!login) {
+      throw new TokenRequestAuthFlowError(
+        `Token request auth: login request "${auth.requestId}" was not found`
+      );
+    }
+    const request = this.applyScopedRequest(
+      this.applyProfile(this.cloneStateValue(login))
+    );
+    if (request.auth.type === "tokenRequest") request.auth = { type: "none" };
+    return request;
+  }
+
+  private async renewTokenRequestAuth(
+    auth: TokenRequestAuthConfig,
+    env: StoredEnvironment,
+    variables: Record<string, string>
+  ): Promise<string> {
+    const login = this.loginRequestFor(auth);
+    const result = await httpSend({
+      request: login,
+      variables,
+      cookieJarKey: this.activeCookieJarKey ?? undefined,
+    });
+    if (!result.response.ok) {
+      throw new TokenRequestAuthFlowError(
+        `Token request auth: login request failed with status ${result.response.status}`
+      );
+    }
+    const extracted = extractTokenRequestAuth(
+      result.response.bodyText,
+      auth,
+      Date.now()
+    );
+    await repo.saveEnvironmentSecret(
+      env,
+      auth.accessTokenSecretName,
+      extracted.accessToken
+    );
+    if (auth.refreshTokenSecretName && extracted.refreshToken) {
+      await repo.saveEnvironmentSecret(
+        env,
+        auth.refreshTokenSecretName,
+        extracted.refreshToken
+      );
+    }
+    const expiryVar = this.tokenRequestExpiryVar(auth.accessTokenSecretName);
+    if (extracted.expiresAt) env.vars[expiryVar] = String(extracted.expiresAt);
+    else delete env.vars[expiryVar];
+    await this.persistEnv(env);
+    return extracted.accessToken;
+  }
+
+  private async applyTokenRequestAuth(
+    snap: RequestDefinition,
+    variables: Record<string, string>
+  ): Promise<RequestDefinition> {
+    if (snap.auth.type !== "tokenRequest") return snap;
+    const auth = snap.auth;
+    if (snap.id === auth.requestId) return { ...snap, auth: { type: "none" } };
+    const env = this.tokenRequestEnvironment();
+    const stored = await this.storedTokenRequestAccess(env, auth);
+    snap.auth = {
+      type: "bearer",
+      token: stored ?? (await this.renewTokenRequestAuth(auth, env, variables)),
+    };
+    return snap;
   }
 
   // --- OAuth2 / OIDC -------------------------------------------------------
