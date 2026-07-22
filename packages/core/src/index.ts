@@ -1,5 +1,6 @@
 export * from "./constants.js";
 export * from "./auth.js";
+export * from "./token-request-auth.js";
 export * from "./detect.js";
 export * from "./request.js";
 export * from "./response.js";
