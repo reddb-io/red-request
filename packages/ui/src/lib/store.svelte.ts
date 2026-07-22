@@ -163,6 +163,8 @@ async function withTimeout<T>(
 }
 
 class Workspace {
+  private tokenRequestRenewals = new Map<string, Promise<string>>();
+
   ready = $state(false);
   bridgeMissing = $state(false);
   loadError = $state<string | null>(null);
@@ -1415,15 +1417,43 @@ class Workspace {
           )
         )
       );
+      const tokenRequestAuth =
+        request.auth.type === "tokenRequest" ? request.auth : null;
       request = await this.applyTokenRequestAuth(request, variables);
       if (request.auth.type === "bearer")
         variables = await this.buildVariables();
       this.renderedRequest = this.redactRendered(request, variables);
-      const result = await httpSend({
+      let result = await httpSend({
         request,
         variables,
         cookieJarKey: this.activeCookieJarKey ?? undefined,
       });
+      if (
+        tokenRequestAuth &&
+        result.response.status === 401 &&
+        request.id !== tokenRequestAuth.requestId &&
+        request.id !== tokenRequestAuth.refreshRequestId
+      ) {
+        const env = this.tokenRequestEnvironment();
+        request = {
+          ...request,
+          auth: {
+            type: "bearer",
+            token: await this.renewTokenRequestAuth(
+              tokenRequestAuth,
+              env,
+              variables
+            ),
+          },
+        };
+        variables = await this.buildVariables();
+        this.renderedRequest = this.redactRendered(request, variables);
+        result = await httpSend({
+          request,
+          variables,
+          cookieJarKey: this.activeCookieJarKey ?? undefined,
+        });
+      }
       this.response = result.response;
       this.unresolved = result.unresolved;
       this.effectiveUrl = result.effectiveUrl;
@@ -3319,43 +3349,47 @@ class Workspace {
     return token;
   }
 
-  private loginRequestFor(auth: TokenRequestAuthConfig): RequestDefinition {
-    const login = this.activeCollection?.requests.find(
-      (request) => request.id === auth.requestId
+  private tokenAuthRequestFor(
+    requestId: string,
+    label: string
+  ): RequestDefinition {
+    const source = this.activeCollection?.requests.find(
+      (request) => request.id === requestId
     );
-    if (!login) {
+    if (!source) {
       throw new TokenRequestAuthFlowError(
-        `Token request auth: login request "${auth.requestId}" was not found`
+        `Token request auth: ${label} request "${requestId}" was not found`
       );
     }
     const request = this.applyScopedRequest(
-      this.applyProfile(this.cloneStateValue(login))
+      this.applyProfile(this.cloneStateValue(source))
     );
     if (request.auth.type === "tokenRequest") request.auth = { type: "none" };
     return request;
   }
 
-  private async renewTokenRequestAuth(
+  private loginRequestFor(auth: TokenRequestAuthConfig): RequestDefinition {
+    return this.tokenAuthRequestFor(auth.requestId, "login");
+  }
+
+  private refreshRequestFor(
+    auth: TokenRequestAuthConfig
+  ): RequestDefinition | null {
+    const requestId = auth.refreshRequestId?.trim();
+    if (!requestId) return null;
+    try {
+      return this.tokenAuthRequestFor(requestId, "refresh");
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveTokenRequestAuth(
     auth: TokenRequestAuthConfig,
     env: StoredEnvironment,
-    variables: Record<string, string>
+    bodyText: string
   ): Promise<string> {
-    const login = this.loginRequestFor(auth);
-    const result = await httpSend({
-      request: login,
-      variables,
-      cookieJarKey: this.activeCookieJarKey ?? undefined,
-    });
-    if (!result.response.ok) {
-      throw new TokenRequestAuthFlowError(
-        `Token request auth: login request failed with status ${result.response.status}`
-      );
-    }
-    const extracted = extractTokenRequestAuth(
-      result.response.bodyText,
-      auth,
-      Date.now()
-    );
+    const extracted = extractTokenRequestAuth(bodyText, auth, Date.now());
     await repo.saveEnvironmentSecret(
       env,
       auth.accessTokenSecretName,
@@ -3375,13 +3409,82 @@ class Workspace {
     return extracted.accessToken;
   }
 
+  private async fetchTokenRequestAuth(
+    auth: TokenRequestAuthConfig,
+    env: StoredEnvironment,
+    variables: Record<string, string>
+  ): Promise<string> {
+    const refresh = this.refreshRequestFor(auth);
+    if (refresh) {
+      const result = await httpSend({
+        request: refresh,
+        variables,
+        cookieJarKey: this.activeCookieJarKey ?? undefined,
+      });
+      if (result.response.ok) {
+        try {
+          return await this.saveTokenRequestAuth(
+            auth,
+            env,
+            result.response.bodyText
+          );
+        } catch {
+          // Fall through to login when refresh returns an unusable token body.
+        }
+      }
+    }
+    const login = this.loginRequestFor(auth);
+    const result = await httpSend({
+      request: login,
+      variables,
+      cookieJarKey: this.activeCookieJarKey ?? undefined,
+    });
+    if (!result.response.ok) {
+      throw new TokenRequestAuthFlowError(
+        `Token request auth: login request failed with status ${result.response.status}`
+      );
+    }
+    return this.saveTokenRequestAuth(auth, env, result.response.bodyText);
+  }
+
+  private tokenRequestRenewalKey(
+    auth: TokenRequestAuthConfig,
+    env: StoredEnvironment
+  ): string {
+    return [
+      env.name,
+      auth.requestId,
+      auth.refreshRequestId,
+      auth.accessTokenSecretName,
+      auth.refreshTokenSecretName,
+    ].join("\u0000");
+  }
+
+  private async renewTokenRequestAuth(
+    auth: TokenRequestAuthConfig,
+    env: StoredEnvironment,
+    variables: Record<string, string>
+  ): Promise<string> {
+    const key = this.tokenRequestRenewalKey(auth, env);
+    const current = this.tokenRequestRenewals.get(key);
+    if (current) return current;
+    const renewal = this.fetchTokenRequestAuth(auth, env, variables).finally(
+      () => {
+        this.tokenRequestRenewals.delete(key);
+      }
+    );
+    this.tokenRequestRenewals.set(key, renewal);
+    return renewal;
+  }
+
   private async applyTokenRequestAuth(
     snap: RequestDefinition,
     variables: Record<string, string>
   ): Promise<RequestDefinition> {
     if (snap.auth.type !== "tokenRequest") return snap;
     const auth = snap.auth;
-    if (snap.id === auth.requestId) return { ...snap, auth: { type: "none" } };
+    if (snap.id === auth.requestId || snap.id === auth.refreshRequestId)
+      return { ...snap, auth: { type: "none" } };
     const env = this.tokenRequestEnvironment();
     const stored = await this.storedTokenRequestAccess(env, auth);
     snap.auth = {
