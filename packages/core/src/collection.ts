@@ -154,6 +154,7 @@ const authHeaderNames = (auth: AuthConfig): string[] => {
     case "bearer":
     case "digest":
     case "oauth2":
+    case "tokenRequest":
     case "awsSigV4":
       return ["authorization"];
     case "apiKey":
