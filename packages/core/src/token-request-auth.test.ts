@@ -36,6 +36,7 @@ describe("token request auth", () => {
     expect(auth).toEqual({
       type: "tokenRequest",
       requestId: "login",
+      refreshRequestId: "",
       accessTokenPath: "access_token",
       refreshTokenPath: "refresh_token",
       accessTokenSecretName: "access_token",
@@ -70,6 +71,7 @@ describe("token request auth", () => {
         {
           type: "tokenRequest",
           requestId: "login",
+          refreshRequestId: "",
           accessTokenPath: "data.token",
           refreshTokenPath: "",
           accessTokenSecretName: "auth.access",
@@ -87,6 +89,7 @@ describe("token request auth", () => {
         {
           type: "tokenRequest",
           requestId: "login",
+          refreshRequestId: "",
           accessTokenPath: "access_token",
           refreshTokenPath: "",
           accessTokenSecretName: "access_token",
