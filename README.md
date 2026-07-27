@@ -20,7 +20,7 @@ Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</cod
 
 ```bash
 # Linux / macOS — one line. Auto-detects your OS + arch; re-run any time to auto-upgrade.
-curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh
 ```
 
 The script detects your platform and installs the matching release (verifying its `sha256`
@@ -40,10 +40,10 @@ broken install — add `--force`. Pin a specific release with `--version vX.Y.Z`
 
 ```bash
 # reinstall the current version (refreshes the bundled sidecar / repairs the install)
-curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash -s -- --force
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh -s -- --force
 
 # install/downgrade to a specific release
-curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash -s -- --version v0.25.2
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh -s -- --version v0.25.2
 ```
 
 > The app always runs its **own bundled** RedDB sidecar (next to the executable), not a
@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.s
 To remove either:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | sh
 ```
 
 Prefer a click, or apt? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
