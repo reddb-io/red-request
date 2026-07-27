@@ -1,20 +1,21 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # rr — open a red-request project rooted at the given directory (default: cwd).
 # The app then uses <dir>/.red/request/app.rdb (created if missing); with no dir it
 # uses the global ~/.red/request/app.rdb.
 #
 # After `pnpm desktop:build`, put this on your PATH, e.g.:
 #   ln -s "$PWD/scripts/rr" ~/.local/bin/rr
-set -euo pipefail
+set -eu
 dir="${1:-.}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-targets=(
-  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/release/red-request"
-  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/debug/red-request"
-  "/opt/cargo-target/release/red-request"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+# Candidate binary locations, tried in order. POSIX sh has no arrays, so we carry them as
+# positional parameters ($dir is already captured above before we overwrite them).
+set -- \
+  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/release/red-request" \
+  "${CARGO_TARGET_DIR:-$root/apps/desktop/src-tauri/target}/debug/red-request" \
+  "/opt/cargo-target/release/red-request" \
   "/opt/cargo-target/debug/red-request"
-)
-for cand in "${targets[@]}"; do
+for cand in "$@"; do
   if [ -x "$cand" ]; then exec "$cand" "$dir"; fi
 done
 echo "red-request binary not found — run 'pnpm desktop:build' (or desktop:dev) first." >&2
