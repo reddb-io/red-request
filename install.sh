@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
 #
 # Red Request — one-line installer / auto-upgrader.
 #
-#   curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --version v0.1.0
-#   curl -fsSL .../install.sh | bash -s -- --appimage      # single-file AppImage instead
+#   curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh
+#   curl -fsSL .../install.sh | sh -s -- --version v0.1.0
+#   curl -fsSL .../install.sh | sh -s -- --appimage      # single-file AppImage instead
 #
 # OS- and arch-agnostic: it detects your platform (linux/macOS/windows · x86_64/aarch64) and
 # installs the matching release asset, verifying its sha256 against checksums.txt.
@@ -17,7 +17,14 @@
 # UI: when stdout is a TTY (and NO_COLOR isn't set) the installer paints a colored banner,
 # shows a spinner while downloading, and frames the final report in a box. In non-TTY
 # contexts (CI logs, `... > install.log`) it falls back to plain text so logs stay greppable.
-set -euo pipefail
+#
+# POSIX sh (dash/ash/busybox): this script is intentionally POSIX so `curl … | sh` works on
+# systems where /bin/sh is dash (Debian/Ubuntu). Two deliberate notes:
+#   • `set -o pipefail` is not POSIX (dash aborts on it), so it is dropped; the one pipe whose
+#     status matters (sha256 hashing) checks the producer's exit code explicitly instead.
+#   • `local` is not strict POSIX but is supported universally by dash/ash/busybox/ksh, so it
+#     stays — rewriting every function to avoid it would be high-risk for zero gain.
+set -eu
 
 REPO="reddb-io/red-request"
 BIN_NAME="red-request"
@@ -31,7 +38,7 @@ MODIFY_PATH=1
 LINUX_FORMAT="deb" # deb (default) | appimage
 FORCE_NO_COLOR=0
 
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="${2:-}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:?}"; shift 2 ;;
@@ -65,35 +72,40 @@ done
 # ANSI helpers. We only emit escapes when (a) stdout is a TTY, (b) NO_COLOR
 # is unset, and (c) the user didn't pass --no-color. That keeps `... > log`
 # and CI runs greppable while giving interactive users a colored view.
-if [[ -t 1 && -z "${NO_COLOR:-}" && "$FORCE_NO_COLOR" != "1" ]]; then
-  C_RESET=$'\033[0m'
-  C_BOLD=$'\033[1m'
-  C_DIM=$'\033[2m'
-  C_RED=$'\033[31m'
-  C_GREEN=$'\033[32m'
-  C_YELLOW=$'\033[33m'
-  C_BLUE=$'\033[34m'
-  C_CYAN=$'\033[36m'
-  C_BRAND=$'\033[38;5;203m'  # warm red, matches the red-request wordmark
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "$FORCE_NO_COLOR" != "1" ]; then
+  # POSIX sh has no $'…' ANSI-C quoting, so mint a real ESC byte via printf and reuse it.
+  esc=$(printf '\033')
+  C_RESET="${esc}[0m"
+  C_BOLD="${esc}[1m"
+  C_DIM="${esc}[2m"
+  C_RED="${esc}[31m"
+  C_GREEN="${esc}[32m"
+  C_YELLOW="${esc}[33m"
+  C_BLUE="${esc}[34m"
+  C_CYAN="${esc}[36m"
+  C_BRAND="${esc}[38;5;203m"  # warm red, matches the red-request wordmark
 else
   C_RESET=""; C_BOLD=""; C_DIM=""; C_RED=""; C_GREEN=""
   C_YELLOW=""; C_BLUE=""; C_CYAN=""; C_BRAND=""
 fi
 UI_IS_TTY=0
-[[ -t 1 && -z "${NO_COLOR:-}" && "$FORCE_NO_COLOR" != "1" ]] && UI_IS_TTY=1
+[ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "$FORCE_NO_COLOR" != "1" ] && UI_IS_TTY=1
 
 # Unicode glyphs render fine on every modern terminal (macOS Terminal, iTerm2,
 # gnome-terminal, Windows Terminal). When UI is off we fall back to ASCII so
 # plain logs still read correctly.
-if [[ "$UI_IS_TTY" == "1" ]]; then
+# G_SPINNER is a space-separated list of frames: POSIX sh can't index a substring out of a
+# string (`${v:off:len}` is a bashism), and the glyphs below are multibyte, so we cycle the
+# frames as words via `set --` in the spinner loop instead.
+if [ "$UI_IS_TTY" = "1" ]; then
   G_ARROW="▸"
   G_OK="✓"
   G_WARN="!"
   G_ERR="✗"
-  G_SPINNER='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  G_SPINNER='⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏'
 else
   G_ARROW="→"; G_OK="✓"; G_WARN="!"; G_ERR="✗"
-  G_SPINNER='|/-\'
+  G_SPINNER='| / - \'
 fi
 
 # ── ui primitives ─────────────────────────────────────────────────────────
@@ -118,16 +130,19 @@ SPIN_PID=""
 SPIN_ACTIVE=0
 SPIN_WATCHER=""
 spin_start() {
-  [[ "$UI_IS_TTY" == "1" ]] || return 0
+  [ "$UI_IS_TTY" = "1" ] || return 0
   local label="$1" pid="$2"
   SPIN_PID="$pid"
   SPIN_ACTIVE=1
   # Hide the cursor while we draw over the same line.
   printf '\033[?25l' >&2
   (
-    local i=0 frame
+    i=0
+    set -- $G_SPINNER          # cycle frames as positional params ($1 … $nframes)
+    nframes=$#
     while kill -0 "$SPIN_PID" 2>/dev/null; do
-      frame="${G_SPINNER:$((i % ${#G_SPINNER})):1}"
+      idx=$(( i % nframes + 1 ))
+      eval "frame=\${$idx}"
       printf '\r%s%s%s %s' "$C_CYAN" "$frame" "$C_RESET" "$label" >&2
       i=$((i + 1))
       sleep 0.08
@@ -137,12 +152,12 @@ spin_start() {
 }
 
 stop_spinner() {
-  [[ "${SPIN_ACTIVE:-0}" == "1" ]] || return 0
+  [ "${SPIN_ACTIVE:-0}" = "1" ] || return 0
   SPIN_ACTIVE=0
   wait "$SPIN_WATCHER" 2>/dev/null || true
   # Erase the spinner line and restore the cursor. No-op when UI is off so
   # non-TTY logs (CI, `... > install.log`) stay free of stray escapes.
-  if [[ "$UI_IS_TTY" == "1" ]]; then
+  if [ "$UI_IS_TTY" = "1" ]; then
     printf '\r\033[2K\033[?25h' >&2
   fi
   SPIN_PID=""
@@ -154,10 +169,10 @@ stop_spinner() {
 box() {
   local title="$1"; shift
   local width=64 pad
-  (( ${#title} + 4 > width )) && width=$((${#title} + 4))
+  [ $((${#title} + 4)) -gt "$width" ] && width=$((${#title} + 4))
   pad=$(printf '%*s' "$((width - ${#title} - 2))" "")
   printf '%s╭─ %s %s%s%s╮\n' "$C_BRAND$C_BOLD" "$title" "$pad" "$C_RESET" "$C_BRAND"
-  if [[ $# -gt 0 ]]; then
+  if [ $# -gt 0 ]; then
     local line
     for line in "$@"; do
       printf '%s│%s %-*s %s│\n' "$C_BRAND" "$C_RESET" "$((width - 2))" "$line" "$C_BRAND"
@@ -168,14 +183,23 @@ box() {
 
 # OS-aware banner. Only on interactive runs — CI doesn't need the logo.
 banner() {
-  [[ "$UI_IS_TTY" == "1" ]] || return 0
+  [ "$UI_IS_TTY" = "1" ] || return 0
   printf '%s%s  R E D · R E Q U E S T%s\n' "$C_BRAND$C_BOLD" "" "$C_RESET"
   printf '%sOpen-source API client · powered by recker + RedDB%s\n' "$C_DIM" "$C_RESET"
 }
 
 # Make sure the spinner is cleared on any exit path so a stray ^C doesn't
-# leave the cursor hidden or a half-drawn frame on screen.
-trap 'stop_spinner; [[ "$UI_IS_TTY" == "1" ]] && printf "\033[?25h" >&2' EXIT INT TERM
+# leave the cursor hidden or a half-drawn frame on screen. POSIX sh has no
+# function-scoped RETURN trap (a bashism), so the per-install temp dir is
+# tracked in TMP_CLEANUP and removed here on any exit instead.
+TMP_CLEANUP=""
+cleanup() {
+  stop_spinner
+  [ -n "${TMP_CLEANUP:-}" ] && rm -rf "$TMP_CLEANUP"
+  [ "$UI_IS_TTY" = "1" ] && printf '\033[?25h' >&2
+  return 0
+}
+trap cleanup EXIT INT TERM
 
 # ── platform ──────────────────────────────────────────────────────────────
 detect_platform() {
@@ -197,7 +221,7 @@ detect_platform() {
 # Filename of the asset for this platform (must match release.yml's staged names).
 asset_name() {
   case "$OS" in
-    linux)   [[ "$LINUX_FORMAT" == "appimage" ]] && printf '%s-linux-%s.AppImage' "$BIN_NAME" "$ARCH" || printf '%s-linux-%s.deb' "$BIN_NAME" "$ARCH" ;;
+    linux)   [ "$LINUX_FORMAT" = "appimage" ] && printf '%s-linux-%s.AppImage' "$BIN_NAME" "$ARCH" || printf '%s-linux-%s.deb' "$BIN_NAME" "$ARCH" ;;
     darwin)  printf '%s-darwin-%s.dmg' "$BIN_NAME" "$ARCH" ;;
     windows) printf '%s-windows-%s-setup.exe' "$BIN_NAME" "$ARCH" ;;
   esac
@@ -229,7 +253,7 @@ download() { # url dest [label]
 # /releases/latest endpoint 302-redirects to /releases/tag/<tag>, so we read the
 # final URL. For an explicit --version we trust the tag as given.
 resolve_tag() {
-  if [[ -n "$VERSION" ]]; then printf '%s' "$VERSION"; return; fi
+  if [ -n "$VERSION" ]; then printf '%s' "$VERSION"; return; fi
   local url=""
   if have curl; then
     url="$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
@@ -239,7 +263,10 @@ resolve_tag() {
             "https://github.com/$REPO/releases/latest" 2>&1 \
             | awk '/^[[:space:]]*Location:/ {print $2}' | tail -1 || true)"
   fi
-  [[ "$url" == *"/releases/tag/"* ]] || return 1
+  case "$url" in
+    *"/releases/tag/"*) ;;
+    *) return 1 ;;
+  esac
   printf '%s' "${url##*/releases/tag/}"
 }
 
@@ -247,18 +274,24 @@ asset_url()    { printf 'https://github.com/%s/releases/download/%s/%s' "$REPO" 
 checksum_url() { printf 'https://github.com/%s/releases/download/%s/checksums.txt' "$REPO" "$1"; }
 
 sha256_of() { # file -> hex
-  if have sha256sum; then sha256sum "$1" | awk '{print $1}'
-  elif have shasum;   then shasum -a 256 "$1" | awk '{print $1}'
+  # `set -o pipefail` isn't POSIX, so a failing hasher piped straight into awk would be masked
+  # by awk's exit 0 — a corrupt/short download could then pass verification. Capture the
+  # hasher's status explicitly before extracting the digest so the failure protection is
+  # equivalent to the old pipefail behavior.
+  local out
+  if have sha256sum; then out="$(sha256sum "$1")" || return 1
+  elif have shasum;   then out="$(shasum -a 256 "$1")" || return 1
   else return 1; fi
+  printf '%s\n' "$out" | awk '{print $1}'
 }
 
 # Verify $1 (file) against the checksums.txt body in $2; each line is "<hex>  <name>".
 verify_sha256() { # file checksums_text asset_name
   local want got
   want="$(printf '%s\n' "$2" | awk -v f="$3" '$2==f || $2=="*"f {print $1; exit}')"
-  [[ -n "$want" ]] || { warn "no checksum for $3 in checksums.txt — skipping verify"; return 0; }
+  [ -n "$want" ] || { warn "no checksum for $3 in checksums.txt — skipping verify"; return 0; }
   got="$(sha256_of "$1")" || { warn "no sha256 tool found — skipping verify"; return 0; }
-  [[ "$got" == "$want" ]] || err "checksum mismatch for $3
+  [ "$got" = "$want" ] || err "checksum mismatch for $3
    expected $want
    got      $got"
   ok "sha256 verified"
@@ -271,7 +304,7 @@ fetch_verified() { # tag asset dir
   download "$url" "$dir/$asset" "downloading $asset" \
     || err "download failed — is $asset published in $tag? ($url)"
   ck_text="$(download "$(checksum_url "$tag")" /dev/stdout "fetching checksums.txt" 2>/dev/null || true)"
-  if [[ -n "$ck_text" ]]; then verify_sha256 "$dir/$asset" "$ck_text" "$asset"
+  if [ -n "$ck_text" ]; then verify_sha256 "$dir/$asset" "$ck_text" "$asset"
   else warn "no checksums.txt in $tag — skipping verify"; fi
   DL="$dir/$asset"
 }
@@ -289,7 +322,7 @@ deb_binary_path() { dpkg-query -L "$BIN_NAME" 2>/dev/null | grep -m1 -E "/bin/${
 # Remove our own managed AppImage so /usr/bin/$BIN_NAME wins. Only touches files
 # this installer created: $DATA_DIR/version is written solely by install_appimage.
 clear_appimage_shadow() {
-  [[ -f "$DATA_DIR/version" ]] || return 0
+  [ -f "$DATA_DIR/version" ] || return 0
   say "removing prior AppImage install — it shadows the .deb on PATH"
   rm -f "$INSTALL_DIR/$BIN_NAME" "$DATA_DIR/version" "$DESKTOP_DIR/red-request.desktop"
   rmdir "$DATA_DIR" 2>/dev/null || true
@@ -303,8 +336,8 @@ clear_appimage_shadow() {
 ensure_deb_shortcut() {
   local deb_bin sudo="" dst="/usr/local/bin/$SHORTCUT"
   deb_bin="$(deb_binary_path)"
-  [[ -n "$deb_bin" ]] || { warn "could not locate the installed $BIN_NAME binary; skipping $SHORTCUT alias"; return 0; }
-  [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
+  [ -n "$deb_bin" ] || { warn "could not locate the installed $BIN_NAME binary; skipping $SHORTCUT alias"; return 0; }
+  [ "$(id -u)" -ne 0 ] && have sudo && sudo="sudo"
   $sudo mkdir -p /usr/local/bin && $sudo ln -sf "$deb_bin" "$dst" \
     && ok "linked $SHORTCUT → $deb_bin ($dst)" \
     || warn "could not create the $SHORTCUT symlink in /usr/local/bin"
@@ -317,7 +350,7 @@ install_deb() {
   asset="$(asset_name)"
   cur="$(deb_installed_version)"
 
-  if [[ -n "$cur" && "v$cur" == "$tag" && "$FORCE" != "1" ]]; then
+  if [ -n "$cur" ] && [ "v$cur" = "$tag" ] && [ "$FORCE" != "1" ]; then
     ok "Red Request $cur (.deb) is already the latest — nothing to do. (--force to reinstall)"
     return 0
   fi
@@ -326,8 +359,7 @@ install_deb() {
   say "${cur:+upgrading $cur → }${tag} (.deb · $OS/$ARCH)"
 
   step 2 4 "Downloading + verifying"
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
-  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"; TMP_CLEANUP="$tmp"
   fetch_verified "$tag" "$asset" "$tmp"
 
   # apt drops privileges to the unprivileged "_apt" user to fetch the local file;
@@ -336,7 +368,7 @@ install_deb() {
   chmod 755 "$tmp" && chmod 644 "$DL"
 
   step 3 4 "Installing via apt"
-  [[ $EUID -ne 0 ]] && have sudo && sudo="sudo"
+  [ "$(id -u)" -ne 0 ] && have sudo && sudo="sudo"
   say "you may be prompted for your password…"
   if have apt-get; then
     $sudo apt-get install -y ${FORCE:+--reinstall --allow-downgrades} "$DL"
@@ -362,7 +394,7 @@ on_path() { case ":$PATH:" in *":$INSTALL_DIR:"*) return 0 ;; *) return 1 ;; esa
 rc_file() {
   case "${SHELL##*/}" in
     zsh)  printf '%s' "${ZDOTDIR:-$HOME}/.zshrc" ;;
-    bash) [[ -f "$HOME/.bashrc" ]] && printf '%s' "$HOME/.bashrc" || printf '%s' "$HOME/.profile" ;;
+    bash) [ -f "$HOME/.bashrc" ] && printf '%s' "$HOME/.bashrc" || printf '%s' "$HOME/.profile" ;;
     fish) printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
     *)    printf '%s' "$HOME/.profile" ;;
   esac
@@ -370,16 +402,16 @@ rc_file() {
 
 ensure_path() {
   on_path && return 0
-  if [[ "$MODIFY_PATH" == "0" ]]; then
+  if [ "$MODIFY_PATH" = "0" ]; then
     warn "$INSTALL_DIR is not on your PATH — add: export PATH=\"$INSTALL_DIR:\$PATH\""
     return 0
   fi
   local rc; rc="$(rc_file)"
   mkdir -p "$(dirname "$rc")"
-  if [[ -f "$rc" ]] && grep -q '# >>> red-request >>>' "$rc"; then return 0; fi
+  if [ -f "$rc" ] && grep -q '# >>> red-request >>>' "$rc"; then return 0; fi
   # fish doesn't read .profile and uses its own PATH syntax — write the right one for the
   # user's shell so the line actually takes effect (a bash `export` in config.fish is inert).
-  if [[ "${SHELL##*/}" == "fish" ]]; then
+  if [ "${SHELL##*/}" = "fish" ]; then
     {
       printf '\n# >>> red-request >>>\n'
       printf 'fish_add_path %s\n' "$INSTALL_DIR"
@@ -409,7 +441,7 @@ EOF
   have update-desktop-database && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
 }
 
-appimage_installed_version() { [[ -f "$DATA_DIR/version" ]] && cat "$DATA_DIR/version" || printf ''; }
+appimage_installed_version() { [ -f "$DATA_DIR/version" ] && cat "$DATA_DIR/version" || printf ''; }
 
 # ── linux: AppImage single-file (opt-in via --appimage) ─────────────────────
 install_appimage() {
@@ -418,23 +450,22 @@ install_appimage() {
   asset="$(asset_name)"
   cur="$(appimage_installed_version)"
 
-  if [[ -n "$cur" && "$cur" == "$tag" && "$FORCE" != "1" ]]; then
+  if [ -n "$cur" ] && [ "$cur" = "$tag" ] && [ "$FORCE" != "1" ]; then
     ok "Red Request $cur (AppImage) is already the latest — nothing to do. (--force to reinstall)"
     return 0
   fi
 
   step 1 4 "Resolving latest release"
-  if [[ -n "$cur" ]]; then say "upgrading $cur → $tag (AppImage · $OS/$ARCH)"; else say "installing $tag (AppImage · $OS/$ARCH)"; fi
+  if [ -n "$cur" ]; then say "upgrading $cur → $tag (AppImage · $OS/$ARCH)"; else say "installing $tag (AppImage · $OS/$ARCH)"; fi
 
   step 2 4 "Downloading + verifying"
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
-  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"; TMP_CLEANUP="$tmp"
   fetch_verified "$tag" "$asset" "$tmp"
 
   # The .deb (system libs) is the supported Linux build; an AppImage installed
   # alongside it lands in ~/.local/bin and usually shadows /usr/bin/$BIN_NAME on
   # PATH, so the user ends up running the older-glibc bundle. Warn, don't block.
-  if have dpkg && [[ -n "$(deb_installed_version)" ]]; then
+  if have dpkg && [ -n "$(deb_installed_version)" ]; then
     warn "the .deb is already installed; this AppImage in $INSTALL_DIR will shadow it on PATH."
     warn "prefer the .deb (re-run without --appimage), or remove it: sudo apt remove $BIN_NAME"
   fi
@@ -473,8 +504,7 @@ install_gui() {
   say "Red Request $tag · $OS/$ARCH"
 
   step 2 3 "Downloading + verifying"
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"
-  trap '[ -n "${tmp:-}" ] && rm -rf "$tmp"' RETURN
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/red-request.XXXXXX")"; TMP_CLEANUP="$tmp"
 
   if ! download "$(asset_url "$tag" "$asset")" "$tmp/$asset" "downloading $asset"; then
     warn "no $OS/$ARCH build published in $tag yet."
@@ -482,10 +512,10 @@ install_gui() {
     return 0
   fi
   ck_text="$(download "$(checksum_url "$tag")" /dev/stdout "fetching checksums.txt" 2>/dev/null || true)"
-  [[ -n "$ck_text" ]] && verify_sha256 "$tmp/$asset" "$ck_text" "$asset"
+  [ -n "$ck_text" ] && verify_sha256 "$tmp/$asset" "$ck_text" "$asset"
 
   step 3 3 "Saving installer"
-  dest="$HOME/Downloads"; [[ -d "$dest" ]] || dest="$PWD"
+  dest="$HOME/Downloads"; [ -d "$dest" ] || dest="$PWD"
   mv -f "$tmp/$asset" "$dest/$asset"
 
   case "$OS" in
@@ -514,17 +544,17 @@ install_gui() {
 verify_install() { # red_request_path
   local rr="$1" red v
   say "verifying…"
-  if [[ -x "$rr" ]]; then
+  if [ -x "$rr" ]; then
     # --version is headless on current builds; `timeout` guards older builds that ignore the
     # flag (it would otherwise launch the GUI and hang the installer).
     v="$(timeout 10 "$rr" --version 2>/dev/null | head -n1 || true)"
-    [[ -n "$v" ]] && ok "$v" || warn "$BIN_NAME --version produced no output (build older than this installer expects)"
+    [ -n "$v" ] && ok "$v" || warn "$BIN_NAME --version produced no output (build older than this installer expects)"
   else
     warn "$BIN_NAME not found at $rr"
   fi
   # The .deb installs a standalone /usr/bin/red; the AppImage bundles it (nothing on disk).
   red="$(command -v red 2>/dev/null || true)"
-  if [[ -n "$red" ]]; then
+  if [ -n "$red" ]; then
     if v="$("$red" --version 2>&1)"; then
       ok "$v"
     else
@@ -538,7 +568,7 @@ main() {
   banner
   detect_platform
   case "$OS" in
-    linux)          [[ "$LINUX_FORMAT" == "appimage" ]] && install_appimage || install_deb ;;
+    linux)          [ "$LINUX_FORMAT" = "appimage" ] && install_appimage || install_deb ;;
     darwin|windows) install_gui ;;
   esac
 }
