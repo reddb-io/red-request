@@ -246,7 +246,7 @@ out.push("");
 out.push("**Linux / macOS auto-installer:**");
 out.push("```bash");
 out.push(
-  "curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | bash"
+  "curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh"
 );
 out.push("```");
 out.push("");

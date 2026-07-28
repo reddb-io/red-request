@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # pre_merge gate — mirrors CI's `rust-fmt` job (.github/workflows/ci.yml).
 # Self-guarding: this runs on EVERY AFK iteration, so it must no-op cleanly when
