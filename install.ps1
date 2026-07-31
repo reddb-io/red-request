@@ -17,12 +17,11 @@
   irm https://raw.githubusercontent.com/reddb-io/red-request/main/install.ps1 | iex
 
 .EXAMPLE
-  # With options, download first (a piped script can't take parameters):
-  irm https://raw.githubusercontent.com/reddb-io/red-request/main/install.ps1 -OutFile install.ps1
-  .\install.ps1 -Version v0.64.4 -Force
+  # With options, still one line — `iex` can't take parameters, but a scriptblock can:
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/reddb-io/red-request/main/install.ps1))) -Version v0.64.4 -Force
 
 .NOTES
-  When piped to `iex` you can still pass options through the environment:
+  Options also come from the environment, which is handy in CI:
     $env:RED_REQUEST_VERSION = 'v0.64.4'
     $env:RED_REQUEST_FORCE = '1'
 #>
@@ -83,17 +82,28 @@ function Write-Banner {
 # Only x86_64 setups are published: RedDB ships no `red-windows-aarch64.exe` sidecar
 # to embed, so there is nothing to build an arm64 bundle from. Windows 11 on ARM runs
 # x64 binaries under emulation, so arm64 hosts get the x86_64 build with a note.
+#
+# Read the OS architecture, not the *process* architecture. $env:PROCESSOR_ARCHITECTURE
+# describes the running PowerShell: on Windows on ARM an emulated x64 PowerShell reports
+# AMD64, so an arm64 host would silently look like a plain x64 one and never get the note
+# below. RuntimeInformation::OSArchitecture reports the machine (same approach as ../dit).
 function Get-TargetArch {
-  $arch = $env:PROCESSOR_ARCHITECTURE
-  if ($env:PROCESSOR_ARCHITEW6432) { $arch = $env:PROCESSOR_ARCHITEW6432 }
-  switch ($arch) {
-    'AMD64' { return 'x86_64' }
-    'ARM64' {
+  $arch = $null
+  try {
+    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+  } catch {
+    # .NET too old to expose it — fall back to the env vars (PROCESSOR_ARCHITEW6432 is the
+    # real OS arch when a 32-bit process runs under WOW64).
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+  }
+  switch -Regex ($arch) {
+    '^(X64|AMD64)$' { return 'x86_64' }
+    '^(Arm64|ARM64)$' {
       Write-Warn2 'arm64 Windows detected — installing the x86_64 build (runs under emulation).'
       Write-Warn2 'A native arm64 build needs an arm64 RedDB sidecar, which RedDB does not publish yet.'
       return 'x86_64'
     }
-    'x86' { Write-Err '32-bit Windows is not supported — Red Request ships x86_64 only.' }
+    '^(X86|ARM)$' { Write-Err "32-bit Windows ($arch) is not supported — Red Request ships x86_64 only." }
     default { Write-Err "Unsupported architecture: $arch" }
   }
 }

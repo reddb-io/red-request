@@ -38,8 +38,10 @@ against `checksums.txt`):
 - **macOS** (Apple Silicon · Intel) — downloads + verifies the `.dmg` into `~/Downloads` for you to open.
 - **Windows** (x86_64) — downloads + verifies the NSIS setup, runs it silently, and puts
   `red-request` + `rr` on your PATH. Windows on ARM installs the x86_64 build and runs it under
-  emulation. Pass options by downloading first (a piped script takes no parameters):
-  `.\install.ps1 -Version v0.64.4 -Force`, or set `$env:RED_REQUEST_VERSION` / `$env:RED_REQUEST_FORCE`.
+  emulation. To pass options, wrap it in a scriptblock (`iex` itself takes no parameters):
+  ```powershell
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/reddb-io/red-request/main/install.ps1))) -Version v0.65.0 -Force
+  ```
 
 When a newer release exists the script upgrades automatically. If you're **already on the
 latest tag** it no-ops (`… is already the latest — nothing to do`). To reinstall the same
