@@ -86,6 +86,12 @@ jobs:
     name: ${{ matrix.label }}
     needs: preflight
     runs-on: ${{ matrix.os }}
+    # `optional` legs are best-effort: they still run and still upload, but their failure
+    # must not fail the `build` job, because every downstream job `needs: build` and would
+    # be skipped — costing the whole release its checksums.txt and notes over one
+    # unproven platform. verify-assets downgrades a missing optional asset to a warning.
+    # Promote a leg to required (drop `optional`) once it has gone green in a real release.
+    continue-on-error: ${{ matrix.optional == true }}
     strategy:
       fail-fast: false
       matrix:
@@ -128,6 +134,8 @@ jobs:
               osname: darwin,
               arch: aarch64,
             }
+          # `optional` until it has shipped green once: this cross-compile has never run in
+          # CI, and a first-run failure would otherwise skip checksums for the whole release.
           - {
               os: macos-14,
               target: x86_64-apple-darwin,
@@ -136,6 +144,7 @@ jobs:
               bundle: target/x86_64-apple-darwin/release/bundle,
               osname: darwin,
               arch: x86_64,
+              optional: true,
             }
           # Windows: NSIS setup .exe. No arm64 leg — RedDB publishes no
           # `red-windows-aarch64.exe` sidecar to embed, and Windows 11 on ARM runs this
@@ -324,10 +333,66 @@ jobs:
           [[ ${#files[@]} -gt 0 ]] || { echo "nothing to upload"; exit 0; }
           gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"
 
+  # Gate between build and publish: every asset the installers resolve BY NAME must
+  # actually be on the release. The staging step is best-effort per file (a missing bundle
+  # only warns), and `continue-on-error` lets an optional leg fail — which together is
+  # exactly how a release ships without the .exe install.ps1 asks for. Fail here instead.
+  verify-assets:
+    name: verify assets
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check the asset manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          work="$(mktemp -d)"; cd "$work"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'red-request-*' --skip-existing
+
+          # Names install.sh and install.ps1 build from $OS/$ARCH — see asset_name() /
+          # Get-AssetName. Keep these two lists in sync with the build matrix.
+          REQUIRED=(
+            red-request-linux-x86_64.deb
+            red-request-linux-x86_64.AppImage
+            red-request-linux-aarch64.deb
+            red-request-linux-aarch64.AppImage
+            red-request-darwin-aarch64.dmg
+            red-request-windows-x86_64-setup.exe
+          )
+          # Best-effort legs (matrix `optional: true`); the installers degrade to a clear
+          # message when these are absent, so warn rather than block the release.
+          OPTIONAL=(
+            red-request-darwin-x86_64.dmg
+          )
+
+          status=0
+          check() { # asset level
+            local asset="$1" level="$2"
+            if [[ ! -f "$asset" ]]; then
+              if [[ "$level" == required ]]; then
+                echo "::error::missing required asset ${asset} — its build leg failed or staged nothing"
+                status=1
+              else
+                echo "::warning::missing optional asset ${asset} — its build leg failed"
+              fi
+              return
+            fi
+            if [[ ! -s "$asset" ]]; then
+              echo "::error::${asset} is empty"; status=1; return
+            fi
+            echo "ok  ${asset}  ($(stat -c%s "$asset") bytes)"
+          }
+
+          for a in "${REQUIRED[@]}"; do check "$a" required; done
+          for a in "${OPTIONAL[@]}"; do check "$a" optional; done
+          exit "$status"
+
   # One checksums.txt covering every staged single-file asset, after all builds land.
   checksums:
     name: checksums
-    needs: build
+    needs: verify-assets
     runs-on: ubuntu-22.04
     permissions:
       contents: write
