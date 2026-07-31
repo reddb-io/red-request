@@ -6,6 +6,12 @@
 // Requires a modern Bun (>= 1.x; see .tool-versions). In dev, Tauri can instead spawn the
 // engine via `node`/`bun` from PATH (see the Rust shell's PATH fallback), so this script
 // is only needed for packaging a release.
+//
+// Cross-compiles when ENGINE_TARGET names a Rust triple other than the host — the release
+// matrix builds the macOS Intel leg on an Apple Silicon runner, so the engine has to be
+// emitted for x86_64 there too:
+//
+//   ENGINE_TARGET=x86_64-apple-darwin pnpm engine:build
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,7 +23,7 @@ const outDir = resolve(root, "apps/desktop/src-tauri/binaries");
 mkdirSync(outDir, { recursive: true });
 
 // Tauri's target-triple naming convention for externalBin.
-function targetTriple() {
+function hostTriple() {
   try {
     const rustc = execFileSync("rustc", ["-vV"], { encoding: "utf8" });
     const host = rustc.split("\n").find((l) => l.startsWith("host:"));
@@ -33,8 +39,28 @@ function targetTriple() {
   throw new Error(`unsupported platform ${platform}`);
 }
 
-const triple = targetTriple();
-const ext = process.platform === "win32" ? ".exe" : "";
+// Rust triple → Bun `--compile --target` name. Bare `bun` means "this host", which is what
+// we want for a native build; an explicit `bun-<os>-<arch>` makes Bun download and embed the
+// matching runtime so an Apple Silicon runner can emit an x86_64 macOS engine.
+function bunTarget(triple, host) {
+  if (triple === host) return "bun";
+  const [arch] = triple.split("-");
+  const cpu = arch === "x86_64" ? "x64" : arch === "aarch64" ? "arm64" : null;
+  const os = triple.includes("linux")
+    ? "linux"
+    : triple.includes("darwin")
+      ? "darwin"
+      : triple.includes("windows")
+        ? "windows"
+        : null;
+  if (!cpu || !os)
+    throw new Error(`unsupported ENGINE_TARGET triple: ${triple}`);
+  return `bun-${os}-${cpu}`;
+}
+
+const host = hostTriple();
+const triple = process.env.ENGINE_TARGET?.trim() || host;
+const ext = triple.includes("windows") ? ".exe" : "";
 const outfile = resolve(outDir, `red-request-engine-${triple}${ext}`);
 
 if (!existsSync(entry)) {
@@ -42,11 +68,14 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-console.log(`engine:build → ${outfile}`);
+const target = bunTarget(triple, host);
+console.log(
+  `engine:build → ${outfile}${target === "bun" ? "" : ` (cross-compiling from ${host})`}`
+);
 try {
   execFileSync(
     "bun",
-    ["build", entry, "--compile", "--target=bun", "--outfile", outfile],
+    ["build", entry, "--compile", `--target=${target}`, "--outfile", outfile],
     { stdio: "inherit", cwd: root }
   );
   console.log("engine:build done.");

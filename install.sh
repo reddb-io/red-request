@@ -529,11 +529,14 @@ install_gui() {
         "3. first launch: right-click → Open (unsigned build)"
       ;;
     windows)
+      # This path only runs under git-bash/MSYS/Cygwin. Native PowerShell users have
+      # install.ps1, which also wires PATH + the `rr` shortcut — point at it.
       box "✔ Red Request $tag downloaded" \
         "" \
         "  $dest/$asset" \
         "" \
-        "run the .exe to install."
+        "run the .exe to install, or from PowerShell:" \
+        "  irm https://raw.githubusercontent.com/$REPO/main/install.ps1 | iex"
       ;;
   esac
 }

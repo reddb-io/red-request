@@ -67,13 +67,17 @@ jobs:
       - name: Check RedDB sidecar source/release availability
         # With REDDB_SOURCE_REF set, verify the pinned RedDB commit exists; otherwise
         # verify the pinned release exposes the prebuilt sidecar assets for every
-        # platform we build below. macOS is Apple Silicon only for now (GitHub's
-        # Intel macos-13 runners are scarce and leave the run queued forever).
+        # platform we build below. Keep this list in sync with the build matrix —
+        # every target that ships must have a `red` sidecar to embed.
+        # Windows on ARM is absent on purpose: RedDB publishes no
+        # `red-windows-aarch64.exe`, and Windows 11 ARM64 runs the x64 build
+        # under emulation, so arm64 hosts install the x86_64 setup.
         run: >-
           node scripts/check-reddb-release-assets.mjs
           x86_64-unknown-linux-gnu
           aarch64-unknown-linux-gnu
           aarch64-apple-darwin
+          x86_64-apple-darwin
           x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,17 +86,27 @@ jobs:
     name: ${{ matrix.label }}
     needs: preflight
     runs-on: ${{ matrix.os }}
+    # `optional` legs are best-effort: they still run and still upload, but their failure
+    # must not fail the `build` job, because every downstream job `needs: build` and would
+    # be skipped — costing the whole release its checksums.txt and notes over one
+    # unproven platform. verify-assets downgrades a missing optional asset to a warning.
+    # Promote a leg to required (drop `optional`) once it has gone green in a real release.
+    continue-on-error: ${{ matrix.optional == true }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux ships BOTH the AppImage (single-file, what install.sh pulls) and the .deb
+          # `bundle` is the directory Tauri writes bundles into. It gains a <triple>
+          # segment whenever `--target` is passed, which the cross-compiled leg does.
+          #
+          # Linux ships BOTH the AppImage (single-file, `install.sh --appimage`) and the .deb
           # (apt crowd). AppImage tooling runs without FUSE via APPIMAGE_EXTRACT_AND_RUN.
           - {
               os: ubuntu-22.04,
               target: x86_64-unknown-linux-gnu,
               label: linux-x86_64,
               args: "--bundles deb,appimage",
+              bundle: target/release/bundle,
               osname: linux,
               arch: x86_64,
             }
@@ -101,27 +115,46 @@ jobs:
               target: aarch64-unknown-linux-gnu,
               label: linux-aarch64,
               args: "--bundles deb,appimage",
+              bundle: target/release/bundle,
               osname: linux,
               arch: aarch64,
             }
-          # macOS: Apple Silicon .dmg on macos-14. Intel (x86_64) is dropped for now —
-          # GitHub's macos-13 Intel runners are scarce, so that leg sat queued forever and
-          # never completed. Re-add via cross-compile (x86_64-apple-darwin on this arm
-          # runner) when Intel coverage is needed.
+          # macOS: Apple Silicon .dmg natively on macos-14, plus an Intel .dmg
+          # cross-compiled on the same arm runner. GitHub's Intel macos-13 runners are
+          # scarce enough that a native leg sat queued forever, and the Apple SDK is
+          # universal, so `--target x86_64-apple-darwin` from arm is the way to keep
+          # Intel Macs covered. The `red` sidecar (red-macos-x86_64) and the Bun engine
+          # (--target=bun-darwin-x64) are both fetched/built for x86_64 to match.
           - {
               os: macos-14,
               target: aarch64-apple-darwin,
               label: macos-aarch64,
               args: "--bundles dmg",
+              bundle: target/release/bundle,
               osname: darwin,
               arch: aarch64,
             }
-          # Windows: NSIS setup .exe.
+          # `optional` until it has shipped green once: this cross-compile has never run in
+          # CI, and a first-run failure would otherwise skip checksums for the whole release.
+          - {
+              os: macos-14,
+              target: x86_64-apple-darwin,
+              label: macos-x86_64,
+              args: "--target x86_64-apple-darwin --bundles dmg",
+              bundle: target/x86_64-apple-darwin/release/bundle,
+              osname: darwin,
+              arch: x86_64,
+              optional: true,
+            }
+          # Windows: NSIS setup .exe. No arm64 leg — RedDB publishes no
+          # `red-windows-aarch64.exe` sidecar to embed, and Windows 11 on ARM runs this
+          # x64 build under emulation (install.ps1 falls back to it on arm64 hosts).
           - {
               os: windows-latest,
               target: x86_64-pc-windows-msvc,
               label: windows-x86_64,
               args: "--bundles nsis",
+              bundle: target/release/bundle,
               osname: windows,
               arch: x86_64,
             }
@@ -195,8 +228,13 @@ jobs:
       - name: Build core (UI/engine contract)
         run: pnpm --filter @reddb-io/request-core build
 
+      # ENGINE_TARGET / REDDB_TARGET equal the host triple on every native leg, so this is
+      # a no-op there; on the cross-compiled macOS Intel leg they're what make the engine
+      # and `red` sidecars come out x86_64 instead of the arm runner's own arch.
       - name: Build engine sidecar (Bun → externalBin)
         run: pnpm engine:build
+        env:
+          ENGINE_TARGET: ${{ matrix.target }}
 
       # Build `red` from a pinned RedDB source commit when REDDB_SOURCE_REF is set.
       # This is how red-request can adopt urgent RedDB runtime fixes before the
@@ -215,6 +253,7 @@ jobs:
         run: pnpm reddb:fetch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REDDB_TARGET: ${{ matrix.target }}
 
       # linuxdeploy runs `ldd` on every bundled ELF, including the externalBin sidecars
       # (`red` from reddb, `red-request-engine` from Bun --compile). Those are effectively
@@ -254,7 +293,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage="$(ls apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage | head -1)"
+          appimage="$(ls apps/desktop/src-tauri/${{ matrix.bundle }}/appimage/*.AppImage | head -1)"
           node scripts/check-appimage-reddb-sidecar.mjs "$appimage" "$REDDB_VERSION"
 
       # Re-publish each platform's single-file bundle under a stable, version-free name so
@@ -264,7 +303,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
-          BR="apps/desktop/src-tauri/target/release/bundle"
+          BR="apps/desktop/src-tauri/${{ matrix.bundle }}"
           OUT="${RUNNER_TEMP}/portable"; mkdir -p "$OUT"
           stage() { # glob dest
             local f; f="$(ls $1 2>/dev/null | head -1 || true)"
@@ -294,10 +333,66 @@ jobs:
           [[ ${#files[@]} -gt 0 ]] || { echo "nothing to upload"; exit 0; }
           gh release upload "$TAG" "${files[@]}" --clobber -R "$GITHUB_REPOSITORY"
 
+  # Gate between build and publish: every asset the installers resolve BY NAME must
+  # actually be on the release. The staging step is best-effort per file (a missing bundle
+  # only warns), and `continue-on-error` lets an optional leg fail — which together is
+  # exactly how a release ships without the .exe install.ps1 asks for. Fail here instead.
+  verify-assets:
+    name: verify assets
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check the asset manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          work="$(mktemp -d)"; cd "$work"
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'red-request-*' --skip-existing
+
+          # Names install.sh and install.ps1 build from $OS/$ARCH — see asset_name() /
+          # Get-AssetName. Keep these two lists in sync with the build matrix.
+          REQUIRED=(
+            red-request-linux-x86_64.deb
+            red-request-linux-x86_64.AppImage
+            red-request-linux-aarch64.deb
+            red-request-linux-aarch64.AppImage
+            red-request-darwin-aarch64.dmg
+            red-request-windows-x86_64-setup.exe
+          )
+          # Best-effort legs (matrix `optional: true`); the installers degrade to a clear
+          # message when these are absent, so warn rather than block the release.
+          OPTIONAL=(
+            red-request-darwin-x86_64.dmg
+          )
+
+          status=0
+          check() { # asset level
+            local asset="$1" level="$2"
+            if [[ ! -f "$asset" ]]; then
+              if [[ "$level" == required ]]; then
+                echo "::error::missing required asset ${asset} — its build leg failed or staged nothing"
+                status=1
+              else
+                echo "::warning::missing optional asset ${asset} — its build leg failed"
+              fi
+              return
+            fi
+            if [[ ! -s "$asset" ]]; then
+              echo "::error::${asset} is empty"; status=1; return
+            fi
+            echo "ok  ${asset}  ($(stat -c%s "$asset") bytes)"
+          }
+
+          for a in "${REQUIRED[@]}"; do check "$a" required; done
+          for a in "${OPTIONAL[@]}"; do check "$a" optional; done
+          exit "$status"
+
   # One checksums.txt covering every staged single-file asset, after all builds land.
   checksums:
     name: checksums
-    needs: build
+    needs: verify-assets
     runs-on: ubuntu-22.04
     permissions:
       contents: write
