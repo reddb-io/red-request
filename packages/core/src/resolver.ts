@@ -658,6 +658,7 @@ function resolveAuth(
       return {
         ...auth,
         requestId: t(auth.requestId),
+        refreshRequestId: t(auth.refreshRequestId),
         accessTokenPath: t(auth.accessTokenPath),
         refreshTokenPath: t(auth.refreshTokenPath),
         accessTokenSecretName: t(auth.accessTokenSecretName),

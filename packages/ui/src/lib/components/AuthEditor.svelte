@@ -41,6 +41,7 @@
     tokenRequest: {
       type: "tokenRequest",
       requestId: "",
+      refreshRequestId: "",
       accessTokenPath: "access_token",
       refreshTokenPath: "refresh_token",
       accessTokenSecretName: "access_token",
@@ -207,6 +208,13 @@
       values={{}}
       dense
       placeholder="login request id"
+    />
+    <VarField
+      bind:value={auth.refreshRequestId}
+      known={[]}
+      values={{}}
+      dense
+      placeholder="refresh request id"
     />
     <VarField
       bind:value={auth.accessTokenPath}

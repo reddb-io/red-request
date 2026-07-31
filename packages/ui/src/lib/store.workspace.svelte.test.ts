@@ -7,6 +7,8 @@ import {
   type RequestDefinition,
   type ResponseResult,
   type ScriptTest,
+  type StoredEnvironment,
+  type TokenRequestAuthConfig,
 } from "@reddb-io/request-core";
 
 vi.mock("./repo", () => ({
@@ -356,6 +358,427 @@ describe("Workspace per-request response cache", () => {
       type: "bearer",
       token: "cached-1",
     });
+  });
+
+  it("renews once and resends after a token request protected request returns 401", async () => {
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {},
+    });
+    vi.mocked(repo.resolveEnvironmentSecret).mockResolvedValueOnce(
+      "stale-access"
+    );
+    ws.environments = [env];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-token-retry",
+        collection: collectionFileSchema.parse({
+          name: "c-token-retry",
+          auth: { type: "tokenRequest", requestId: "login" },
+          order: ["login", "users"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("users", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+    let sendCall = 0;
+    vi.mocked(rpc.httpSend).mockImplementation(async () => {
+      sendCall += 1;
+      if (sendCall === 1)
+        return {
+          response: response(401, { ok: false, statusText: "Unauthorized" }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/users",
+        };
+      if (sendCall === 2)
+        return {
+          response: response(200, {
+            bodyText: JSON.stringify({ access_token: "access-2" }),
+          }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/login",
+        };
+      return {
+        response: response(401, { ok: false, statusText: "Unauthorized" }),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/users",
+      };
+    });
+
+    ws.selectRequest("c-token-retry", "users");
+    await ws.send();
+
+    expect(ws.errorMsg).toBeNull();
+    expect(ws.response?.status).toBe(401);
+    expect(rpc.httpSend).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(rpc.httpSend).mock.calls[0]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "stale-access",
+    });
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request).toMatchObject({
+      id: "login",
+      auth: { type: "none" },
+    });
+    expect(vi.mocked(rpc.httpSend).mock.calls[2]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "access-2",
+    });
+  });
+
+  it("uses a configured refresh request with the stored refresh token and saves both extracted tokens", async () => {
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {
+        access_token: {
+          ref: "red_request_secrets.e_dev.s_access",
+          vault: "red_request_secrets",
+          configKey: "secret_dev_access",
+        },
+        refresh_token: {
+          ref: "red_request_secrets.e_dev.s_refresh",
+          vault: "red_request_secrets",
+          configKey: "secret_dev_refresh",
+        },
+      },
+    });
+    vi.mocked(repo.resolveEnvironmentSecret).mockImplementation(
+      async (_env, name) =>
+        name === "access_token"
+          ? "stale-access"
+          : name === "refresh_token"
+            ? "refresh-1"
+            : null
+    );
+    ws.environments = [env];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-token-refresh",
+        collection: collectionFileSchema.parse({
+          name: "c-token-refresh",
+          auth: {
+            type: "tokenRequest",
+            requestId: "login",
+            refreshRequestId: "refresh",
+          },
+          order: ["login", "refresh", "users"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("refresh", {
+            method: "POST",
+            url: "https://api.example.test/refresh",
+            body: {
+              type: "json",
+              content: '{"refresh":"{{refresh_token}}"}',
+              fields: [],
+            },
+            auth: { type: "inherit" },
+          }),
+          request("users", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+    let sendCall = 0;
+    vi.mocked(rpc.httpSend).mockImplementation(async () => {
+      sendCall += 1;
+      if (sendCall === 1)
+        return {
+          response: response(401, { ok: false, statusText: "Unauthorized" }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/users",
+        };
+      if (sendCall === 2)
+        return {
+          response: response(200, {
+            bodyText: JSON.stringify({
+              access_token: "access-2",
+              refresh_token: "refresh-2",
+            }),
+          }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/refresh",
+        };
+      return {
+        response: response(200),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/users",
+      };
+    });
+
+    ws.selectRequest("c-token-refresh", "users");
+    await ws.send();
+
+    expect(ws.errorMsg).toBeNull();
+    expect(rpc.httpSend).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request).toMatchObject({
+      id: "refresh",
+      auth: { type: "none" },
+    });
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].variables).toMatchObject({
+      refresh_token: "refresh-1",
+    });
+    expect(
+      vi
+        .mocked(repo.saveEnvironmentSecret)
+        .mock.calls.map((call) => [call[1], call[2]])
+    ).toEqual([
+      ["access_token", "access-2"],
+      ["refresh_token", "refresh-2"],
+    ]);
+    expect(vi.mocked(rpc.httpSend).mock.calls[2]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "access-2",
+    });
+  });
+
+  it("falls back to the login request when the configured refresh request fails", async () => {
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {
+        access_token: {
+          ref: "red_request_secrets.e_dev.s_access",
+          vault: "red_request_secrets",
+          configKey: "secret_dev_access",
+        },
+        refresh_token: {
+          ref: "red_request_secrets.e_dev.s_refresh",
+          vault: "red_request_secrets",
+          configKey: "secret_dev_refresh",
+        },
+      },
+    });
+    vi.mocked(repo.resolveEnvironmentSecret).mockImplementation(
+      async (_env, name) =>
+        name === "access_token"
+          ? "stale-access"
+          : name === "refresh_token"
+            ? "refresh-1"
+            : null
+    );
+    ws.environments = [env];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-token-refresh-fallback",
+        collection: collectionFileSchema.parse({
+          name: "c-token-refresh-fallback",
+          auth: {
+            type: "tokenRequest",
+            requestId: "login",
+            refreshRequestId: "refresh",
+          },
+          order: ["login", "refresh", "users"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+          request("refresh", {
+            method: "POST",
+            url: "https://api.example.test/refresh",
+            auth: { type: "none" },
+          }),
+          request("users", {
+            method: "GET",
+            url: "https://api.example.test/users",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+    let sendCall = 0;
+    vi.mocked(rpc.httpSend).mockImplementation(async () => {
+      sendCall += 1;
+      if (sendCall === 1)
+        return {
+          response: response(401, { ok: false, statusText: "Unauthorized" }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/users",
+        };
+      if (sendCall === 2)
+        return {
+          response: response(500, { ok: false, statusText: "Server Error" }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/refresh",
+        };
+      if (sendCall === 3)
+        return {
+          response: response(200, {
+            bodyText: JSON.stringify({
+              access_token: "access-login",
+              refresh_token: "refresh-login",
+            }),
+          }),
+          unresolved: [],
+          effectiveUrl: "https://api.example.test/login",
+        };
+      return {
+        response: response(200),
+        unresolved: [],
+        effectiveUrl: "https://api.example.test/users",
+      };
+    });
+
+    ws.selectRequest("c-token-refresh-fallback", "users");
+    await ws.send();
+
+    expect(ws.errorMsg).toBeNull();
+    expect(rpc.httpSend).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request.id).toBe(
+      "refresh"
+    );
+    expect(vi.mocked(rpc.httpSend).mock.calls[2]?.[0].request.id).toBe("login");
+    expect(vi.mocked(rpc.httpSend).mock.calls[3]?.[0].request.auth).toEqual({
+      type: "bearer",
+      token: "access-login",
+    });
+  });
+
+  it("sends login and refresh requests directly without token request recursion", async () => {
+    ws.collections = [
+      {
+        id: "c-token-direct",
+        collection: collectionFileSchema.parse({
+          name: "c-token-direct",
+          auth: {
+            type: "tokenRequest",
+            requestId: "login",
+            refreshRequestId: "refresh",
+          },
+          order: ["login", "refresh"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "inherit" },
+          }),
+          request("refresh", {
+            method: "POST",
+            url: "https://api.example.test/refresh",
+            auth: { type: "inherit" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+    vi.mocked(rpc.httpSend).mockResolvedValue({
+      response: response(200),
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/token",
+    });
+
+    ws.selectRequest("c-token-direct", "login");
+    await ws.send();
+    ws.selectRequest("c-token-direct", "refresh");
+    await ws.send();
+
+    expect(rpc.httpSend).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(rpc.httpSend).mock.calls[0]?.[0].request).toMatchObject({
+      id: "login",
+      auth: { type: "none" },
+    });
+    expect(vi.mocked(rpc.httpSend).mock.calls[1]?.[0].request).toMatchObject({
+      id: "refresh",
+      auth: { type: "none" },
+    });
+  });
+
+  it("shares one in-flight token request renewal across concurrent callers", async () => {
+    const env = storedEnvironmentSchema.parse({
+      name: "dev",
+      vars: {},
+      secrets: {},
+    });
+    ws.environments = [env];
+    ws.activeEnvName = "dev";
+    ws.collections = [
+      {
+        id: "c-token-concurrent",
+        collection: collectionFileSchema.parse({
+          name: "c-token-concurrent",
+          auth: { type: "none" },
+          order: ["login"],
+        }),
+        requests: [
+          request("login", {
+            method: "POST",
+            url: "https://api.example.test/login",
+            auth: { type: "none" },
+          }),
+        ],
+        environments: [],
+      },
+    ];
+    ws.activeColId = "c-token-concurrent";
+    const auth: TokenRequestAuthConfig = collectionFileSchema.parse({
+      name: "auth",
+      auth: { type: "tokenRequest", requestId: "login" },
+    }).auth as TokenRequestAuthConfig;
+    let resolveLogin: (
+      value: Awaited<ReturnType<typeof rpc.httpSend>>
+    ) => void = () => {
+      throw new Error("login request was not started");
+    };
+    vi.mocked(rpc.httpSend).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLogin = resolve;
+        })
+    );
+
+    const renew = (
+      ws as unknown as {
+        renewTokenRequestAuth: (
+          auth: TokenRequestAuthConfig,
+          env: StoredEnvironment,
+          variables: Record<string, string>
+        ) => Promise<string>;
+      }
+    ).renewTokenRequestAuth.bind(ws);
+    const first = renew(auth, env, {});
+    const second = renew(auth, env, {});
+    resolveLogin({
+      response: response(200, {
+        bodyText: JSON.stringify({ access_token: "shared-access" }),
+      }),
+      unresolved: [],
+      effectiveUrl: "https://api.example.test/login",
+    });
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      "shared-access",
+      "shared-access",
+    ]);
+    expect(rpc.httpSend).toHaveBeenCalledTimes(1);
   });
 
   it("surfaces failed token request login as a flow error without dispatching the target request", async () => {
