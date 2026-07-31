@@ -195,6 +195,17 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # The step above installs the target on `stable`, but the app does NOT build with
+      # stable: apps/desktop/src-tauri/rust-toolchain.toml pins channel 1.95.0, and rustup's
+      # directory override wins inside that directory. So the cross-compiled leg failed with
+      # "Target x86_64-apple-darwin is not installed (installed targets: aarch64-apple-darwin)"
+      # — that list is 1.95.0's, not stable's. Native legs never noticed, because a
+      # toolchain always has its own host target. Add the target to the toolchain that
+      # actually builds, by running rustup where the override applies.
+      - name: Add the Rust target to the pinned toolchain
+        working-directory: apps/desktop/src-tauri
+        run: rustup target add ${{ matrix.target }}
+
       - name: Set up protoc for RedDB source build
         if: env.REDDB_SOURCE_REF != ''
         uses: arduino/setup-protoc@v3
