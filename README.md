@@ -23,15 +23,23 @@ Built on the <a href="https://github.com/forattini-dev/recker"><code>recker</cod
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/install.sh | sh
 ```
 
+```powershell
+# Windows — one line, per-user (no admin prompt). Re-run any time to auto-upgrade.
+irm https://raw.githubusercontent.com/reddb-io/red-request/main/install.ps1 | iex
+```
+
 The script detects your platform and installs the matching release (verifying its `sha256`
 against `checksums.txt`):
 
-- **Linux** — installs the **`.deb`** (links the system's WebKitGTK/glibc so the app and its
-  bundled sidecars start reliably; needs apt/sudo) and drops `red-request` + an `rr` shortcut
-  on your PATH. Prefer the portable single-file build? Add `--appimage` (no sudo; note an
-  AppImage built on an older glibc can be unstable on newer hosts).
-- **macOS** (Apple Silicon) — downloads + verifies the `.dmg` into `~/Downloads` for you to open.
-- **Windows** — grab `red-request-windows-x86_64-setup.exe` from the [latest release](https://github.com/reddb-io/red-request/releases/latest) and run it.
+- **Linux** (x86_64 · aarch64) — installs the **`.deb`** (links the system's WebKitGTK/glibc so
+  the app and its bundled sidecars start reliably; needs apt/sudo) and drops `red-request` + an
+  `rr` shortcut on your PATH. Prefer the portable single-file build? Add `--appimage` (no sudo;
+  note an AppImage built on an older glibc can be unstable on newer hosts).
+- **macOS** (Apple Silicon · Intel) — downloads + verifies the `.dmg` into `~/Downloads` for you to open.
+- **Windows** (x86_64) — downloads + verifies the NSIS setup, runs it silently, and puts
+  `red-request` + `rr` on your PATH. Windows on ARM installs the x86_64 build and runs it under
+  emulation. Pass options by downloading first (a piped script takes no parameters):
+  `.\install.ps1 -Version v0.64.4 -Force`, or set `$env:RED_REQUEST_VERSION` / `$env:RED_REQUEST_FORCE`.
 
 When a newer release exists the script upgrades automatically. If you're **already on the
 latest tag** it no-ops (`… is already the latest — nothing to do`). To reinstall the same
@@ -57,11 +65,16 @@ To remove either:
 curl -fsSL https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.sh | sh
 ```
 
+```powershell
+irm https://raw.githubusercontent.com/reddb-io/red-request/main/uninstall.ps1 | iex
+```
+
 Prefer a click, or apt? Grab your platform from the **[latest release](https://github.com/reddb-io/red-request/releases/latest)**:
 
-| Linux                | macOS                  | Windows                    |
-| -------------------- | ---------------------- | -------------------------- |
-| `.AppImage` · `.deb` | `.dmg` (Apple Silicon) | `.msi` · NSIS `-setup.exe` |
+| Linux                | macOS                                        | Windows           |
+| -------------------- | -------------------------------------------- | ----------------- |
+| `.AppImage` · `.deb` | `.dmg`                                       | NSIS `-setup.exe` |
+| `x86_64` · `aarch64` | `aarch64` (Apple Silicon) · `x86_64` (Intel) | `x86_64`          |
 
 <sub>Builds are unsigned for now — macOS: right-click → **Open** · Windows: **More info → Run anyway**.</sub>
 
