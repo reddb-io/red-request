@@ -123,6 +123,10 @@ export type GrpcConfig = z.infer<typeof grpcConfigSchema>;
 export const requestDefinitionSchema = z.object({
   id: z.string(),
   name: z.string().default("New Request"),
+  /** Human-readable notes (e.g. an OpenAPI operation description). */
+  description: z.string().default(""),
+  /** Marked deprecated by the source spec (rendered struck-through in the sidebar). */
+  deprecated: z.boolean().default(false),
   /** Folder this request lives in (a name; "" = collection root). */
   folder: z.string().default(""),
   kind: requestKindSchema.default("http"),

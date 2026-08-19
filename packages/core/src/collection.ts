@@ -16,21 +16,14 @@ export type CollectionRootItem = z.infer<typeof collectionRootItemSchema>;
 
 const folderConfigObjectSchema = z.object({
   name: z.string(),
+  description: z.string().default(""),
   auth: authConfigSchema.default({ type: "inherit" }),
   headers: z.array(kvSchema).default([]),
   vars: z.record(z.string(), z.string()).default({}),
 });
 
 export const folderConfigSchema = z.preprocess(
-  (value) =>
-    typeof value === "string"
-      ? {
-          name: value,
-          auth: { type: "inherit" },
-          headers: [],
-          vars: {},
-        }
-      : value,
+  (value) => (typeof value === "string" ? { name: value } : value),
   folderConfigObjectSchema
 );
 export type FolderConfig = z.infer<typeof folderConfigSchema>;

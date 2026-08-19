@@ -428,7 +428,10 @@
             class="h-6 flex-1"
           />
         {:else}
-          <span class="truncate text-fg">{req.name}</span>
+          <span
+            class="truncate text-fg {req.deprecated ? 'line-through opacity-60' : ''}"
+            title={req.description || undefined}>{req.name}</span
+          >
         {/if}
       </button>
       <Menu
