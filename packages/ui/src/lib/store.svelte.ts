@@ -2512,6 +2512,7 @@ class Workspace {
         ? [
             byName.get(item.name) ?? {
               name: item.name,
+              description: "",
               auth: { type: "inherit" },
               headers: [],
               vars: {},
@@ -2757,17 +2758,9 @@ class Workspace {
    */
   async importText(text: string): Promise<"collection" | "request"> {
     const trimmed = text.trim();
-    let spec: unknown = null;
-    try {
-      spec = JSON.parse(trimmed);
-    } catch {
-      try {
-        const { parse: parseYaml } = await import("yaml");
-        spec = parseYaml(trimmed);
-      } catch {
-        /* not structured — fall through to cURL */
-      }
-    }
+    // A bare URL pasted into the import box → fetch the spec from it.
+    if (/^https?:\/\/\S+$/.test(trimmed)) return this.importFromUrl(trimmed);
+    const spec = await Workspace.parseSpecText(trimmed);
     const s = spec as Record<string, any> | null;
     if (s && typeof s === "object") {
       if (s.paths) {
@@ -2812,6 +2805,52 @@ class Workspace {
     return "request";
   }
 
+  /** Parse structured import text: JSON first, then YAML. Null when neither parses. */
+  private static async parseSpecText(text: string): Promise<unknown> {
+    try {
+      return JSON.parse(text);
+    } catch {
+      try {
+        const { parse: parseYaml } = await import("yaml");
+        return parseYaml(text);
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Fetch a spec (e.g. an openapi.json/yaml served by an API) through the engine —
+   * no CORS restrictions — and run it through the regular import pipeline.
+   */
+  async importFromUrl(url: string): Promise<"collection" | "request"> {
+    const trimmed = url.trim();
+    if (!/^https?:\/\//.test(trimmed))
+      throw new Error("enter an http(s) URL to an OpenAPI/collection document");
+    const probe = newRequest("import-probe");
+    probe.method = "GET";
+    probe.url = trimmed;
+    probe.headers = [
+      {
+        name: "Accept",
+        value: "application/json, application/yaml, text/yaml, */*",
+        enabled: true,
+      },
+    ];
+    const res = await httpSend({ request: probe, variables: {} });
+    if (res.response.error) throw new Error(res.response.error.message);
+    if (res.response.status >= 400)
+      throw new Error(
+        `fetching ${trimmed} failed with status ${res.response.status}`
+      );
+    const body = res.response.bodyText?.trim();
+    if (!body) throw new Error(`empty response from ${trimmed}`);
+    // Guard against a URL whose body is itself a bare URL (would recurse).
+    if (/^https?:\/\/\S+$/.test(body))
+      throw new Error(`the response from ${trimmed} is not a spec document`);
+    return this.importText(body);
+  }
+
   /** Build a fresh collection from a parsed OpenAPI/Swagger document and open it. */
   async importOpenAPI(spec: unknown): Promise<void> {
     const { openapiToCollection } =
@@ -2819,16 +2858,24 @@ class Workspace {
     await this.importCollection(openapiToCollection(spec));
   }
 
-  /** Persist an imported collection (meta + requests), reload, and open it. The
-   *  imported variables fold into the project-level globals (vars are project-wide now). */
+  /**
+   * Persist an imported collection (meta + requests), create one environment per
+   * imported server (dedupe names, activate the first so requests run immediately),
+   * fold leftover vars into the globals as a non-clobbering fallback, reload, open it.
+   */
   private async importCollection(imported: ImportedCollection): Promise<void> {
     const colId = `imp-${Date.now().toString(36)}`;
     await repo.saveCollectionMeta(
       colId,
       collectionFileSchema.parse({
         name: imported.name,
+        description: imported.description,
         baseUrl: imported.baseUrl || undefined,
-        folders: imported.folders,
+        auth: imported.auth ?? { type: "none" },
+        folders: imported.folders.map((name) => ({
+          name,
+          description: imported.folderMeta?.[name]?.description ?? "",
+        })),
         order: imported.requests.map((r) => r.id),
         rootOrder: [
           ...imported.requests
@@ -2842,12 +2889,44 @@ class Workspace {
       })
     );
     for (const r of imported.requests) await repo.saveRequest(colId, r);
-    if (Object.keys(imported.vars).length) {
-      for (const [k, v] of Object.entries(imported.vars))
-        this.globals.vars[k] = v;
-      await this.persistEnv(this.globals);
+
+    // Servers → environments. Each carries its own baseUrl; switching envs
+    // switches the basepath. Never write baseUrl into collection.vars — that
+    // would shadow every environment in the scope cascade.
+    let firstEnvName: string | null = null;
+    if (imported.environments?.length) {
+      for (const imp of imported.environments) {
+        let name = imp.name;
+        let i = 2;
+        while (
+          name === GLOBALS_ENV ||
+          this.environments.some((e) => e.name === name)
+        )
+          name = `${imp.name} ${i++}`;
+        const env = storedEnvironmentSchema.parse({
+          name,
+          vars: { ...imp.vars },
+          secrets: {},
+        });
+        this.environments.push(env);
+        await this.persistEnv(env);
+        firstEnvName ??= name;
+      }
+      await repo.saveEnvironmentOrder(this.environments.map((e) => e.name));
     }
+
+    // Fallback vars (baseUrl et al.) go to globals — which sit *below* the active
+    // environment — and only for keys not already set, so imports never clobber.
+    let globalsDirty = false;
+    for (const [k, v] of Object.entries(imported.vars)) {
+      if (this.globals.vars[k] !== undefined) continue;
+      this.globals.vars[k] = v;
+      globalsDirty = true;
+    }
+    if (globalsDirty) await this.persistEnv(this.globals);
+
     await this.reload();
+    if (firstEnvName) this.activeEnvName = firstEnvName;
     this.activeColId = colId;
     const first = imported.requests[0];
     if (first) this.selectRequest(colId, first.id);
@@ -2942,6 +3021,7 @@ class Workspace {
     const rootOrder = this.rootOrder(col);
     col.collection.folders.push({
       name,
+      description: "",
       auth: { type: "inherit" },
       headers: [],
       vars: {},

@@ -138,9 +138,16 @@ describe("collectionFileSchema", () => {
     });
 
     expect(c.folders).toEqual([
-      { name: "Legacy", auth: { type: "inherit" }, headers: [], vars: {} },
+      {
+        name: "Legacy",
+        description: "",
+        auth: { type: "inherit" },
+        headers: [],
+        vars: {},
+      },
       {
         name: "Admin",
+        description: "",
         auth: { type: "bearer", token: "folder-token" },
         headers: [{ name: "X-Team", value: "folder", enabled: true }],
         vars: { tenant: "folder" },
