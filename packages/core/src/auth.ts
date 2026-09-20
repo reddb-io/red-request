@@ -71,6 +71,7 @@ export const authConfigSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("tokenRequest"),
     requestId: z.string().default(""),
+    refreshRequestId: z.string().default(""),
     accessTokenPath: z.string().default("access_token"),
     refreshTokenPath: z.string().default("refresh_token"),
     accessTokenSecretName: z.string().default("access_token"),
