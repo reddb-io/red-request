@@ -21,14 +21,14 @@
     "@reddb-io/request-core": "workspace:*",
     "https-proxy-agent": "^9.1.0",
     "recker": "1.0.103",
-    "socks": "^2.8.3"
+    "socks": "^2.8.10"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.6.1",
     "@types/ws": "^8.18.1",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.10",
-    "ws": "^8.21.0"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "ws": "^8.21.3"
   },
   "exports": {
     ".": {
