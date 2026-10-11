@@ -16,10 +16,10 @@
   "dependencies": {
     "@reddb-io/request-core": "workspace:*",
     "@reddb-io/request-engine": "workspace:*",
-    "yaml": "^2.6.1"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
-    "typescript": "^5.9.3"
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
   }
 }
