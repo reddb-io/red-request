@@ -1,9 +1,6 @@
 name: Release
 
 on:
-  # Dispatched by the auto-release workflow (red-release.yml) after it tags a version.
-  # No `push: tags` trigger — that double-fired the whole matrix (tag push + dispatch)
-  # and piled up concurrent runs.
   workflow_dispatch:
     inputs:
       tag:

@@ -7,8 +7,7 @@ name: Auto-release
 # publishes the GitHub Release for that tag). No changesets, no Version-Packages PR.
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: red-release
@@ -23,9 +22,7 @@ jobs:
     name: version → tag → build
     runs-on: ubuntu-latest
     # Double-guarded against reacting to our own bump commit: bot actor AND [skip release].
-    if: >-
-      github.actor != 'github-actions[bot]' &&
-      !contains(github.event.head_commit.message, '[skip release]')
+    if: (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') && (github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip release]'))
     env:
       LEFTHOOK: "0" # the bot commit must not fire the pre-commit hook (needs a built repo)
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
