@@ -7,6 +7,10 @@ on:
         description: "Tag to (re)build, e.g. v0.1.0 (must already exist)"
         required: true
 
+      preview_platforms:
+        type: boolean
+        description: Show selected platforms without running builds, tests or publication
+        default: false
 permissions:
   contents: write
 
@@ -47,7 +51,137 @@ env:
   # and aborts the whole AppImage bundle ("failed to run linuxdeploy"); skip it.
   NO_STRIP: "1"
 
+  ENABLE_LINUX_X64: ${{ vars.ENABLE_LINUX_X64 || 'true' }}
+  ENABLE_LINUX_ARM64: ${{ vars.ENABLE_LINUX_ARM64 || 'true' }}
+  ENABLE_WINDOWS_X64: ${{ vars.ENABLE_WINDOWS_X64 || 'true' }}
+  ENABLE_WINDOWS_ARM64: ${{ vars.ENABLE_WINDOWS_ARM64 || 'false' }}
+  ENABLE_MACOS_X64: ${{ vars.ENABLE_MACOS_X64 || 'false' }}
+  ENABLE_MACOS_ARM64: ${{ vars.ENABLE_MACOS_ARM64 || 'false' }}
+  ENABLE_LINUX_ARMV7: ${{ vars.ENABLE_LINUX_ARMV7 || 'false' }}
+  ENABLE_LINUX_X86: ${{ vars.ENABLE_LINUX_X86 || 'false' }}
 jobs:
+  platforms:
+    name: Select platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions: {}
+    outputs:
+      linux_x64: ${{ steps.select.outputs.linux_x64 }}
+      linux_arm64: ${{ steps.select.outputs.linux_arm64 }}
+      windows_x64: ${{ steps.select.outputs.windows_x64 }}
+      windows_arm64: ${{ steps.select.outputs.windows_arm64 }}
+      macos_x64: ${{ steps.select.outputs.macos_x64 }}
+      macos_arm64: ${{ steps.select.outputs.macos_arm64 }}
+      linux_armv7: ${{ steps.select.outputs.linux_armv7 }}
+      linux_x86: ${{ steps.select.outputs.linux_x86 }}
+      any: ${{ steps.select.outputs.any }}
+      docker_platforms: ${{ steps.select.outputs.docker_platforms }}
+      matrix_build: ${{ steps.select.outputs.matrix_build }}
+      enabled_build: ${{ steps.select.outputs.enabled_build }}
+    steps:
+      - id: select
+        name: Filter platforms before allocating runners
+        shell: python
+        env:
+          PLATFORM_DEFAULTS: '{"linux_x64":true,"linux_arm64":true,"windows_x64":true,"windows_arm64":false,"macos_x64":false,"macos_arm64":false,"linux_armv7":false,"linux_x86":false}'
+          PLATFORM_AVAILABLE: '["linux_arm64", "linux_x64", "macos_arm64", "macos_x64", "windows_x64"]'
+          PLATFORM_MATRICES: |
+            {
+              "build": [
+                {
+                  "flag": "linux_x64",
+                  "row": {
+                    "os": "ubuntu-22.04",
+                    "target": "x86_64-unknown-linux-gnu",
+                    "label": "linux-x86_64",
+                    "args": "--bundles deb,appimage",
+                    "bundle": "target/release/bundle",
+                    "osname": "linux",
+                    "arch": "x86_64"
+                  }
+                },
+                {
+                  "flag": "linux_arm64",
+                  "row": {
+                    "os": "ubuntu-22.04-arm",
+                    "target": "aarch64-unknown-linux-gnu",
+                    "label": "linux-aarch64",
+                    "args": "--bundles deb,appimage",
+                    "bundle": "target/release/bundle",
+                    "osname": "linux",
+                    "arch": "aarch64"
+                  }
+                },
+                {
+                  "flag": "macos_arm64",
+                  "row": {
+                    "os": "macos-14",
+                    "target": "aarch64-apple-darwin",
+                    "label": "macos-aarch64",
+                    "args": "--bundles dmg",
+                    "bundle": "target/release/bundle",
+                    "osname": "darwin",
+                    "arch": "aarch64"
+                  }
+                },
+                {
+                  "flag": "macos_x64",
+                  "row": {
+                    "os": "macos-14",
+                    "target": "x86_64-apple-darwin",
+                    "label": "macos-x86_64",
+                    "args": "--target x86_64-apple-darwin --bundles dmg",
+                    "bundle": "target/x86_64-apple-darwin/release/bundle",
+                    "osname": "darwin",
+                    "arch": "x86_64",
+                    "optional": true
+                  }
+                },
+                {
+                  "flag": "windows_x64",
+                  "row": {
+                    "os": "windows-latest",
+                    "target": "x86_64-pc-windows-msvc",
+                    "label": "windows-x86_64",
+                    "args": "--bundles nsis",
+                    "bundle": "target/release/bundle",
+                    "osname": "windows",
+                    "arch": "x86_64"
+                  }
+                }
+              ]
+            }
+        run: |
+          import json
+          import os
+
+          defaults = json.loads(os.environ["PLATFORM_DEFAULTS"])
+          enabled = {}
+          for key in defaults:
+              name = "ENABLE_" + key.upper()
+              value = os.environ[name].lower()
+              if value not in ("true", "false"):
+                  raise SystemExit(f"{name} must be true or false, got {value!r}")
+              enabled[key] = value == "true"
+
+          matrices = json.loads(os.environ["PLATFORM_MATRICES"])
+          available = json.loads(os.environ["PLATFORM_AVAILABLE"])
+          output = {key: str(value).lower() for key, value in enabled.items()}
+          output["any"] = str(any(enabled[key] for key in available)).lower()
+          for job, entries in matrices.items():
+              selected = [entry["row"] for entry in entries if enabled[entry["flag"]]]
+              output["enabled_" + job] = str(bool(selected)).lower()
+              # A placeholder keeps GitHub's matrix schema valid when the job is skipped.
+              output["matrix_" + job] = json.dumps({"include": selected or [entries[0]["row"]]}, separators=(",", ":"))
+          docker = [target for key, target in (("linux_x64", "linux/amd64"), ("linux_arm64", "linux/arm64")) if enabled[key]]
+          output["docker_platforms"] = ",".join(docker)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              for key, value in output.items():
+                  handle.write(f"{key}={value}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write("### Selected platforms\n\n")
+              for key in available:
+                  handle.write(f"- {key}: {str(enabled[key]).lower()}\n")
   preflight:
     name: release preflight
     runs-on: ubuntu-22.04
@@ -69,19 +203,21 @@ jobs:
         # Windows on ARM is absent on purpose: RedDB publishes no
         # `red-windows-aarch64.exe`, and Windows 11 ARM64 runs the x64 build
         # under emulation, so arm64 hosts install the x86_64 setup.
-        run: >-
-          node scripts/check-reddb-release-assets.mjs
-          x86_64-unknown-linux-gnu
-          aarch64-unknown-linux-gnu
-          aarch64-apple-darwin
-          x86_64-apple-darwin
-          x86_64-pc-windows-msvc
+        run: |
+          mapfile -t targets < <(jq -r ' .include[].target' <<< "$BUILD_MATRIX")
+          node scripts/check-reddb-release-assets.mjs "${targets[@]}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+          BUILD_MATRIX: ${{ needs.platforms.outputs.matrix_build }}
+    needs:
+      - platforms
+    if: ${{ !inputs.preview_platforms && (needs.platforms.outputs.any == 'true') }}
   build:
     name: ${{ matrix.label }}
-    needs: preflight
+    needs:
+      - preflight
+      - platforms
     runs-on: ${{ matrix.os }}
     # `optional` legs are best-effort: they still run and still upload, but their failure
     # must not fail the `build` job, because every downstream job `needs: build` and would
@@ -91,70 +227,7 @@ jobs:
     continue-on-error: ${{ matrix.optional == true }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # `bundle` is the directory Tauri writes bundles into. It gains a <triple>
-          # segment whenever `--target` is passed, which the cross-compiled leg does.
-          #
-          # Linux ships BOTH the AppImage (single-file, `install.sh --appimage`) and the .deb
-          # (apt crowd). AppImage tooling runs without FUSE via APPIMAGE_EXTRACT_AND_RUN.
-          - {
-              os: ubuntu-22.04,
-              target: x86_64-unknown-linux-gnu,
-              label: linux-x86_64,
-              args: "--bundles deb,appimage",
-              bundle: target/release/bundle,
-              osname: linux,
-              arch: x86_64,
-            }
-          - {
-              os: ubuntu-22.04-arm,
-              target: aarch64-unknown-linux-gnu,
-              label: linux-aarch64,
-              args: "--bundles deb,appimage",
-              bundle: target/release/bundle,
-              osname: linux,
-              arch: aarch64,
-            }
-          # macOS: Apple Silicon .dmg natively on macos-14, plus an Intel .dmg
-          # cross-compiled on the same arm runner. GitHub's Intel macos-13 runners are
-          # scarce enough that a native leg sat queued forever, and the Apple SDK is
-          # universal, so `--target x86_64-apple-darwin` from arm is the way to keep
-          # Intel Macs covered. The `red` sidecar (red-macos-x86_64) and the Bun engine
-          # (--target=bun-darwin-x64) are both fetched/built for x86_64 to match.
-          - {
-              os: macos-14,
-              target: aarch64-apple-darwin,
-              label: macos-aarch64,
-              args: "--bundles dmg",
-              bundle: target/release/bundle,
-              osname: darwin,
-              arch: aarch64,
-            }
-          # `optional` until it has shipped green once: this cross-compile has never run in
-          # CI, and a first-run failure would otherwise skip checksums for the whole release.
-          - {
-              os: macos-14,
-              target: x86_64-apple-darwin,
-              label: macos-x86_64,
-              args: "--target x86_64-apple-darwin --bundles dmg",
-              bundle: target/x86_64-apple-darwin/release/bundle,
-              osname: darwin,
-              arch: x86_64,
-              optional: true,
-            }
-          # Windows: NSIS setup .exe. No arm64 leg — RedDB publishes no
-          # `red-windows-aarch64.exe` sidecar to embed, and Windows 11 on ARM runs this
-          # x64 build under emulation (install.ps1 falls back to it on arm64 hosts).
-          - {
-              os: windows-latest,
-              target: x86_64-pc-windows-msvc,
-              label: windows-x86_64,
-              args: "--bundles nsis",
-              bundle: target/release/bundle,
-              osname: windows,
-              arch: x86_64,
-            }
+      matrix: ${{ fromJSON(needs.platforms.outputs.matrix_build) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -345,9 +418,12 @@ jobs:
   # actually be on the release. The staging step is best-effort per file (a missing bundle
   # only warns), and `continue-on-error` lets an optional leg fail — which together is
   # exactly how a release ships without the .exe install.ps1 asks for. Fail here instead.
+    if: ${{ !inputs.preview_platforms && (needs.platforms.outputs.enabled_build == 'true') }}
   verify-assets:
     name: verify assets
-    needs: build
+    needs:
+      - build
+      - platforms
     runs-on: ubuntu-22.04
     steps:
       - name: Check the asset manifest
@@ -375,9 +451,23 @@ jobs:
             red-request-darwin-x86_64.dmg
           )
 
+          platform_enabled() {
+            case "$1" in
+              *linux-x86_64*|*linux-x64*) [[ "$ENABLE_LINUX_X64" == true ]] ;;
+              *linux-aarch64*|*linux-arm64*) [[ "$ENABLE_LINUX_ARM64" == true ]] ;;
+              *linux-armv7*) [[ "$ENABLE_LINUX_ARMV7" == true ]] ;;
+              *macos-x86_64*|*darwin-x86_64*|*darwin-x64*) [[ "$ENABLE_MACOS_X64" == true ]] ;;
+              *macos-aarch64*|*darwin-aarch64*|*darwin-arm64*) [[ "$ENABLE_MACOS_ARM64" == true ]] ;;
+              *windows-aarch64*|*windows-arm64*) [[ "$ENABLE_WINDOWS_ARM64" == true ]] ;;
+              *windows-x86_64*|*windows-x64*) [[ "$ENABLE_WINDOWS_X64" == true ]] ;;
+              *) return 0 ;;
+            esac
+          }
+
           status=0
           check() { # asset level
             local asset="$1" level="$2"
+            platform_enabled "$asset" || return 0
             if [[ ! -f "$asset" ]]; then
               if [[ "$level" == required ]]; then
                 echo "::error::missing required asset ${asset} — its build leg failed or staged nothing"
@@ -398,6 +488,7 @@ jobs:
           exit "$status"
 
   # One checksums.txt covering every staged single-file asset, after all builds land.
+    if: ${{ !inputs.preview_platforms }}
   checksums:
     name: checksums
     needs: verify-assets
@@ -444,3 +535,4 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           node scripts/generate-release-notes.mjs "$TAG" > "$work/release-notes.md"
           gh release edit "$TAG" --notes-file "$work/release-notes.md" -R "$GITHUB_REPOSITORY"
+    if: ${{ !inputs.preview_platforms }}
